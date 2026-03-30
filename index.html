@@ -1,0 +1,1255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>iGang — Quality Shearing</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f0f2f5;color:#1a1a2e;min-height:100vh}
+button{cursor:pointer;border:none;background:none;font-family:inherit}
+input,select,textarea{font-family:inherit}
+.hs{overflow-x:auto;-webkit-overflow-scrolling:touch}
+</style>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script>
+window.onerror = function(msg, src, line, col, err) {
+  document.getElementById('root').innerHTML = '<div style="padding:20px;color:red;font-family:monospace;font-size:13px"><strong>JS Error:</strong><br>' + msg + '<br>Line: ' + line + '</div>';
+  return true;
+};
+const e=React.createElement;
+const{useState,useMemo}=React;
+const createRoot=ReactDOM.createRoot;
+
+// ── Constants ──────────────────────────────────────────────
+const N='#1a3a5c',ND='#0f2236',AM='#e8a020',GR='#6b7280',BD='#e5e7eb';
+const BL='#1d4ed8',BLB='#dbeafe',CR='#d97706',CRB='#fef3c7';
+const GN='#166534',GNB='#dcfce7',RD='#dc2626';
+const PIN='1234';
+const CLS=['Ewes','Wethers','Rams','Lambs','Other'];
+const ROLES=['Wool Handler','Presser','Penner','Classer'];
+const STATUS_OPTS=['active','completed','charged'];
+const STATUS_LABELS={active:'Active',completed:'Completed',charged:'Charged Out'};
+const STATUS_COLORS={active:[GNB,GN],completed:['#f3f4f6',GR],charged:['#ede9fe','#7c3aed']};
+
+// ── Date helpers ───────────────────────────────────────────
+let _id=100;
+const uid=()=>'u'+(++_id);
+
+// Convert DD/MM/YYYY or YYYY-MM-DD to ISO
+function toISO(s){
+  if(!s)return '';
+  if(s.includes('-'))return s;
+  const[d,m,y]=s.split('/');
+  return y+'-'+m.padStart(2,'0')+'-'+d.padStart(2,'0');
+}
+
+function isoToDisplay(iso){
+  if(!iso)return '';
+  const[y,m,d]=iso.split('-');
+  return d+'/'+m+'/'+y;
+}
+
+function isoToDayShort(iso){
+  if(!iso)return '';
+  const days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  return days[new Date(iso).getDay()];
+}
+
+function today(){
+  return new Date().toISOString().slice(0,10);
+}
+
+// Generate all dates from start ISO to today ISO inclusive
+function dateRange(startISO, endISO){
+  const dates=[];
+  const cur=new Date(startISO);
+  const end=new Date(endISO);
+  while(cur<=end){
+    dates.push(cur.toISOString().slice(0,10));
+    cur.setDate(cur.getDate()+1);
+  }
+  return dates;
+}
+
+// ── Data helpers ───────────────────────────────────────────
+const mkC=(sh,v=0)=>{const o={};sh.forEach(s=>o[s.id]=v);return o;};
+
+function mkCount(cls,job,desc,shearers,val=0,rate=null){
+  return{id:uid(),cls,job,desc,counts:mkC(shearers,val),rate};
+}
+
+function mkRun(num,shearers){
+  return{id:uid(),num,counts:[mkCount('Ewes','Shearing','',shearers,0,null)]};
+}
+
+function mkDay(runs,staff,notes){
+  return{runs:runs||[],staff:staff||{},notes:notes||''};
+}
+
+function mkBlankDates(startISO){
+  const today_=today();
+  const dates=dateRange(startISO,today_);
+  const obj={};
+  dates.forEach(d=>obj[d]=mkDay());
+  return obj;
+}
+
+// Totals
+function getDayTotals(job,dateKey){
+  let sh=0,cr=0;
+  (job.dates[dateKey]?.runs||[]).forEach(r=>r.counts.forEach(c=>{
+    const v=job.shearers.reduce((s,sh)=>s+Number(c.counts[sh.id]||0),0);
+    if(c.job==='Shearing')sh+=v;else cr+=v;
+  }));
+  return{sh,cr,total:sh+cr};
+}
+
+function getShedTotals(job){
+  let sh=0,cr=0;
+  Object.keys(job.dates||{}).forEach(d=>{const t=getDayTotals(job,d);sh+=t.sh;cr+=t.cr;});
+  return{sh,cr,total:sh+cr};
+}
+
+function getShearerTotals(job,sid,dateKey){
+  const allDates=Object.keys(job.dates||{}).sort();
+  const di=allDates.indexOf(dateKey);
+  let shBF=0,crBF=0,shD=0,crD=0;
+  allDates.forEach((d,i)=>{
+    if(i>di)return;
+    let sh=0,cr=0;
+    (job.dates[d]?.runs||[]).forEach(r=>r.counts.forEach(c=>{
+      const v=Number(c.counts[sid]||0);
+      if(c.job==='Shearing')sh+=v;else cr+=v;
+    }));
+    if(i<di){shBF+=sh;crBF+=cr;}else{shD=sh;crD=cr;}
+  });
+  return{shearing:{bf:shBF,day:shD,tot:shBF+shD},crutching:{bf:crBF,day:crD,tot:crBF+crD}};
+}
+
+function getStaffRuns(job,stid,dateKey){
+  const allDates=Object.keys(job.dates||{}).sort();
+  const di=allDates.indexOf(dateKey);
+  let bf=0,day=0;
+  allDates.forEach((d,i)=>{
+    if(i>di)return;
+    const v=Number((job.dates[d]?.staff||{})[stid]?.runs||0);
+    if(i<di)bf+=v;else day=v;
+  });
+  return{bf,day,tot:bf+day};
+}
+
+function getStaffBales(job,stid,dateKey){
+  const allDates=Object.keys(job.dates||{}).sort();
+  const di=allDates.indexOf(dateKey);
+  let bf=0,day=0;
+  allDates.forEach((d,i)=>{
+    if(i>di)return;
+    const v=Number((job.dates[d]?.staff||{})[stid]?.bales||0);
+    if(i<di)bf+=v;else day=v;
+  });
+  return{bf,day,tot:bf+day};
+}
+
+// ── Demo data ──────────────────────────────────────────────
+const J1=[{id:'s1',name:'Hayden',loading:0},{id:'s2',name:'Gonz',loading:0},{id:'s3',name:'Nathan B',loading:0},{id:'s4',name:'Nathan',loading:0.10},{id:'s5',name:'LH',loading:0}];
+const J1S=[{id:'st1',name:'Connor',role:'Wool Handler'},{id:'st2',name:'Ben',role:'Presser'}];
+const J2=[{id:'g1',name:'Davo',loading:0},{id:'g2',name:'Jacko',loading:0},{id:'g3',name:'Bretto',loading:0},{id:'g4',name:'Mick',loading:0},{id:'g5',name:'Simo',loading:0.10}];
+const J2S=[{id:'gst1',name:'Bec',role:'Wool Handler'},{id:'gst2',name:'Tash',role:'Wool Handler'},{id:'gst3',name:'Ray',role:'Classer'},{id:'gst4',name:'Jack',role:'Presser'}];
+const J3=[{id:'m1',name:'Kel',loading:0},{id:'m2',name:'Thommo',loading:0},{id:'m3',name:'Bazza',loading:0}];
+const J3S=[{id:'mst1',name:'Shaz',role:'Wool Handler'},{id:'mst2',name:'Deb',role:'Penner'}];
+
+function makeJ1Dates(){
+  const dates={};
+  const start='2026-03-23';
+  const td=today();
+  dateRange(start,td).forEach(d=>dates[d]=mkDay());
+  // Monday 23/3
+  dates['2026-03-23']=mkDay(
+    [{id:'r1a',num:1,counts:[
+      {id:'c1a',cls:'Ewes',job:'Shearing',desc:'',counts:{s1:55,s2:54,s3:56,s4:55,s5:0},rate:null},
+    ]},{id:'r2a',num:2,counts:[
+      {id:'c2a',cls:'Ewes',job:'Shearing',desc:'',counts:{s1:56,s2:55,s3:54,s4:55,s5:0},rate:null},
+    ]},{id:'r3a',num:3,counts:[
+      {id:'c3a',cls:'Lambs',job:'Shearing',desc:'',counts:{s1:54,s2:56,s3:55,s4:55,s5:0},rate:null},
+    ]},{id:'r4a',num:4,counts:[
+      {id:'c4a',cls:'Lambs',job:'Shearing',desc:'',counts:{s1:55,s2:55,s3:55,s4:55,s5:0},rate:null},
+    ]}],
+    {st1:{runs:4},st2:{runs:4,bales:17}},'Good consistent day.'
+  );
+  return dates;
+}
+
+function makeJ2Dates(){
+  const dates={};
+  const start='2026-03-23';
+  const td=today();
+  dateRange(start,td).forEach(d=>dates[d]=mkDay());
+  dates['2026-03-23']=mkDay(
+    [{id:'r1b',num:1,counts:[{id:'c1b',cls:'Ewes',job:'Crutching',desc:'Merino Ewe FC + wig',counts:{g1:70,g2:68,g3:72,g4:70,g5:70},rate:1.85}]},
+     {id:'r2b',num:2,counts:[{id:'c2b',cls:'Wethers',job:'Crutching',desc:'XB Full crt',counts:{g1:70,g2:70,g3:70,g4:69,g5:70},rate:1.35}]},
+     {id:'r3b',num:3,counts:[{id:'c3b',cls:'Ewes',job:'Crutching',desc:'Merino Ewe FC + wig',counts:{g1:69,g2:70,g3:70,g4:71,g5:70},rate:1.85}]},
+     {id:'r4b',num:4,counts:[{id:'c4b',cls:'Wethers',job:'Crutching',desc:'XB Full crt',counts:{g1:70,g2:72,g3:68,g4:70,g5:70},rate:1.35}]}],
+    {gst1:{runs:4},gst2:{runs:4},gst3:{runs:4},gst4:{runs:4,bales:18}},''
+  );
+  dates['2026-03-24']=mkDay(
+    [{id:'r1c',num:1,counts:[{id:'c1c',cls:'Ewes',job:'Crutching',desc:'Merino Ewe FC + wig',counts:{g1:72,g2:70,g3:71,g4:70,g5:69},rate:1.85}]},
+     {id:'r2c',num:2,counts:[{id:'c2c',cls:'Wethers',job:'Crutching',desc:'XB Full crt',counts:{g1:68,g2:71,g3:70,g4:70,g5:71},rate:1.35}]},
+     {id:'r3c',num:3,counts:[{id:'c3c',cls:'Ewes',job:'Crutching',desc:'Merino Ewe FC + wig',counts:{g1:70,g2:70,g3:70,g4:70,g5:70},rate:1.85}]},
+     {id:'r4c',num:4,counts:[{id:'c4c',cls:'Wethers',job:'Crutching',desc:'XB Full crt',counts:{g1:71,g2:69,g3:70,g4:70,g5:70},rate:1.35}]}],
+    {gst1:{runs:4},gst2:{runs:4},gst3:{runs:4},gst4:{runs:4,bales:19}},''
+  );
+  return dates;
+}
+
+function makeJ3Dates(){
+  const dates={};
+  const start='2026-03-23';
+  const td=today();
+  dateRange(start,td).forEach(d=>dates[d]=mkDay());
+  dates['2026-03-23']=mkDay(
+    [{id:'r1d',num:1,counts:[{id:'c1d',cls:'Lambs',job:'Crutching',desc:'Lamb FC',counts:{m1:120,m2:120,m3:120},rate:null}]},
+     {id:'r2d',num:2,counts:[{id:'c2d',cls:'Lambs',job:'Crutching',desc:'Lamb FC',counts:{m1:120,m2:120,m3:120},rate:null}]},
+     {id:'r3d',num:3,counts:[{id:'c3d',cls:'Lambs',job:'Crutching',desc:'Lamb FC',counts:{m1:120,m2:120,m3:120},rate:null}]},
+     {id:'r4d',num:4,counts:[{id:'c4d',cls:'Lambs',job:'Crutching',desc:'Lamb FC',counts:{m1:120,m2:120,m3:120},rate:null}]}],
+    {mst1:{runs:4},mst2:{runs:4}},'Crutching only.'
+  );
+  return dates;
+}
+
+// Staff pay helpers
+function getStaffDaysWorked(job,stid){
+  return Object.keys(job.dates||{}).filter(d=>Number((job.dates[d]?.staff||{})[stid]?.runs||0)>0).length;
+}
+function getStaffPay(job,st){
+  const sr=job.staffRates||{woolHandler:80,classer:110,penner:85,presserRun:85,presserBale:6.50,baleThreshold:13};
+  let pay=0;
+  const roleRateMap={woolHandler:'woolHandler',classer:'classer',penner:'penner',presser:'presserRun'};
+  const rateKey=roleRateMap[st.role.toLowerCase().replace(' ','')]||'woolHandler';
+  
+  if(st.role==='Presser'){
+    Object.keys(job.dates||{}).forEach(d=>{
+      const entry=(job.dates[d]?.staff||{})[st.id]||{};
+      const runs=Number(entry.runs||0);
+      const bales=Number(entry.bales||0);
+      if(!runs)return;
+      if(bales>(sr.baleThreshold||13)){
+        pay+=bales*(sr.presserBale||6.50);
+      } else {
+        pay+=runs*(sr.presserRun||85);
+      }
+    });
+  } else {
+    const runRate=sr[rateKey]||80;
+    let totalRuns=0;
+    Object.keys(job.dates||{}).forEach(d=>{totalRuns+=Number((job.dates[d]?.staff||{})[st.id]?.runs||0);});
+    pay=totalRuns*runRate;
+  }
+  return pay;
+}
+function getShearerDaysWorked(job,sid){
+  return Object.keys(job.dates||{}).filter(d=>{
+    return (job.dates[d]?.runs||[]).some(r=>r.counts.some(c=>Number(c.counts[sid]||0)>0));
+  }).length;
+}
+
+const JOBS_INIT=[
+  {id:'j1',property:'Barrama',address:'South West Victoria',type:'Shearing',status:'active',start:'2026-03-17',
+   rates:{shearing:4.10,crutching:1.50},
+   staffRates:{woolHandler:80,classer:110,penner:85,presserRun:85,presserBale:6.50,baleThreshold:13},
+   shearers:[{id:'a1',name:'Aidan T',loading:0},{id:'a2',name:'Scotty B',loading:0},{id:'a3',name:'Browny',loading:0},{id:'a4',name:'Macca F',loading:0},{id:'a5',name:'Jase L',loading:0.10}],
+   staff:[{id:'ast1',name:'Kayla M',role:'Wool Handler'},{id:'ast2',name:'Tegan R',role:'Wool Handler'},{id:'ast3',name:'Ray C',role:'Classer'},{id:'ast4',name:'Robbo K',role:'Penner'},{id:'ast5',name:'Daz W',role:'Presser'}],
+   travel:{a1:55,a2:55,a3:55,a4:55,a5:55,ast1:45,ast2:45,ast3:90,ast4:45,ast5:50},
+   dates:(()=>{
+     const dates={};dateRange('2026-03-17',today()).forEach(d=>dates[d]=mkDay());
+     const sids=['a1','a2','a3','a4','a5'];
+     const bales=[34,33,30,28,30,29,34,29,35,31];
+     const dd=[
+       [[55,55,53,56,53],[53,53,53,52,54],[57,55,56,57,57],[56,52,56,55,53]],
+       [[57,56,56,53,54],[55,57,53,53,55],[57,53,56,54,52],[57,56,57,52,55]],
+       [[55,52,54,56,52],[55,53,54,56,52],[55,56,53,56,55],[52,54,53,53,57]],
+       [[57,55,56,53,56],[57,53,52,52,52],[53,55,57,55,52],[55,57,52,53,54]],
+       [[55,54,53,56,55],[53,52,57,53,55],[54,56,55,53,54],[57,55,52,53,57]],
+       [[56,55,52,52,52],[53,54,53,53,55],[53,53,56,54,55],[53,54,52,54,53]],
+       [[56,54,52,56,52],[54,53,55,55,54],[55,55,55,54,56],[52,53,52,54,57]],
+       [[55,53,54,57,53],[57,57,54,52,57],[57,54,53,57,57],[57,53,55,54,55]],
+       [[55,55,54,52,56],[54,57,54,55,56],[53,54,55,54,55],[57,56,53,54,55]],
+       [[53,55,54,53,54],[52,57,54,57,54],[53,57,57,53,57],[54,57,55,57,57]],
+     ];
+     const days=['2026-03-17','2026-03-18','2026-03-19','2026-03-20','2026-03-23','2026-03-24','2026-03-25','2026-03-26','2026-03-27','2026-03-30'];
+     days.forEach((dt,di)=>{
+       const runs=dd[di].map((rc,ri)=>({id:uid(),num:ri+1,counts:[{id:uid(),cls:'Ewes',job:'Shearing',desc:'',counts:Object.fromEntries(sids.map((s,i)=>[s,rc[i]])),rate:null}]}));
+       dates[dt]=mkDay(runs,{ast1:{runs:4},ast2:{runs:4},ast3:{runs:4},ast4:{runs:4},ast5:{runs:4,bales:bales[di]}},'');
+     });
+     return dates;
+   })()},
+
+  {id:'j2',property:'Duggans',address:'South West Victoria',type:'Shearing',status:'active',start:'2026-03-17',
+   rates:{shearing:4.10,crutching:1.50},
+   staffRates:{woolHandler:80,classer:110,penner:85,presserRun:85,presserBale:6.50,baleThreshold:13},
+   shearers:[{id:'d1',name:'Watto',loading:0},{id:'d2',name:'Clarky',loading:0},{id:'d3',name:'Simmo',loading:0},{id:'d4',name:'Gazza T',loading:0},{id:'d5',name:'Brocky',loading:0.10}],
+   staff:[{id:'dst1',name:'Sarah P',role:'Wool Handler'},{id:'dst2',name:'Bec H',role:'Wool Handler'},{id:'dst3',name:'Les M',role:'Classer'},{id:'dst4',name:'Trev O',role:'Penner'},{id:'dst5',name:'Nige B',role:'Presser'}],
+   travel:{d1:40,d2:40,d3:40,d4:40,d5:40,dst1:35,dst2:35,dst3:75,dst4:35,dst5:40},
+   dates:(()=>{
+     const dates={};dateRange('2026-03-17',today()).forEach(d=>dates[d]=mkDay());
+     const sids=['d1','d2','d3','d4','d5'];
+     const bales=[24,20,21,22,21,18,19,21,24,18];
+     const dd=[
+       [[41,40,45,41,35],[36,43,43,38,35],[43,39,45,46,37],[43,42,38,39,46]],
+       [[46,41,42,43,43],[45,44,45,44,39],[38,46,35,36,39],[36,44,35,35,41]],
+       [[40,43,45,46,44],[44,39,38,36,41],[41,37,39,42,40],[37,37,42,46,46]],
+       [[41,43,46,37,40],[39,38,39,42,44],[46,41,37,42,44],[45,42,45,37,36]],
+       [[38,42,43,35,36],[40,42,36,40,45],[46,35,44,45,43],[39,45,35,44,40]],
+       [[39,37,37,44,35],[41,35,35,40,43],[38,43,39,37,42],[35,46,41,38,38]],
+       [[42,37,39,39,45],[40,36,43,38,43],[37,46,40,45,43],[36,46,45,36,46]],
+       [[37,37,43,36,35],[43,45,41,37,40],[46,38,44,44,44],[37,40,35,40,45]],
+       [[38,39,37,46,36],[37,42,45,43,46],[35,38,41,45,36],[38,44,42,46,44]],
+       [[36,37,37,42,40],[39,40,44,35,44],[41,35,39,37,37],[35,39,43,39,39]],
+     ];
+     const days=['2026-03-17','2026-03-18','2026-03-19','2026-03-20','2026-03-23','2026-03-24','2026-03-25','2026-03-26','2026-03-27','2026-03-30'];
+     days.forEach((dt,di)=>{
+       const runs=dd[di].map((rc,ri)=>({id:uid(),num:ri+1,counts:[{id:uid(),cls:'Wethers',job:'Shearing',desc:'',counts:Object.fromEntries(sids.map((s,i)=>[s,rc[i]])),rate:null}]}));
+       dates[dt]=mkDay(runs,{dst1:{runs:4},dst2:{runs:4},dst3:{runs:4},dst4:{runs:4},dst5:{runs:4,bales:bales[di]}},'');
+     });
+     return dates;
+   })()},
+
+  {id:'j3',property:'Nareen',address:'Limestone Coast SA',type:'Shearing',status:'active',start:'2026-03-19',
+   rates:{shearing:4.10,crutching:1.50},
+   staffRates:{woolHandler:80,classer:110,penner:85,presserRun:85,presserBale:6.50,baleThreshold:13},
+   shearers:[{id:'n1',name:'Thommo',loading:0},{id:'n2',name:'Richo',loading:0},{id:'n3',name:'Douggy',loading:0},{id:'n4',name:'Pagey',loading:0},{id:'n5',name:'Hendo',loading:0.10}],
+   staff:[{id:'nst1',name:'Leah F',role:'Wool Handler'},{id:'nst2',name:'Amy G',role:'Wool Handler'},{id:'nst3',name:'Col B',role:'Classer'},{id:'nst4',name:'Pete W',role:'Penner'},{id:'nst5',name:'Shorty',role:'Presser'}],
+   travel:{n1:50,n2:50,n3:50,n4:50,n5:50,nst1:40,nst2:40,nst3:80,nst4:40,nst5:45},
+   dates:(()=>{
+     const dates={};dateRange('2026-03-19',today()).forEach(d=>dates[d]=mkDay());
+     const sids=['n1','n2','n3','n4','n5'];
+     const bales=[24,25,21,20,21,22,22,24];
+     const dd=[
+       [[50,49,44,43,48],[45,48,48,48,43],[49,47,46,45,43],[47,49,49,46,45]],
+       [[49,43,46,46,47],[45,44,49,43,43],[46,45,45,47,43],[47,45,49,45,43]],
+       [[43,49,50,44,45],[46,48,49,45,50],[44,48,45,46,50],[46,44,49,46,45]],
+       [[50,46,45,47,45],[44,46,46,46,49],[49,44,46,47,48],[48,50,46,44,43]],
+       [[49,43,48,46,43],[47,45,47,47,43],[47,46,48,44,45],[48,49,45,47,47]],
+       [[50,43,43,48,46],[45,44,49,43,48],[48,49,46,45,44],[43,43,45,46,46]],
+       [[47,44,43,49,44],[49,44,48,50,49],[49,47,48,48,44],[47,46,44,43,46]],
+       [[48,44,47,47,46],[46,50,50,43,47],[44,49,44,43,47],[50,50,49,48,46]],
+     ];
+     const days=['2026-03-19','2026-03-20','2026-03-23','2026-03-24','2026-03-25','2026-03-26','2026-03-27','2026-03-30'];
+     days.forEach((dt,di)=>{
+       const runs=dd[di].map((rc,ri)=>({id:uid(),num:ri+1,counts:[{id:uid(),cls:'Ewes',job:'Shearing',desc:'',counts:Object.fromEntries(sids.map((s,i)=>[s,rc[i]])),rate:null}]}));
+       dates[dt]=mkDay(runs,{nst1:{runs:4},nst2:{runs:4},nst3:{runs:4},nst4:{runs:4},nst5:{runs:4,bales:bales[di]}},'');
+     });
+     return dates;
+   })()},
+
+  {id:'j4',property:'Eulong',address:'South West Victoria',type:'Crutching',status:'active',start:'2026-03-23',
+   rates:{shearing:4.10,crutching:1.50},
+   staffRates:{woolHandler:80,classer:110,penner:85,presserRun:85,presserBale:6.50,baleThreshold:13},
+   shearers:[{id:'e1',name:'Jacko',loading:0},{id:'e2',name:'Tommo',loading:0},{id:'e3',name:'Stewy',loading:0},{id:'e4',name:'Kingy',loading:0},{id:'e5',name:'Foxy',loading:0}],
+   staff:[{id:'est1',name:'Mel C',role:'Wool Handler'},{id:'est2',name:'Dana W',role:'Wool Handler'},{id:'est3',name:'Bazza R',role:'Penner'}],
+   travel:{e1:60,e2:60,e3:60,e4:60,e5:60,est1:50,est2:50,est3:50},
+   dates:(()=>{
+     const dates={};dateRange('2026-03-23',today()).forEach(d=>dates[d]=mkDay());
+     const sids=['e1','e2','e3','e4','e5'];
+     const dd=[
+       [[146,118,130,137,125],[116,149,129,141,143],[133,150,117,113,115],[148,117,152,120,138]],
+       [[124,139,149,149,113],[113,119,132,125,125],[152,118,112,139,130],[123,120,130,123,138]],
+       [[118,131,123,138,136],[152,118,116,129,145],[131,128,122,129,119],[114,150,116,128,142]],
+       [[137,120,130,150,142],[125,144,131,140,128],[144,128,152,123,141],[130,121,124,133,144]],
+       [[120,144,126,151,134],[150,145,116,126,147],[139,121,148,112,133],[137,149,117,112,139]],
+       [[117,139,141,118,117],[112,124,117,127,131],[124,119,121,128,131],[123,147,124,117,151]],
+     ];
+     const days=['2026-03-23','2026-03-24','2026-03-25','2026-03-26','2026-03-27','2026-03-30'];
+     // Run 1: Ewes FC $1.50, Run 2: Wether wig+pizzle $1.90, Run 3: Wether wig+pizzle $1.90, Run 4: Lambs FC $1.20
+     const runConfig=[
+       {cls:'Ewes',desc:'Ewe Full Crutch',rate:1.50},
+       {cls:'Wethers',desc:'Wether FC wig & pizzle',rate:1.90},
+       {cls:'Wethers',desc:'Wether FC wig & pizzle',rate:1.90},
+       {cls:'Lambs',desc:'Lamb Full Crutch',rate:1.20},
+     ];
+     days.forEach((dt,di)=>{
+       const runs=dd[di].map((rc,ri)=>({id:uid(),num:ri+1,counts:[{id:uid(),cls:runConfig[ri].cls,job:'Crutching',desc:runConfig[ri].desc,counts:Object.fromEntries(sids.map((s,i)=>[s,rc[i]])),rate:runConfig[ri].rate}]}));
+       dates[dt]=mkDay(runs,{est1:{runs:4},est2:{runs:4},est3:{runs:4}},'');
+     });
+     return dates;
+   })()},
+
+  {id:'j5',property:'Wando Vale',address:'South West Victoria',type:'Shearing',status:'completed',start:'2026-03-27',
+   rates:{shearing:4.10,crutching:1.50},
+   staffRates:{woolHandler:80,classer:110,penner:85,presserRun:85,presserBale:6.50,baleThreshold:13},
+   shearers:[{id:'v1',name:'Aidan T',loading:0},{id:'v2',name:'Scotty B',loading:0},{id:'v3',name:'Watto',loading:0},{id:'v4',name:'Clarky',loading:0}],
+   staff:[{id:'vst1',name:'Kayla M',role:'Wool Handler'},{id:'vst2',name:'Tegan R',role:'Wool Handler'},{id:'vst3',name:'Daz W',role:'Presser'}],
+   travel:{v1:55,v2:55,v3:40,v4:40,vst1:45,vst2:45,vst3:50},
+   dates:(()=>{
+     const dates={};dateRange('2026-03-27',today()).forEach(d=>dates[d]=mkDay());
+     const sids=['v1','v2','v3','v4'];
+     const runs=[
+       {id:uid(),num:1,counts:[{id:uid(),cls:'Ewes',job:'Shearing',desc:'',counts:{v1:49,v2:50,v3:49,v4:49},rate:null}]},
+       {id:uid(),num:2,counts:[{id:uid(),cls:'Ewes',job:'Shearing',desc:'',counts:{v1:50,v2:50,v3:50,v4:51},rate:null}]},
+       {id:uid(),num:3,counts:[{id:uid(),cls:'Ewes',job:'Shearing',desc:'',counts:{v1:49,v2:50,v3:51,v4:50},rate:null}]},
+       {id:uid(),num:4,counts:[{id:uid(),cls:'Ewes',job:'Shearing',desc:'',counts:{v1:50,v2:51,v3:51,v4:50},rate:null}]},
+     ];
+     dates['2026-03-27']=mkDay(runs,{vst1:{runs:4},vst2:{runs:4},vst3:{runs:4,bales:22}},'One day shed. Good result.');
+     return dates;
+   })()},
+]
+
+// ── UI Helpers ─────────────────────────────────────────────
+const d=(...a)=>e('div',...a);
+const sp=(...a)=>e('span',...a);
+const btn=(...a)=>e('button',...a);
+const inp=(...a)=>e('input',...a);
+const lbl=(...a)=>e('label',...a);
+
+const card=(ch,style={})=>d({style:{background:'#fff',borderRadius:14,border:`1px solid ${BD}`,padding:'16px 18px',...style}},ch);
+const slab=(t,extra)=>d({style:{fontSize:11,fontWeight:700,color:GR,textTransform:'uppercase',letterSpacing:1.2,marginBottom:10,...extra}},t);
+
+function Tag({type}){
+  const[bg,col]=type==='Shearing'?[BLB,BL]:[CRB,CR];
+  return sp({style:{background:bg,color:col,fontSize:11,fontWeight:700,padding:'2px 8px',borderRadius:12}},type);
+}
+
+// ── Modals ─────────────────────────────────────────────────
+function AddJobModal({onClose,onAdd}){
+  const[form,setForm]=useState({property:'',address:'',type:'Shearing',start:'',shearing:'4.80',crutching:'1.50'});
+  const set=(k,v)=>setForm(f=>({...f,[k]:v}));
+  const submit=()=>{
+    if(!form.property||!form.start)return;
+    const startISO=toISO(form.start)||form.start;
+    const job={id:uid(),property:form.property,address:form.address,type:form.type,status:'active',start:startISO,
+      rates:{shearing:Number(form.shearing),crutching:Number(form.crutching)},staffRates:{woolHandler:80,classer:110,penner:85,presserRun:85,presserBale:6.50,baleThreshold:13},
+      shearers:[],staff:[],travel:{},dates:mkBlankDates(startISO)};
+    onAdd(job);onClose();
+  };
+  return d({style:{position:'fixed',inset:0,background:'rgba(0,0,0,0.55)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:200,padding:16}},
+    d({style:{background:'#fff',borderRadius:16,padding:24,width:'100%',maxWidth:440}},
+      d({style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20}},
+        d({style:{fontWeight:800,fontSize:18}},'New Job'),
+        btn({onClick:onClose,style:{fontSize:22,color:GR}},'×')
+      ),
+      d({style:{marginBottom:12}},
+        lbl({style:{fontSize:13,fontWeight:600,color:GR,display:'block',marginBottom:4}},'Property name'),
+        inp({type:'text',value:form.property,onChange:ev=>set('property',ev.target.value),style:{width:'100%',padding:'10px 12px',borderRadius:8,border:`1px solid ${BD}`,fontSize:14}})
+      ),
+      d({style:{marginBottom:12}},
+        lbl({style:{fontSize:13,fontWeight:600,color:GR,display:'block',marginBottom:4}},'Address'),
+        inp({type:'text',value:form.address,onChange:ev=>set('address',ev.target.value),style:{width:'100%',padding:'10px 12px',borderRadius:8,border:`1px solid ${BD}`,fontSize:14}})
+      ),
+      d({style:{marginBottom:12}},
+        lbl({style:{fontSize:13,fontWeight:600,color:GR,display:'block',marginBottom:4}},'Start date'),
+        inp({type:'date',value:form.start,onChange:ev=>set('start',ev.target.value),style:{width:'100%',padding:'10px 12px',borderRadius:8,border:`1px solid ${BD}`,fontSize:14}})
+      ),
+      d({style:{marginBottom:12}},
+        lbl({style:{fontSize:13,fontWeight:600,color:GR,display:'block',marginBottom:4}},'Job type'),
+        e('select',{value:form.type,onChange:ev=>set('type',ev.target.value),style:{width:'100%',padding:'10px 12px',borderRadius:8,border:`1px solid ${BD}`,fontSize:14}},
+          ['Shearing','Crutching','Mixed'].map(t=>e('option',{key:t,value:t},t)))
+      ),
+      d({style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:20}},
+        ...['shearing','crutching'].map(k=>
+          d({key:k},
+            lbl({style:{fontSize:13,fontWeight:600,color:GR,display:'block',marginBottom:4}},k.charAt(0).toUpperCase()+k.slice(1)+' $/head'),
+            inp({type:'number',step:0.05,value:form[k],onChange:ev=>set(k,ev.target.value),style:{width:'100%',padding:'10px',borderRadius:8,border:`1px solid ${BD}`,fontSize:14}})
+          )
+        )
+      ),
+      d({style:{display:'flex',gap:8}},
+        btn({onClick:onClose,style:{flex:1,padding:'12px',borderRadius:10,border:`1px solid ${BD}`,fontSize:14,fontWeight:600,color:GR}},'Cancel'),
+        btn({onClick:submit,style:{flex:1,padding:'12px',borderRadius:10,background:N,color:'#fff',fontSize:14,fontWeight:700,border:'none'}},'Create Job')
+      )
+    )
+  );
+}
+
+function AddCrewModal({type,onClose,onAdd,admin}){
+  const[name,setName]=useState('');
+  const[role,setRole]=useState('Wool Handler');
+  const[travel,setTravel]=useState('0');
+  const[loading,setLoading]=useState('0');
+  const submit=()=>{
+    if(!name)return;
+    const id=uid();
+    const person=type==='shearer'?{id,name,loading:Number(loading)||0}:{id,name,role};
+    onAdd(person,Number(travel)||0);
+    onClose();
+  };
+  return d({style:{position:'fixed',inset:0,background:'rgba(0,0,0,0.55)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:200,padding:16}},
+    d({style:{background:'#fff',borderRadius:16,padding:24,width:'100%',maxWidth:360}},
+      d({style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20}},
+        d({style:{fontWeight:800,fontSize:18}},type==='shearer'?'Add Shearer':'Add Staff'),
+        btn({onClick:onClose,style:{fontSize:22,color:GR}},'×')
+      ),
+      d({style:{marginBottom:12}},
+        lbl({style:{fontSize:13,fontWeight:600,color:GR,display:'block',marginBottom:4}},'Name'),
+        inp({type:'text',value:name,onChange:ev=>setName(ev.target.value),placeholder:'Full name',style:{width:'100%',padding:'10px 12px',borderRadius:8,border:`1px solid ${BD}`,fontSize:14}})
+      ),
+      type==='staff'&&d({style:{marginBottom:12}},
+        lbl({style:{fontSize:13,fontWeight:600,color:GR,display:'block',marginBottom:4}},'Role'),
+        e('select',{value:role,onChange:ev=>setRole(ev.target.value),style:{width:'100%',padding:'10px 12px',borderRadius:8,border:`1px solid ${BD}`,fontSize:14}},
+          ROLES.map(r=>e('option',{key:r,value:r},r)))
+      ),
+      type==='shearer'&&admin&&d({style:{marginBottom:12}},
+        lbl({style:{fontSize:13,fontWeight:600,color:GR,display:'block',marginBottom:4}},'Rate loading ($/head above base)'),
+        inp({type:'number',step:0.01,value:loading,onChange:ev=>setLoading(ev.target.value),placeholder:'e.g. 0.10',style:{width:'100%',padding:'10px 12px',borderRadius:8,border:`1px solid ${BD}`,fontSize:14}})
+      ),
+      d({style:{marginBottom:20}},
+        lbl({style:{fontSize:13,fontWeight:600,color:GR,display:'block',marginBottom:4}},'Travel allowance ($)'),
+        inp({type:'number',value:travel,onChange:ev=>setTravel(ev.target.value),style:{width:'100%',padding:'10px 12px',borderRadius:8,border:`1px solid ${BD}`,fontSize:14}})
+      ),
+      d({style:{display:'flex',gap:8}},
+        btn({onClick:onClose,style:{flex:1,padding:'12px',borderRadius:10,border:`1px solid ${BD}`,fontSize:14,fontWeight:600,color:GR}},'Cancel'),
+        btn({onClick:submit,style:{flex:1,padding:'12px',borderRadius:10,background:N,color:'#fff',fontSize:14,fontWeight:700,border:'none'}},'Add')
+      )
+    )
+  );
+}
+
+// ── Count Row ──────────────────────────────────────────────
+function CountRow({count,shearers,jobRates,onChange,onDelete,admin}){
+  const mob=shearers.reduce((s,sh)=>s+Number(count.counts[sh.id]||0),0);
+  const baseRate=count.job==='Shearing'?jobRates.shearing:jobRates.crutching;
+  const effectiveRate=count.rate!==null&&count.rate!==undefined&&count.rate!==''?Number(count.rate):baseRate;
+
+  return d({style:{background:'#f9fafb',borderRadius:10,padding:12,marginBottom:8,border:`1px solid ${BD}`}},
+    d({style:{display:'flex',alignItems:'center',gap:8,marginBottom:10,flexWrap:'wrap'}},
+      e(Tag,{type:count.job}),
+      e('select',{value:count.cls,onChange:ev=>onChange({...count,cls:ev.target.value}),style:{padding:'4px 8px',borderRadius:6,border:`1px solid ${BD}`,fontSize:13,fontWeight:600,background:'#fff'}},
+        CLS.map(c=>e('option',{key:c,value:c},c))),
+      inp({value:count.desc||'',onChange:ev=>onChange({...count,desc:ev.target.value}),
+        placeholder:'Mob description (e.g. Red tag ewes / Merino Ewe FC + wig)',
+        style:{flex:1,minWidth:160,padding:'4px 8px',borderRadius:6,border:`1px solid ${BD}`,fontSize:13}}),
+      btn({onClick:onDelete,style:{color:RD,fontSize:20,fontWeight:700,flexShrink:0}},'×')
+    ),
+    admin&&d({style:{display:'flex',alignItems:'center',gap:8,marginBottom:10,flexWrap:'wrap'}},
+      d({style:{display:'flex',alignItems:'center',gap:6,background:'#fff',borderRadius:8,padding:'6px 10px',border:`1px solid ${BD}`}},
+        sp({style:{fontSize:11,color:GR,whiteSpace:'nowrap'}},'Rate override $/head:'),
+        inp({type:'number',step:0.01,
+          value:count.rate!==null&&count.rate!==undefined&&count.rate!==''?count.rate:'',
+          onChange:ev=>onChange({...count,rate:ev.target.value===''?null:Number(ev.target.value)}),
+          placeholder:'Default: $'+baseRate.toFixed(2),
+          style:{width:90,padding:'4px 8px',borderRadius:6,border:`1px solid ${BD}`,fontSize:13}})
+      ),
+      sp({style:{fontSize:12,color:GR}},'Effective: '),
+      sp({style:{fontSize:13,fontWeight:700,color:effectiveRate!==baseRate?AM:N}},'$'+effectiveRate.toFixed(2)+'/head')
+    ),
+    d({className:'hs'},
+      e('table',{style:{borderCollapse:'collapse'}},
+        e('thead',null,e('tr',null,
+          ...shearers.map(sh=>e('th',{key:sh.id,style:{padding:'4px 8px',textAlign:'center',fontSize:11,fontWeight:700,color:GR,whiteSpace:'nowrap',minWidth:68}},
+            d(null,d(null,sh.name),admin&&sh.loading>0?d({style:{color:AM,fontSize:9}},'+$'+sh.loading.toFixed(2)):null)
+          )),
+          e('th',{style:{padding:'4px 12px',textAlign:'center',fontSize:11,fontWeight:700,color:N,borderLeft:`2px solid ${BD}`,minWidth:90,whiteSpace:'nowrap'}},'MOB TOTAL')
+        )),
+        e('tbody',null,e('tr',null,
+          ...shearers.map(sh=>e('td',{key:sh.id,style:{padding:'4px 6px',textAlign:'center'}},
+            inp({type:'number',min:0,value:count.counts[sh.id]||'',
+              onChange:ev=>onChange({...count,counts:{...count.counts,[sh.id]:Number(ev.target.value)||0}}),
+              style:{width:58,padding:'8px 4px',borderRadius:8,border:`1px solid ${BD}`,fontSize:18,textAlign:'center',fontWeight:700,background:'#fff'}})
+          )),
+          e('td',{style:{padding:'4px 10px',textAlign:'center',borderLeft:`2px solid ${BD}`}},
+            d({style:{background:N,borderRadius:8,padding:'8px 10px',display:'inline-block',minWidth:60,textAlign:'center'}},
+              sp({style:{color:'#fff',fontSize:18,fontWeight:800}},mob))
+          )
+        ))
+      )
+    )
+  );
+}
+
+// ── Run Card ───────────────────────────────────────────────
+function RunCard({run,shearers,jobRates,onUpdate,onDelete,admin}){
+  const[open,setOpen]=useState(true);
+  const runTotal=run.counts.reduce((s,c)=>s+shearers.reduce((ss,sh)=>ss+Number(c.counts[sh.id]||0),0),0);
+  const addC=job=>{const nc=mkCount('Ewes',job,'',shearers,0,null);onUpdate({...run,counts:[...run.counts,nc]});};
+  return d({style:{background:'#fff',borderRadius:12,border:`1px solid ${BD}`,marginBottom:12,overflow:'hidden'}},
+    d({style:{display:'flex',alignItems:'center',gap:10,padding:'12px 14px',background:N,cursor:'pointer'},onClick:()=>setOpen(o=>!o)},
+      d({style:{width:28,height:28,borderRadius:8,background:AM,display:'flex',alignItems:'center',justifyContent:'center',fontWeight:800,fontSize:14,color:'#fff',flexShrink:0}},run.num),
+      sp({style:{color:'#fff',fontWeight:700,fontSize:15}},'Run '+run.num),
+      sp({style:{color:'#93c5fd',fontSize:12}},run.counts.length+' count'+(run.counts.length!==1?'s':'')),
+      d({style:{marginLeft:'auto',display:'flex',alignItems:'center',gap:8}},
+        sp({style:{background:'rgba(255,255,255,0.15)',color:'#fff',fontSize:13,fontWeight:700,padding:'3px 10px',borderRadius:20}},'Run total: '+runTotal),
+        btn({onClick:ev=>{ev.stopPropagation();onDelete();},style:{color:'rgba(255,255,255,0.4)',fontSize:20,fontWeight:700}},'×')
+      )
+    ),
+    open&&d({style:{padding:14}},
+      ...run.counts.map(c=>e(CountRow,{key:c.id,count:c,shearers,jobRates,admin,
+        onChange:u=>onUpdate({...run,counts:run.counts.map(x=>x.id===c.id?u:x)}),
+        onDelete:()=>onUpdate({...run,counts:run.counts.filter(x=>x.id!==c.id)})})),
+      d({style:{display:'flex',gap:8,marginTop:6}},
+        btn({onClick:()=>addC('Shearing'),style:{flex:1,padding:'8px 0',borderRadius:8,border:`1px dashed ${BL}`,fontSize:13,fontWeight:600,color:BL,background:BLB}},'+ Shearing'),
+        btn({onClick:()=>addC('Crutching'),style:{flex:1,padding:'8px 0',borderRadius:8,border:`1px dashed ${CR}`,fontSize:13,fontWeight:600,color:CR,background:CRB}},'+ Crutching')
+      )
+    )
+  );
+}
+
+// ── Date Navigation ────────────────────────────────────────
+function DateNav({job,selected,onSelect}){
+  const allDates=Object.keys(job.dates||{}).sort().reverse(); // newest first
+  return d({className:'hs',style:{marginBottom:16,background:'#fff',borderRadius:12,border:`1px solid ${BD}`}},
+    d({style:{display:'flex',minWidth:'max-content'}},
+      ...allDates.map(dt=>{
+        const active=dt===selected;
+        const hasData=(job.dates[dt]?.runs||[]).length>0;
+        const[d_,m_]=dt.split('-').slice(1);
+        return btn({key:dt,onClick:()=>onSelect(dt),
+          style:{padding:'10px 14px',fontSize:12,fontWeight:700,color:active?N:'#9ca3af',borderBottom:active?'3px solid '+N:'3px solid transparent',whiteSpace:'nowrap',background:'none',position:'relative',minWidth:64}},
+          isoToDayShort(dt),
+          sp({style:{fontSize:9,display:'block',color:active?GR:'#d1d5db'}},d_+'/'+m_),
+          hasData&&sp({style:{position:'absolute',top:8,right:6,width:5,height:5,borderRadius:'50%',background:AM}})
+        );
+      })
+    )
+  );
+}
+
+// ── Shearer Totals Table ───────────────────────────────────
+function ShearerTotalsTable({job,dateKey,admin}){
+  return card(d(null,
+    slab('Shearer totals — BF / Day / To Date'),
+    d({className:'hs'},
+      e('table',{style:{borderCollapse:'collapse',fontSize:13}},
+        e('thead',null,e('tr',{style:{background:'#f9fafb'}},
+          e('th',{style:{padding:'8px 12px',textAlign:'left',fontWeight:700,color:GR,borderBottom:`1px solid ${BD}`,whiteSpace:'nowrap'}},'Name'),
+          admin&&e('th',{style:{padding:'8px 10px',textAlign:'center',fontWeight:600,color:GR,borderBottom:`1px solid ${BD}`,fontSize:11,whiteSpace:'nowrap'}},'Loading'),
+          ...['SH BF','SH Day','SH Tot','CR BF','CR Day','CR Tot'].map(h=>
+            e('th',{key:h,style:{padding:'8px 12px',textAlign:'center',fontWeight:600,color:GR,borderBottom:`1px solid ${BD}`,fontSize:11,whiteSpace:'nowrap',minWidth:58}},h)
+          )
+        )),
+        e('tbody',null,...job.shearers.map((s,i)=>{
+          const t=getShearerTotals(job,s.id,dateKey);
+          const has=t.shearing.tot>0||t.crutching.tot>0;
+          return e('tr',{key:s.id,style:{background:i%2===0?'#fff':'#fafafa',opacity:has?1:0.3}},
+            e('td',{style:{padding:'10px 12px',fontWeight:700,whiteSpace:'nowrap'}},s.name),
+            admin&&e('td',{style:{padding:'10px 10px',textAlign:'center',color:s.loading>0?AM:GR,fontWeight:s.loading>0?700:400}},
+              s.loading>0?'+$'+s.loading.toFixed(2):'—'),
+            e('td',{style:{padding:'10px 12px',textAlign:'center',color:GR}},t.shearing.bf||'—'),
+            e('td',{style:{padding:'10px 12px',textAlign:'center',fontWeight:700,color:BL}},t.shearing.day||'—'),
+            e('td',{style:{padding:'10px 12px',textAlign:'center',fontWeight:800,color:N,fontSize:15}},t.shearing.tot||'—'),
+            e('td',{style:{padding:'10px 12px',textAlign:'center',color:GR}},t.crutching.bf||'—'),
+            e('td',{style:{padding:'10px 12px',textAlign:'center',fontWeight:700,color:CR}},t.crutching.day||'—'),
+            e('td',{style:{padding:'10px 12px',textAlign:'center',fontWeight:800,color:N,fontSize:15}},t.crutching.tot||'—')
+          );
+        }))
+      )
+    ),
+    d({style:{fontSize:11,color:'#ccc',marginTop:8}},'SH=Shearing · CR=Crutching · BF=Brought Fwd · Tot=To Date')
+  ),{marginBottom:12});
+}
+
+// ── Shed Staff Card ────────────────────────────────────────
+function ShedStaffCard({job,dateKey,updateJob,showAddStaff,admin}){
+  const dd=job.dates[dateKey];
+  const upd=(stid,field,val)=>updateJob({...job,dates:{...job.dates,[dateKey]:{...dd,staff:{...dd.staff,[stid]:{...dd.staff[stid],[field]:Number(val)||0}}}}});
+  const removeStaff=stid=>updateJob({...job,staff:job.staff.filter(s=>s.id!==stid)});
+  const byRole={};
+  job.staff.forEach(st=>{if(!byRole[st.role])byRole[st.role]=[];byRole[st.role].push(st);});
+
+  return card(d(null,
+    d({style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}},
+      slab('Shed staff'),
+      btn({onClick:showAddStaff,style:{fontSize:12,fontWeight:700,color:BL,background:BLB,padding:'4px 10px',borderRadius:6}},'+ Add staff')
+    ),
+    ...Object.entries(byRole).map(([role,members])=>
+      d({key:role},
+        d({style:{fontSize:11,fontWeight:700,color:AM,textTransform:'uppercase',letterSpacing:1,marginBottom:6,marginTop:8}},role),
+        ...members.map(st=>{
+          const runs=getStaffRuns(job,st.id,dateKey);
+          const isPresser=role==='Presser';
+          const bales=isPresser?getStaffBales(job,st.id,dateKey):null;
+          const dayEntry=(dd?.staff||{})[st.id]||{};
+          return d({key:st.id,style:{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap',padding:'8px 0',borderBottom:`1px solid #f3f4f6`}},
+            d({style:{width:32,height:32,borderRadius:'50%',background:N,display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',fontWeight:700,fontSize:13,flexShrink:0}},st.name[0]),
+            d({style:{flex:1,minWidth:70}},d({style:{fontWeight:700,fontSize:13}},st.name)),
+            d({style:{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}},
+              d({style:{display:'flex',alignItems:'center',gap:4}},
+                sp({style:{fontSize:11,color:GR}},'Runs:'),
+                inp({type:'number',min:0,max:20,value:dayEntry.runs||'',onChange:ev=>upd(st.id,'runs',ev.target.value),
+                  style:{width:46,padding:'5px 6px',borderRadius:7,border:`1px solid ${BD}`,fontSize:15,textAlign:'center',fontWeight:700}})
+              ),
+              isPresser&&d({style:{display:'flex',alignItems:'center',gap:4}},
+                sp({style:{fontSize:11,color:GR}},'Bales:'),
+                inp({type:'number',min:0,value:dayEntry.bales||'',onChange:ev=>upd(st.id,'bales',ev.target.value),
+                  style:{width:46,padding:'5px 6px',borderRadius:7,border:`1px solid ${BD}`,fontSize:15,textAlign:'center',fontWeight:700}})
+              )
+            ),
+            d({className:'hs'},
+              e('table',{style:{borderCollapse:'collapse',fontSize:11}},
+                e('thead',null,e('tr',null,
+                  ...['BF','Today','To Date','Travel Days',...(admin?['Travel $/day']:[]),...(isPresser?['Bales Tot']:[])].map(h=>
+                    e('th',{key:h,style:{padding:'2px 8px',textAlign:'center',color:GR,fontWeight:600,whiteSpace:'nowrap'}},h))
+                )),
+                e('tbody',null,e('tr',null,
+                  e('td',{style:{padding:'3px 8px',textAlign:'center',color:GR}},runs.bf),
+                  e('td',{style:{padding:'3px 8px',textAlign:'center',fontWeight:700,color:N}},runs.day||0),
+                  e('td',{style:{padding:'3px 8px',textAlign:'center',fontWeight:700,color:GN}},runs.tot),
+                  e('td',{style:{padding:'3px 8px',textAlign:'center',fontWeight:600,color:N}},getStaffDaysWorked(job,st.id)),
+                  admin&&e('td',{style:{padding:'3px 8px',textAlign:'center',color:GR}},'$'+(job.travel[st.id]||0)+'/day'),
+                  isPresser&&e('td',{style:{padding:'3px 8px',textAlign:'center',fontWeight:800,color:AM}},bales.tot)
+                ))
+              )
+            ),
+            btn({onClick:()=>removeStaff(st.id),style:{color:'#ccc',fontSize:16,flexShrink:0}},'×')
+          );
+        })
+      )
+    )
+  ),{marginBottom:12});
+}
+
+// ── Job View ───────────────────────────────────────────────
+function JobView({job,updateJob,onBack,admin}){
+  const allDates=Object.keys(job.dates||{}).sort().reverse();
+  const[dateKey,setDateKey]=useState(allDates[0]||today());
+  const[tab,setTab]=useState('tally');
+  const[showAddSh,setShowAddSh]=useState(false);
+  const[showAddSt,setShowAddSt]=useState(false);
+
+  const dd=job.dates[dateKey]||mkDay();
+  const st=getShedTotals(job);
+
+  const dt=useMemo(()=>{
+    let sh=0,cr=0;
+    dd.runs.forEach(r=>r.counts.forEach(c=>{
+      const v=job.shearers.reduce((s,sh)=>s+Number(c.counts[sh.id]||0),0);
+      if(c.job==='Shearing')sh+=v;else cr+=v;
+    }));
+    return{sh,cr};
+  },[dd,job.shearers]);
+
+  const addRun=()=>{
+    const num=(dd.runs.length||0)+1;if(num>10)return;
+    const nr={id:uid(),num,counts:[mkCount('Ewes','Shearing','',job.shearers,0,null)]};
+    updateJob({...job,dates:{...job.dates,[dateKey]:{...dd,runs:[...dd.runs,nr]}}});
+  };
+
+  const addShearer=(person,travel)=>updateJob({...job,shearers:[...job.shearers,person],travel:{...job.travel,[person.id]:travel}});
+  const removeShearer=sid=>updateJob({...job,shearers:job.shearers.filter(s=>s.id!==sid)});
+  const addStaff=(person,travel)=>updateJob({...job,staff:[...job.staff,person],travel:{...job.travel,[person.id]:travel}});
+  const cycleStatus=()=>{const idx=STATUS_OPTS.indexOf(job.status);updateJob({...job,status:STATUS_OPTS[(idx+1)%STATUS_OPTS.length]});};
+
+  const[jsc,jscol]=STATUS_COLORS[job.status];
+
+  const handleCSV=()=>{
+    const sr=job.staffRates||{woolHandler:80,classer:110,penner:85,presserRun:85,presserBale:6.50,baleThreshold:13};
+    const lines=[];
+    const div='─────────────────────────────────────────';
+
+    // Detect multiple rates
+    const allCounts=[];
+    Object.keys(job.dates).forEach(dk=>{(job.dates[dk]?.runs||[]).forEach(r=>r.counts.forEach(c=>allCounts.push(c)));});
+    const usedRates=new Set(allCounts.map(c=>c.rate!==null&&c.rate!==undefined?Number(c.rate):(c.job==='Shearing'?job.rates.shearing:job.rates.crutching)));
+    const isComplex=usedRates.size>1;
+
+    lines.push('PAY SUMMARY — '+job.property.toUpperCase());
+    lines.push('Contractor: Quality Shearing — Nathan & Sharna');
+    lines.push('Address: '+job.address+'  |  From: '+job.start);
+    lines.push('Status: '+job.status.toUpperCase());
+    lines.push('');
+    lines.push(div);
+    lines.push('SHEARERS');
+    lines.push(div);
+
+    let grandTotal=0;
+    let totalShorn=0;
+    let totalCrutched=0;
+
+    job.shearers.forEach(s=>{
+      const breakdown={};
+      Object.keys(job.dates).forEach(dk=>{
+        (job.dates[dk]?.runs||[]).forEach(r=>r.counts.forEach(c=>{
+          const v=Number(c.counts[s.id]||0);
+          if(!v)return;
+          const rate=c.rate!==null&&c.rate!==undefined?Number(c.rate):(c.job==='Shearing'?job.rates.shearing:job.rates.crutching);
+          const key=c.job+'|'+rate+'|'+(c.desc||c.cls);
+          if(!breakdown[key])breakdown[key]={job:c.job,rate,label:c.desc?c.desc+' ('+c.cls+')':c.cls,count:0};
+          breakdown[key].count+=v;
+          if(c.job==='Shearing')totalShorn+=v;
+          else totalCrutched+=v;
+        }));
+      });
+      const totalHead=Object.values(breakdown).reduce((s,b)=>s+b.count,0);
+      if(!totalHead)return;
+
+      const loading=s.loading||0;
+      const daysWorked=getShearerDaysWorked(job,s.id);
+      const dailyTravel=job.travel[s.id]||0;
+      const travelTotal=daysWorked*dailyTravel;
+      let shearerPay=Object.values(breakdown).reduce((s,b)=>s+b.count*b.rate,0);
+      shearerPay+=totalHead*loading;
+      shearerPay+=travelTotal;
+      grandTotal+=shearerPay;
+
+      lines.push('');
+      lines.push(s.name+' — Shearer'+(loading>0?' [+$'+loading.toFixed(2)+'/head loading]':''));
+
+      if(isComplex){
+        let shornLine='',crutchedLine='';
+        Object.values(breakdown).forEach(b=>{
+          const sub=(b.count*b.rate).toFixed(2);
+          lines.push('  '+b.job+': '+b.label+' — '+b.count+' head @ $'+b.rate.toFixed(2)+' = $'+sub);
+        });
+        if(loading>0)lines.push('  Loading: +$'+loading.toFixed(2)+' x '+totalHead+' head = $'+(totalHead*loading).toFixed(2));
+      } else {
+        const sh=Object.values(breakdown).filter(b=>b.job==='Shearing').reduce((s,b)=>s+b.count,0);
+        const cr=Object.values(breakdown).filter(b=>b.job==='Crutching').reduce((s,b)=>s+b.count,0);
+        const firstR=Object.values(breakdown)[0].rate;
+        if(sh>0)lines.push('  Sheep shorn: '+sh+' head @ $'+firstR.toFixed(2)+' = $'+(sh*firstR).toFixed(2));
+        if(cr>0)lines.push('  Sheep crutched: '+cr+' head @ $'+firstR.toFixed(2)+' = $'+(cr*firstR).toFixed(2));
+      }
+      if(daysWorked>0)lines.push('  Travel: '+daysWorked+' day'+(daysWorked!==1?'s':'')+(dailyTravel>0?' x $'+dailyTravel.toFixed(2)+'/day = $'+travelTotal.toFixed(2):''));
+      lines.push('  GROSS TOTAL: $'+shearerPay.toFixed(2));
+    });
+
+    lines.push('');
+    lines.push(div);
+    lines.push('SHED STAFF');
+    lines.push(div);
+
+    let staffTotal=0;
+    job.staff.forEach(st=>{
+      const daysWorked=getStaffDaysWorked(job,st.id);
+      const dailyTravel=job.travel[st.id]||0;
+      const travelTotal=daysWorked*dailyTravel;
+      const staffPay=getStaffPay(job,st)+travelTotal;
+      staffTotal+=staffPay;
+      grandTotal+=staffPay;
+
+      let totalRuns=0,totalBales=0;
+      Object.keys(job.dates).forEach(dk=>{
+        totalRuns+=Number((job.dates[dk]?.staff||{})[st.id]?.runs||0);
+        totalBales+=Number((job.dates[dk]?.staff||{})[st.id]?.bales||0);
+      });
+
+      lines.push('');
+      lines.push(st.name+' — '+st.role);
+      if(st.role==='Presser'){
+        // Show day by day presser calc
+        let presserPayLine='';
+        Object.keys(job.dates).sort().forEach(dk=>{
+          const entry=(job.dates[dk]?.staff||{})[st.id]||{};
+          const runs=Number(entry.runs||0);const bales=Number(entry.bales||0);
+          if(!runs)return;
+          if(bales>(sr.baleThreshold||13)){
+            presserPayLine+=(presserPayLine?', ':'')+dk.slice(5)+': '+bales+' bales @ $'+(sr.presserBale||6.50).toFixed(2);
+          } else {
+            presserPayLine+=(presserPayLine?', ':'')+dk.slice(5)+': '+runs+' runs @ $'+(sr.presserRun||85).toFixed(2);
+          }
+        });
+        lines.push('  '+presserPayLine);
+        lines.push('  Total runs: '+totalRuns+' | Total bales pressed: '+totalBales);
+      } else {
+        const rateMap={'Wool Handler':sr.woolHandler||80,'Classer':sr.classer||110,'Penner':sr.penner||85};
+        const rate=rateMap[st.role]||80;
+        lines.push('  '+totalRuns+' runs @ $'+rate.toFixed(2)+'/run = $'+(totalRuns*rate).toFixed(2));
+      }
+      if(daysWorked>0)lines.push('  Travel: '+daysWorked+' day'+(daysWorked!==1?'s':'')+(dailyTravel>0?' x $'+dailyTravel.toFixed(2)+'/day = $'+travelTotal.toFixed(2):''));
+      lines.push('  GROSS TOTAL: $'+staffPay.toFixed(2));
+    });
+
+    lines.push('');
+    lines.push(div);
+    lines.push('JOB SUMMARY — '+job.property);
+    lines.push(div);
+    lines.push('Total sheep shorn:    '+totalShorn);
+    lines.push('Total sheep crutched: '+totalCrutched);
+    const shearerWages=grandTotal-staffTotal;lines.push('Total shearer wages:  $'+shearerWages.toFixed(2));
+    lines.push('Total staff wages:    $'+staffTotal.toFixed(2));
+    lines.push('TOTAL GROSS WAGE BILL: $'+grandTotal.toFixed(2));
+    lines.push('');
+    lines.push('* Gross pay only. Tax/super to be applied separately.');
+    lines.push('* Generated by iGang — Southern Reach Digital');
+
+    const csv=lines.join('\n');
+    const blob=new Blob([csv],{type:'text/plain'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url;a.download='igang-pay-'+job.property.replace(/\s/g,'-')+'-'+job.start+'.txt';a.click();
+  };
+
+
+
+  
+
+  return d(null,
+    showAddSh&&e(AddCrewModal,{type:'shearer',onClose:()=>setShowAddSh(false),onAdd:addShearer,admin}),
+    showAddSt&&e(AddCrewModal,{type:'staff',onClose:()=>setShowAddSt(false),onAdd:addStaff}),
+    d({style:{background:N,padding:'10px 16px',margin:'-16px -12px 16px'}},
+      btn({onClick:onBack,style:{color:'#93c5fd',fontSize:13,fontWeight:600,marginBottom:6,display:'block'}},'← All jobs'),
+      d({style:{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:8}},
+        d(null,
+          d({style:{display:'flex',alignItems:'center',gap:8,marginBottom:4,flexWrap:'wrap'}},
+            d({style:{color:'#fff',fontWeight:800,fontSize:17}},job.property),
+            btn({onClick:cycleStatus,style:{background:jsc,color:jscol,fontSize:11,fontWeight:700,padding:'2px 10px',borderRadius:20,border:'none'}},STATUS_LABELS[job.status])
+          ),
+          d({style:{color:'#64748b',fontSize:12}},job.address+' · from '+isoToDisplay(job.start))
+        ),
+        d({style:{display:'flex',gap:4}},
+          ...['tally','summary',...(admin?['admin']:[])].map(v=>
+            btn({key:v,onClick:()=>setTab(v),style:{padding:'6px 10px',borderRadius:8,fontSize:12,fontWeight:700,background:tab===v?AM:'transparent',color:tab===v?'#fff':'#93c5fd'}},
+              v.charAt(0).toUpperCase()+v.slice(1))
+          )
+        )
+      )
+    ),
+
+    tab==='tally'&&d(null,
+      e(DateNav,{job,selected:dateKey,onSelect:setDateKey}),
+      d({style:{display:'flex',gap:10,marginBottom:16,flexWrap:'wrap'}},
+        dt.sh>0&&d({style:{flex:1,minWidth:100,background:BLB,borderRadius:12,padding:'12px 14px'}},
+          d({style:{fontSize:10,color:BL,fontWeight:700,marginBottom:2}},'SHEARING '+isoToDayShort(dateKey).toUpperCase()),
+          d({style:{fontSize:28,fontWeight:800,color:BL}},dt.sh)
+        ),
+        dt.cr>0&&d({style:{flex:1,minWidth:100,background:CRB,borderRadius:12,padding:'12px 14px'}},
+          d({style:{fontSize:10,color:CR,fontWeight:700,marginBottom:2}},'CRUTCHING '+isoToDayShort(dateKey).toUpperCase()),
+          d({style:{fontSize:28,fontWeight:800,color:CR}},dt.cr)
+        ),
+        dt.sh===0&&dt.cr===0&&d({style:{flex:1,minWidth:100,background:'#f9fafb',borderRadius:12,padding:'12px 14px',border:`1px solid ${BD}`}},
+          d({style:{fontSize:13,color:GR}},'No tallies for '+isoToDayShort(dateKey)+' '+isoToDisplay(dateKey).slice(0,5))
+        ),
+        d({style:{flex:1,minWidth:100,background:GNB,borderRadius:12,padding:'12px 14px'}},
+          d({style:{fontSize:10,color:GN,fontWeight:700,marginBottom:4}},'SHED TOTALS'),
+          d({style:{fontSize:14,fontWeight:700,color:GN}},'Shorn: '+st.sh),
+          st.cr>0&&d({style:{fontSize:14,fontWeight:700,color:CR}},'Crutched: '+st.cr)
+        )
+      ),
+      ...dd.runs.map(r=>e(RunCard,{key:r.id,run:r,shearers:job.shearers,jobRates:job.rates,admin,
+        onUpdate:u=>updateJob({...job,dates:{...job.dates,[dateKey]:{...dd,runs:dd.runs.map(x=>x.id===r.id?u:x)}}}),
+        onDelete:()=>updateJob({...job,dates:{...job.dates,[dateKey]:{...dd,runs:dd.runs.filter(x=>x.id!==r.id)}}})})),
+      dd.runs.length<10&&btn({onClick:addRun,style:{width:'100%',padding:'12px',borderRadius:12,border:`2px dashed ${N}`,fontSize:14,fontWeight:700,color:N,background:'transparent',marginBottom:12,opacity:0.4}},
+        '+ Add Run '+(dd.runs.length+1)),
+      e(ShearerTotalsTable,{job,dateKey,admin}),
+      d({style:{marginBottom:12}},
+        d({style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}},
+          d({style:{fontSize:11,fontWeight:700,color:GR,textTransform:'uppercase',letterSpacing:1.2}},'Shearers on job'),
+          btn({onClick:()=>setShowAddSh(true),style:{fontSize:12,fontWeight:700,color:BL,background:BLB,padding:'4px 10px',borderRadius:6}},'+ Add shearer')
+        ),
+        d({style:{display:'flex',flexWrap:'wrap',gap:6}},
+          ...job.shearers.map(s=>
+            d({key:s.id,style:{display:'flex',alignItems:'center',gap:6,background:'#f9fafb',borderRadius:8,padding:'6px 10px',border:`1px solid ${BD}`}},
+              d(null,
+                sp({style:{fontWeight:600,fontSize:13}},s.name),
+                admin&&s.loading>0&&sp({style:{fontSize:10,color:AM,marginLeft:4}},'+$'+s.loading.toFixed(2))
+              ),
+              admin&&btn({onClick:()=>removeShearer(s.id),style:{color:'#ccc',fontSize:14}})
+            )
+          )
+        )
+      ),
+      e(ShedStaffCard,{job,dateKey,updateJob,showAddStaff:()=>setShowAddSt(true),admin}),
+      d({style:{background:'#fff',borderRadius:14,border:`1px solid ${BD}`,padding:'16px 18px'}},
+        d({style:{fontSize:11,fontWeight:700,color:GR,textTransform:'uppercase',letterSpacing:1.2,marginBottom:10}},'Notes — '+isoToDayShort(dateKey)+' '+isoToDisplay(dateKey).slice(0,5)),
+        e('textarea',{value:dd.notes,onChange:ev=>updateJob({...job,dates:{...job.dates,[dateKey]:{...dd,notes:ev.target.value}}}),
+          placeholder:'Notes for the day...',rows:3,style:{width:'100%',padding:'10px 12px',borderRadius:8,border:`1px solid ${BD}`,fontSize:14,resize:'vertical',lineHeight:1.6}})
+      )
+    ),
+
+    tab==='summary'&&d(null,
+      d({style:{background:N,borderRadius:14,padding:'20px',marginBottom:12}},
+        d({style:{color:AM,fontSize:12,fontWeight:700,letterSpacing:1,marginBottom:4}},'END OF SHED SUMMARY'),
+        d({style:{color:'#fff',fontSize:20,fontWeight:800}},job.property),
+        d({style:{color:'#93c5fd',fontSize:13}},'Quality Shearing — Nathan & Sharna'),
+        d({style:{display:'flex',justifyContent:'space-between',alignItems:'flex-end',marginTop:12,flexWrap:'wrap',gap:8}},
+          d(null,
+            d({style:{color:'#64748b',fontSize:12}},'From '+isoToDisplay(job.start)+' · '+job.address),
+            d({style:{background:jsc,color:jscol,fontSize:12,fontWeight:700,padding:'3px 10px',borderRadius:20,display:'inline-block',marginTop:6}},STATUS_LABELS[job.status])
+          ),
+          d({style:{textAlign:'right'}},
+            st.sh>0&&d({style:{color:'#fff',fontSize:22,fontWeight:800}},'Shorn: '+st.sh),
+            st.cr>0&&d({style:{color:CRB,fontSize:22,fontWeight:800}},'Crutched: '+st.cr)
+          )
+        )
+      ),
+      d({style:{background:'#fff',borderRadius:14,border:`1px solid ${BD}`,padding:'16px 18px',marginBottom:12}},
+        d({style:{fontSize:11,fontWeight:700,color:GR,textTransform:'uppercase',letterSpacing:1.2,marginBottom:10}},'Shearers'),
+        d({className:'hs'},
+          e('table',{style:{borderCollapse:'collapse',fontSize:13,width:'100%'}},
+            e('thead',null,e('tr',{style:{background:'#f9fafb'}},
+              ...(admin?['Name','Shearing','Crutching','Loading','Travel']:['Name','Shearing','Crutching']).map(h=>
+                e('th',{key:h,style:{padding:'8px 12px',textAlign:h==='Name'?'left':'center',fontWeight:600,color:GR,borderBottom:`1px solid ${BD}`,whiteSpace:'nowrap'}},h))
+            )),
+            e('tbody',null,...job.shearers.map((s,i)=>{
+              let sh=0,cr=0;
+              Object.keys(job.dates).forEach(dk=>{(job.dates[dk]?.runs||[]).forEach(r=>r.counts.forEach(c=>{const v=Number(c.counts[s.id]||0);if(c.job==='Shearing')sh+=v;else cr+=v;}));});
+              return e('tr',{key:s.id,style:{background:i%2===0?'#fff':'#fafafa'}},
+                e('td',{style:{padding:'10px 12px',fontWeight:700}},s.name),
+                e('td',{style:{padding:'10px 12px',textAlign:'center',color:BL,fontWeight:700}},sh||'—'),
+                e('td',{style:{padding:'10px 12px',textAlign:'center',color:CR,fontWeight:700}},cr||'—'),
+                admin&&e('td',{style:{padding:'10px 12px',textAlign:'center',color:AM,fontWeight:700}},s.loading>0?'+$'+s.loading.toFixed(2):'—'),
+                admin&&e('td',{style:{padding:'10px 12px',textAlign:'center',color:GR}},'$'+(job.travel[s.id]||0))
+              );
+            }))
+          )
+        )
+      ),
+      d({style:{background:'#fff',borderRadius:14,border:`1px solid ${BD}`,padding:'16px 18px',marginBottom:12}},
+        d({style:{fontSize:11,fontWeight:700,color:GR,textTransform:'uppercase',letterSpacing:1.2,marginBottom:10}},'Shed staff'),
+        d({className:'hs'},
+          e('table',{style:{borderCollapse:'collapse',fontSize:13,width:'100%'}},
+            e('thead',null,e('tr',{style:{background:'#f9fafb'}},
+              ...(admin?['Name','Role','Runs','Bales','Travel']:['Name','Role','Runs','Bales']).map(h=>
+                e('th',{key:h,style:{padding:'8px 12px',textAlign:h==='Name'?'left':'center',fontWeight:600,color:GR,borderBottom:`1px solid ${BD}`,whiteSpace:'nowrap'}},h))
+            )),
+            e('tbody',null,...job.staff.map((st,i)=>{
+              let runs=0,bales=0;
+              Object.keys(job.dates).forEach(dk=>{runs+=Number((job.dates[dk]?.staff||{})[st.id]?.runs||0);bales+=Number((job.dates[dk]?.staff||{})[st.id]?.bales||0);});
+              return e('tr',{key:st.id,style:{background:i%2===0?'#fff':'#fafafa'}},
+                e('td',{style:{padding:'10px 12px',fontWeight:700}},st.name),
+                e('td',{style:{padding:'10px 12px',color:GR}},st.role),
+                e('td',{style:{padding:'10px 12px',textAlign:'center',fontWeight:600}},runs),
+                e('td',{style:{padding:'10px 12px',textAlign:'center',fontWeight:600,color:st.role==='Presser'?AM:GR}},st.role==='Presser'?bales:'—'),
+                admin&&e('td',{style:{padding:'10px 12px',textAlign:'center',color:GR}},'$'+(job.travel[st.id]||0))
+              );
+            }))
+          )
+        )
+      ),
+      admin&&btn({onClick:handleCSV,style:{width:'100%',padding:'14px',borderRadius:12,background:GN,color:'#fff',fontSize:15,fontWeight:700,border:'none'}},'Download Pay Summary — '+job.property)
+    ),
+
+    tab==='admin'&&admin&&d(null,
+      d({style:{background:'#fff',borderRadius:14,border:`1px solid ${BD}`,padding:'16px 18px',marginBottom:12}},
+        d({style:{fontSize:11,fontWeight:700,color:GR,textTransform:'uppercase',letterSpacing:1.2,marginBottom:12}},'Shearer base rates'),
+        d({style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}},
+          ...['shearing','crutching'].map(k=>
+            d({key:k},
+              e('label',{style:{fontSize:13,fontWeight:600,color:GR,display:'block',marginBottom:6}},k.charAt(0).toUpperCase()+k.slice(1)+' $/head'),
+              inp({type:'number',step:0.05,value:job.rates[k],onChange:ev=>updateJob({...job,rates:{...job.rates,[k]:Number(ev.target.value)}}),
+                style:{width:'100%',padding:'10px',borderRadius:8,border:`1px solid ${BD}`,fontSize:16,fontWeight:700}})
+            )
+          )
+        )
+      ),
+      d({style:{background:'#fff',borderRadius:14,border:`1px solid ${BD}`,padding:'16px 18px',marginBottom:12}},
+        d({style:{fontSize:11,fontWeight:700,color:GR,textTransform:'uppercase',letterSpacing:1.2,marginBottom:6}},'Shed staff rates'),
+        d({style:{fontSize:12,color:GR,marginBottom:12}},'Per run. Presser switches to per-bale if daily bales exceed threshold.'),
+        d({style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:12}},
+          ...[['Wool Handler','woolHandler'],['Classer','classer'],['Penner','penner'],['Presser (per run)','presserRun']].map(([label,key])=>
+            d({key,style:{background:'#f9fafb',borderRadius:8,padding:'10px 12px'}},
+              e('label',{style:{fontSize:12,fontWeight:600,color:GR,display:'block',marginBottom:4}},label),
+              d({style:{display:'flex',alignItems:'center',gap:4}},
+                sp({style:{color:GR}},'$'),
+                inp({type:'number',step:0.50,value:(job.staffRates||{})[key]||0,
+                  onChange:ev=>updateJob({...job,staffRates:{...(job.staffRates||{}),[key]:Number(ev.target.value)}}),
+                  style:{width:'100%',padding:'8px',borderRadius:6,border:`1px solid ${BD}`,fontSize:15,fontWeight:700}})
+              )
+            )
+          )
+        ),
+        d({style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}},
+          d({style:{background:'#fef3c7',borderRadius:8,padding:'10px 12px'}},
+            e('label',{style:{fontSize:12,fontWeight:600,color:CR,display:'block',marginBottom:4}},'Presser $/bale'),
+            d({style:{display:'flex',alignItems:'center',gap:4}},
+              sp({style:{color:GR}},'$'),
+              inp({type:'number',step:0.10,value:(job.staffRates||{}).presserBale||6.50,
+                onChange:ev=>updateJob({...job,staffRates:{...(job.staffRates||{}),presserBale:Number(ev.target.value)}}),
+                style:{width:'100%',padding:'8px',borderRadius:6,border:`1px solid ${BD}`,fontSize:15,fontWeight:700}})
+            )
+          ),
+          d({style:{background:'#fef3c7',borderRadius:8,padding:'10px 12px'}},
+            e('label',{style:{fontSize:12,fontWeight:600,color:CR,display:'block',marginBottom:4}},'Bale threshold/day'),
+            inp({type:'number',step:1,value:(job.staffRates||{}).baleThreshold||13,
+              onChange:ev=>updateJob({...job,staffRates:{...(job.staffRates||{}),baleThreshold:Number(ev.target.value)}}),
+              style:{width:'100%',padding:'8px',borderRadius:6,border:`1px solid ${BD}`,fontSize:15,fontWeight:700}})
+          )
+        )
+      ),
+      d({style:{background:'#fff',borderRadius:14,border:`1px solid ${BD}`,padding:'16px 18px',marginBottom:12}},
+        d({style:{fontSize:11,fontWeight:700,color:GR,textTransform:'uppercase',letterSpacing:1.2,marginBottom:12}},'Shearer rate loadings'),
+        d({style:{fontSize:12,color:GR,marginBottom:12}},'Added on top of base rate per head across entire job'),
+        d({style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}},
+          ...job.shearers.map(s=>
+            d({key:s.id,style:{display:'flex',alignItems:'center',gap:8,background:'#f9fafb',borderRadius:8,padding:'10px 12px'}},
+              sp({style:{fontWeight:700,fontSize:13,flex:1}},s.name),
+              sp({style:{fontSize:12,color:GR}},'+$'),
+              inp({type:'number',step:0.01,value:s.loading||0,onChange:ev=>updateJob({...job,shearers:job.shearers.map(sh=>sh.id===s.id?{...sh,loading:Number(ev.target.value)||0}:sh)}),
+                style:{width:64,padding:'6px 8px',borderRadius:6,border:`1px solid ${BD}`,fontSize:15,fontWeight:700,textAlign:'center'}})
+            )
+          )
+        )
+      ),
+      d({style:{background:'#fff',borderRadius:14,border:`1px solid ${BD}`,padding:'16px 18px'}},
+        d({style:{fontSize:11,fontWeight:700,color:GR,textTransform:'uppercase',letterSpacing:1.2,marginBottom:12}},'Travel allowances ($/day)'),
+        d({style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}},
+          ...[...job.shearers,...job.staff].map(p=>
+            d({key:p.id,style:{display:'flex',alignItems:'center',gap:8,background:'#f9fafb',borderRadius:8,padding:'10px 12px'}},
+              sp({style:{fontWeight:700,fontSize:13,flex:1}},p.name),
+              sp({style:{fontSize:14,color:GR}},'$'),
+              inp({type:'number',value:job.travel[p.id]||0,onChange:ev=>updateJob({...job,travel:{...job.travel,[p.id]:Number(ev.target.value)}}),
+                style:{width:64,padding:'6px 8px',borderRadius:6,border:`1px solid ${BD}`,fontSize:15,fontWeight:700,textAlign:'center'}})
+            )
+          )
+        )
+      )
+    )
+  );
+}
+
+function HomeScreen({jobs,onSelect,onAdd}){
+  const[search,setSearch]=useState('');
+  const[filterStatus,setFilterStatus]=useState('all');
+  const[sort,setSort]=useState('date-desc');
+  const[showAdd,setShowAdd]=useState(false);
+
+  const filtered=useMemo(()=>{
+    let list=jobs.filter(j=>{
+      const ms=!search||j.property.toLowerCase().includes(search.toLowerCase())||j.address.toLowerCase().includes(search.toLowerCase());
+      const mf=filterStatus==='all'||j.status===filterStatus;
+      return ms&&mf;
+    });
+    const statusOrder={active:0,completed:1,charged:2};
+    return[...list].sort((a,b)=>{
+      const sg=statusOrder[a.status]-statusOrder[b.status];
+      if(sg!==0)return sg;
+      if(sort==='name-asc')return a.property.localeCompare(b.property);
+      if(sort==='name-desc')return b.property.localeCompare(a.property);
+      if(sort==='date-asc')return a.start.localeCompare(b.start);
+      if(sort==='date-desc')return b.start.localeCompare(a.start);
+      return 0;
+    });
+  },[jobs,search,filterStatus,sort]);
+
+  const todayISO=today();
+  const shAll=jobs.reduce((s,j)=>s+getShedTotals(j).sh,0);
+  const crAll=jobs.reduce((s,j)=>s+getShedTotals(j).cr,0);
+  const todayAll=jobs.reduce((s,j)=>s+getDayTotals(j,todayISO).total,0);
+
+  return d(null,
+    showAdd&&e(AddJobModal,{onClose:()=>setShowAdd(false),onAdd}),
+    d({style:{background:`linear-gradient(135deg,${ND},${N})`,borderRadius:16,padding:'20px',marginBottom:16,color:'#fff'}},
+      d({style:{color:AM,fontSize:12,fontWeight:700,letterSpacing:1,marginBottom:4}},'QUALITY SHEARING'),
+      d({style:{color:'#93c5fd',fontSize:14,marginBottom:14}},'Nathan & Sharna — '+jobs.filter(j=>j.status==='active').length+' active jobs'),
+      d({style:{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:8}},
+        d({style:{background:'rgba(255,255,255,0.08)',borderRadius:10,padding:'10px 12px'}},
+          d({style:{fontSize:10,color:'#93c5fd',marginBottom:3}},'TODAY ALL SHEDS'),
+          d({style:{fontSize:22,fontWeight:800,color:'#fff'}},todayAll.toLocaleString())
+        ),
+        d({style:{background:'rgba(255,255,255,0.08)',borderRadius:10,padding:'10px 12px'}},
+          d({style:{fontSize:10,color:'#93c5fd',marginBottom:3}},'ALL SHEARING'),
+          d({style:{fontSize:22,fontWeight:800,color:AM}},shAll.toLocaleString())
+        ),
+        d({style:{background:'rgba(255,255,255,0.08)',borderRadius:10,padding:'10px 12px'}},
+          d({style:{fontSize:10,color:'#93c5fd',marginBottom:3}},'ALL CRUTCHING'),
+          d({style:{fontSize:22,fontWeight:800,color:CRB}},crAll.toLocaleString())
+        )
+      )
+    ),
+    d({style:{display:'flex',gap:8,marginBottom:12,flexWrap:'wrap'}},
+      inp({value:search,onChange:ev=>setSearch(ev.target.value),placeholder:'Search property or address...',
+        style:{flex:1,minWidth:140,padding:'9px 12px',borderRadius:10,border:`1px solid ${BD}`,fontSize:13,background:'#fff'}}),
+      e('select',{value:filterStatus,onChange:ev=>setFilterStatus(ev.target.value),style:{padding:'9px 10px',borderRadius:10,border:`1px solid ${BD}`,fontSize:13,background:'#fff'}},
+        e('option',{value:'all'},'All status'),
+        ...STATUS_OPTS.map(s=>e('option',{key:s,value:s},STATUS_LABELS[s]))
+      ),
+      e('select',{value:sort,onChange:ev=>setSort(ev.target.value),style:{padding:'9px 10px',borderRadius:10,border:`1px solid ${BD}`,fontSize:13,background:'#fff'}},
+        e('option',{value:'name-asc'},'Name A→Z'),
+        e('option',{value:'name-desc'},'Name Z→A'),
+        e('option',{value:'date-asc'},'Date oldest'),
+        e('option',{value:'date-desc'},'Date newest')
+      ),
+      btn({onClick:()=>setShowAdd(true),style:{padding:'9px 16px',borderRadius:10,background:AM,color:'#fff',fontSize:13,fontWeight:700,whiteSpace:'nowrap',border:'none'}},'+ New Job')
+    ),
+    d({style:{fontSize:11,fontWeight:700,color:GR,textTransform:'uppercase',letterSpacing:1.2,marginBottom:10}},filtered.length+' job'+(filtered.length!==1?'s':'')),
+    ...filtered.map(j=>{
+      const dayT=getDayTotals(j,todayISO),shedT=getShedTotals(j);
+      const[tbg,tc]=j.type==='Shearing'?[BLB,BL]:j.type==='Crutching'?[CRB,CR]:['#ede9fe','#7c3aed'];
+      const[sc2,scol2]=STATUS_COLORS[j.status];
+      return d({key:j.id,onClick:()=>onSelect(j.id),style:{background:'#fff',borderRadius:14,border:`1px solid ${BD}`,marginBottom:12,overflow:'hidden',cursor:'pointer'},
+        onMouseEnter:ev=>ev.currentTarget.style.boxShadow='0 4px 20px rgba(0,0,0,0.1)',
+        onMouseLeave:ev=>ev.currentTarget.style.boxShadow='none'},
+        d({style:{padding:'14px 16px',borderBottom:`1px solid #f3f4f6`}},
+          d({style:{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}},
+            d(null,
+              d({style:{display:'flex',alignItems:'center',gap:6,marginBottom:6,flexWrap:'wrap'}},
+                sp({style:{background:sc2,color:scol2,fontSize:11,fontWeight:700,padding:'2px 10px',borderRadius:20}},STATUS_LABELS[j.status]),
+                sp({style:{background:tbg,color:tc,fontSize:11,fontWeight:700,padding:'2px 8px',borderRadius:12}},j.type)
+              ),
+              d({style:{fontWeight:800,fontSize:17,color:N,marginBottom:2}},j.property),
+              d({style:{fontSize:12,color:GR}},j.address+' — from '+isoToDisplay(j.start))
+            ),
+            d({style:{textAlign:'right',flexShrink:0}},
+              d({style:{fontSize:11,color:GR,marginBottom:2}},'Today'),
+              d({style:{fontSize:22,fontWeight:800,color:BL}},dayT.total)
+            )
+          )
+        ),
+        d({style:{padding:'10px 16px',display:'grid',gridTemplateColumns:'repeat(5,1fr)',gap:6}},
+          ...[['Shearers',j.shearers.length],['Staff',j.staff.length],['Shorn',shedT.sh],['Crutched',shedT.cr||'—'],['Days',Object.values(j.dates||{}).filter(d=>d.runs&&d.runs.length>0).length]].map(([l,v])=>
+            d({key:l,style:{textAlign:'center'}},
+              d({style:{fontSize:10,color:GR,marginBottom:2}},l),
+              d({style:{fontSize:15,fontWeight:700,color:N}},v)
+            )
+          )
+        ),
+        d({style:{padding:'0 16px 10px',textAlign:'right'}},
+          sp({style:{fontSize:13,fontWeight:700,color:BL}},'Open job →')
+        )
+      );
+    })
+  );
+}
+
+function App(){
+  const[jobs,setJobs]=useState(JOBS_INIT);
+  const[selId,setSelId]=useState(null);
+  const[admin,setAdmin]=useState(false);
+  const[showPin,setShowPin]=useState(false);
+  const[pin,setPin]=useState('');
+  const[pinErr,setPinErr]=useState(false);
+  const selJob=jobs.find(j=>j.id===selId);
+  const updJob=u=>setJobs(js=>js.map(j=>j.id===u.id?u:j));
+  const addJob=j=>setJobs(js=>[...js,j]);
+  const tryUnlock=()=>{if(pin===PIN){setAdmin(true);setShowPin(false);setPin('');}else setPinErr(true);};
+
+  return d({style:{minHeight:'100vh',background:'#f0f2f5'}},
+    d({style:{background:`linear-gradient(135deg,${ND},${N})`,padding:'0 16px',boxShadow:'0 2px 12px rgba(0,0,0,0.2)'}},
+      d({style:{maxWidth:720,margin:'0 auto',display:'flex',alignItems:'center',justifyContent:'space-between',height:56}},
+        d({style:{display:'flex',alignItems:'center',gap:10}},
+          d({style:{width:34,height:34,borderRadius:10,background:AM,display:'flex',alignItems:'center',justifyContent:'center',fontWeight:900,fontSize:16,color:'#fff'}},'iG'),
+          d(null,
+            d({style:{color:'#fff',fontWeight:800,fontSize:16}},'iGang'),
+            d({style:{color:'#93c5fd',fontSize:10,fontWeight:600}},'Quality Shearing')
+          )
+        ),
+        btn({onClick:()=>{if(admin)setAdmin(false);else{setShowPin(true);setPinErr(false);setPin('');}},
+          style:{padding:'6px 12px',borderRadius:8,fontSize:12,fontWeight:700,background:admin?GNB:'transparent',color:admin?GN:'#93c5fd',border:'none'}},
+          admin?'Admin ON':'Admin')
+      )
+    ),
+    showPin&&d({style:{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:100,padding:20}},
+      d({style:{background:'#fff',borderRadius:16,padding:28,width:'100%',maxWidth:320,textAlign:'center'}},
+        d({style:{fontSize:32,marginBottom:12}},'🔒'),
+        d({style:{fontWeight:700,fontSize:18,marginBottom:6}},'Admin Access'),
+        d({style:{fontSize:13,color:GR,marginBottom:20}},'Enter contractor PIN'),
+        inp({type:'password',value:pin,onChange:ev=>{setPin(ev.target.value);setPinErr(false);},onKeyDown:ev=>{if(ev.key==='Enter')tryUnlock();},placeholder:'PIN',
+          style:{width:'100%',padding:'12px',borderRadius:10,border:`1px solid ${pinErr?RD:BD}`,fontSize:22,textAlign:'center',marginBottom:8,letterSpacing:6}}),
+        pinErr&&d({style:{color:RD,fontSize:13,marginBottom:8}},'Incorrect PIN'),
+        d({style:{display:'flex',gap:8,marginTop:8}},
+          btn({onClick:()=>setShowPin(false),style:{flex:1,padding:'12px',borderRadius:10,border:`1px solid ${BD}`,fontSize:14,fontWeight:600,color:GR}},'Cancel'),
+          btn({onClick:tryUnlock,style:{flex:1,padding:'12px',borderRadius:10,background:N,color:'#fff',fontSize:14,fontWeight:700,border:'none'}},'Unlock')
+        ),
+        d({style:{fontSize:11,color:'#ccc',marginTop:12}},'Demo PIN: 1234')
+      )
+    ),
+    d({style:{maxWidth:720,margin:'0 auto',padding:'16px 12px 40px'}},
+      selJob
+        ?e(JobView,{job:selJob,updateJob:updJob,onBack:()=>setSelId(null),admin})
+        :e(HomeScreen,{jobs,onSelect:setSelId,onAdd:addJob})
+    ),
+    d({style:{background:'rgba(255,255,255,0.9)',borderTop:`1px solid ${BD}`,padding:'8px 16px',textAlign:'center'}},
+      d({style:{fontSize:11,color:'#d1d5db'}},'iGang — Quality Shearing · Powered by Southern Reach Digital')
+    )
+  );
+}
+
+try {
+  createRoot(document.getElementById('root')).render(e(App));
+} catch(err) {
+  document.getElementById('root').innerHTML = '<div style="padding:20px;color:red;font-family:monospace;font-size:14px"><strong>Error:</strong><br>' + err.message + '</div>';
+}
+</script>
+</body>
+</html>
