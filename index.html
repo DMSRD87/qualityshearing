@@ -7,19 +7,22 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=DM+Sans:wght@400;500;600&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
 <style>
-:root{--bg:#0c0e14;--card:#141720;--card2:#1c2030;--border:#252836;--border2:#2e3347;--amber:#f59e0b;--amberD:rgba(245,158,11,.13);--amberB:rgba(245,158,11,.3);--green:#4ade80;--greenD:rgba(74,222,128,.12);--red:#f87171;--redD:rgba(248,113,113,.12);--blue:#60a5fa;--blueD:rgba(96,165,250,.12);--purple:#a78bfa;--purpleD:rgba(167,139,250,.12);--text:#f1f5f9;--muted:#94a3b8;--dim:#475569;--h:'Barlow Condensed',sans-serif;--b:'DM Sans',sans-serif;--m:'JetBrains Mono',monospace;--r:12px}
+:root{--bg:#0c0e14;--card:#141720;--card2:#1c2030;--border:#252836;--border2:#2e3347;--amber:#f59e0b;--amberD:rgba(245,158,11,.13);--amberB:rgba(245,158,11,.3);--green:#4ade80;--greenD:rgba(74,222,128,.12);--red:#f87171;--blue:#60a5fa;--blueD:rgba(96,165,250,.12);--purple:#a78bfa;--purpleD:rgba(167,139,250,.12);--text:#f1f5f9;--muted:#94a3b8;--dim:#475569;--h:'Barlow Condensed',sans-serif;--b:'DM Sans',sans-serif;--m:'JetBrains Mono',monospace;--r:12px}
+.light{--bg:#f2f4f8;--card:#ffffff;--card2:#eceef5;--border:#dde0ea;--border2:#e8eaf2;--text:#1a1e2e;--muted:#64748b;--dim:#94a3b8}
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
-html,body{background:var(--bg);color:var(--text);font-family:var(--b);min-height:100dvh;font-size:15px;overscroll-behavior:none}
+html,body{background:var(--bg);color:var(--text);font-family:var(--b);min-height:100dvh;font-size:15px;overscroll-behavior:none;transition:background .2s,color .2s}
 #root{max-width:480px;margin:0 auto;min-height:100dvh;position:relative}
 .screen{overflow-y:auto;height:calc(100dvh - 58px);padding-bottom:88px}
-.topbar{position:sticky;top:0;z-index:50;height:58px;background:rgba(12,14,20,.97);backdrop-filter:blur(16px);border-bottom:1px solid var(--border);padding:0 14px;display:flex;align-items:center;justify-content:space-between;gap:10px}
+.topbar{position:sticky;top:0;z-index:50;height:58px;background:var(--card);border-bottom:1px solid var(--border);padding:0 12px;display:flex;align-items:center;justify-content:space-between;gap:8px}
 .logo{font-family:var(--h);font-size:24px;font-weight:800;letter-spacing:-.5px;color:var(--amber);line-height:1}
 .logo em{color:var(--text);font-style:normal;opacity:.4;font-weight:500}
 .back-btn{display:flex;align-items:center;gap:5px;font-size:14px;color:var(--muted);cursor:pointer;background:none;border:none;padding:4px 0;flex-shrink:0}
 .back-arr{font-size:18px;line-height:1}
-.back-label{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:130px}
-.role-toggle{display:flex;background:var(--card);border:1px solid var(--border);border-radius:8px;overflow:hidden;flex-shrink:0}
-.rt-btn{padding:5px 8px;font-size:10.5px;font-weight:700;letter-spacing:.3px;text-transform:uppercase;cursor:pointer;border:none;background:none;color:var(--dim);transition:.15s;white-space:nowrap}
+.back-label{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:110px}
+.topbar-r{display:flex;align-items:center;gap:5px;flex-shrink:0}
+.mode-btn{padding:4px 7px;background:none;border:1px solid var(--border);border-radius:6px;color:var(--muted);cursor:pointer;font-size:14px;line-height:1;flex-shrink:0}
+.role-toggle{display:flex;background:var(--card2);border:1px solid var(--border);border-radius:8px;overflow:hidden;flex-shrink:0}
+.rt-btn{padding:5px 7px;font-size:10px;font-weight:700;letter-spacing:.3px;text-transform:uppercase;cursor:pointer;border:none;background:none;color:var(--dim);transition:.15s;white-space:nowrap}
 .rt-btn.active{background:var(--amber);color:#000}
 .fab{position:fixed;bottom:22px;right:calc(50% - 226px);width:52px;height:52px;border-radius:50%;background:var(--amber);border:none;cursor:pointer;font-size:26px;color:#000;font-weight:700;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 24px rgba(245,158,11,.45);z-index:40;transition:transform .15s}
 .fab:active{transform:scale(.91)}
@@ -29,7 +32,7 @@ html,body{background:var(--bg);color:var(--text);font-family:var(--b);min-height
 .wb-title{font-family:var(--h);font-size:11px;font-weight:700;color:var(--amber);letter-spacing:1.2px;text-transform:uppercase}
 .wb-date{font-size:12px;color:var(--dim)}
 .wb-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
-.wb-stat{text-align:center;padding:8px 4px;background:rgba(0,0,0,.22);border-radius:8px}
+.wb-stat{text-align:center;padding:8px 4px;background:rgba(0,0,0,.08);border-radius:8px}
 .wb-num{font-family:var(--h);font-size:26px;font-weight:800;color:var(--text);line-height:1}
 .wb-lbl{font-size:10px;color:var(--muted);margin-top:2px;text-transform:uppercase;letter-spacing:.4px}
 .slbl{font-family:var(--h);font-size:11px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--dim);padding:0 14px;margin:18px 0 8px}
@@ -52,23 +55,25 @@ html,body{background:var(--bg);color:var(--text);font-family:var(--b);min-height
 .jd-sub{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
 .tabs{display:flex;border-bottom:1px solid var(--border);padding:0 14px;position:sticky;top:58px;z-index:40;background:var(--bg);overflow-x:auto;scrollbar-width:none}
 .tabs::-webkit-scrollbar{display:none}
-.tab-btn{padding:10px 14px;font-size:13px;font-weight:600;color:var(--dim);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;transition:.15s;background:none;border-top:none;border-left:none;border-right:none;white-space:nowrap;flex-shrink:0}
+.tab-btn{padding:10px 12px;font-size:13px;font-weight:600;color:var(--dim);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;transition:.15s;background:none;border-top:none;border-left:none;border-right:none;white-space:nowrap;flex-shrink:0}
 .tab-btn.on{color:var(--amber);border-bottom-color:var(--amber)}
-/* TALLY */
-.date-nav{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--border);background:var(--card);position:sticky;top:100px;z-index:35}
-.dn-arr{width:36px;height:36px;border-radius:8px;background:var(--card2);border:1px solid var(--border);color:var(--text);font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1}
-.dn-arr:disabled{opacity:.28;cursor:default}
-.dn-arr:not(:disabled):active{background:var(--border)}
-.dn-center{text-align:center}
-.dn-day{font-family:var(--h);font-size:22px;font-weight:800;line-height:1}
-.dn-date{font-size:12px;color:var(--muted);margin-top:1px}
-.dn-today{display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:700;background:var(--amberD);color:var(--amber);margin-top:3px}
+/* DATE STRIP */
+.date-strip{display:flex;overflow-x:auto;scrollbar-width:none;padding:8px 10px;gap:6px;background:var(--card);border-bottom:1px solid var(--border);position:sticky;top:100px;z-index:35}
+.date-strip::-webkit-scrollbar{display:none}
+.ds-chip{flex-shrink:0;padding:7px 10px;border-radius:9px;cursor:pointer;border:1px solid var(--border);background:var(--card2);text-align:center;min-width:52px;transition:.12s}
+.ds-chip.act{background:var(--amber);border-color:var(--amber)}
+.ds-chip.act .ds-day,.ds-chip.act .ds-num{color:#000}
+.ds-chip.no-data .ds-day,.ds-chip.no-data .ds-num{opacity:.4}
+.ds-day{font-family:var(--h);font-size:14px;font-weight:800;text-transform:uppercase;color:var(--muted);line-height:1}
+.ds-num{font-family:var(--m);font-size:10px;color:var(--dim);margin-top:2px}
+/* DAY TOTALS BAR */
 .day-totals{display:flex;border-bottom:1px solid var(--border)}
 .dt-cell{flex:1;padding:12px 14px;border-right:1px solid var(--border)}
 .dt-cell:last-child{border-right:none}
 .dt-lbl{font-family:var(--h);font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--amber);margin-bottom:3px}
 .dt-val{font-family:var(--h);font-size:32px;font-weight:800;color:var(--text);line-height:1}
-.dt-sub{font-size:12px;color:var(--muted);margin-top:3px}
+.dt-sub{font-size:12px;color:var(--muted);margin-top:3px;font-weight:500}
+/* RUN CARD */
 .run-card{margin:10px 14px 0;background:var(--card);border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
 .run-hdr{display:flex;align-items:center;justify-content:space-between;padding:11px 14px;background:var(--card2);border-bottom:1px solid var(--border)}
 .run-hdr-l{display:flex;align-items:center;gap:10px}
@@ -78,15 +83,19 @@ html,body{background:var(--bg);color:var(--text);font-family:var(--b);min-height
 .run-total-lbl{font-size:11px;color:var(--muted);text-align:right}
 .run-total-val{font-family:var(--h);font-size:22px;font-weight:800;color:var(--amber);line-height:1}
 .run-del{background:none;border:none;color:var(--dim);font-size:22px;cursor:pointer;padding:0 4px;line-height:1}
-.mob-row{padding:10px 14px 0}
+/* MOB ENTRY */
+.mob-entry{padding:10px 14px 0;border-top:1px solid var(--border2)}
+.mob-entry:first-child{border-top:none}
 .mob-type-row{display:flex;align-items:center;gap:8px;margin-bottom:8px}
-.mob-type-btn{padding:5px 12px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;border:1px solid var(--border);background:var(--card2);color:var(--muted);transition:.12s}
+.mob-type-btn{padding:5px 12px;border-radius:6px;font-size:12px;font-weight:700;cursor:default;border:1px solid var(--border);background:var(--card2);color:var(--muted)}
 .mob-type-btn.sh{background:rgba(96,165,250,.15);border-color:rgba(96,165,250,.4);color:var(--blue)}
 .mob-type-btn.cr{background:var(--amberD);border-color:var(--amberB);color:var(--amber)}
 .mob-desc{flex:1;background:none;border:none;border-bottom:1px solid var(--border);padding:4px 0;font-size:13px;color:var(--muted);outline:none;font-family:var(--b)}
 .mob-desc::placeholder{color:var(--border2)}
 .mob-desc:focus{border-bottom-color:var(--amber);color:var(--text)}
-.rate-override-row{display:flex;align-items:center;gap:8px;margin-bottom:6px;padding:4px 0}
+.mob-del-btn{background:none;border:none;color:var(--dim);font-size:16px;cursor:pointer;padding:0 2px;line-height:1;flex-shrink:0}
+.mob-del-btn:active{color:var(--red)}
+.rate-override-row{display:flex;align-items:center;gap:8px;margin-bottom:6px}
 .ro-lbl{font-size:11px;color:var(--dim);flex-shrink:0}
 .ro-inp{width:64px;background:none;border:none;border-bottom:1px solid var(--border);padding:2px 4px;font-family:var(--m);font-size:13px;font-weight:600;color:var(--text);outline:none;-moz-appearance:textfield}
 .ro-inp::-webkit-inner-spin-button,.ro-inp::-webkit-outer-spin-button{-webkit-appearance:none}
@@ -104,17 +113,30 @@ html,body{background:var(--bg);color:var(--text);font-family:var(--b);min-height
 .sh-col-inp::placeholder{color:var(--border2);font-size:18px}
 .sh-col-tot{display:flex;flex-direction:column;align-items:center;min-width:68px;padding:0 6px}
 .sh-col-tot-lbl{font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.4px;margin-bottom:7px;text-align:center}
-.sh-col-tot-val{width:54px;height:54px;background:rgba(0,0,0,.3);border:1px solid var(--border2);border-radius:10px;display:flex;align-items:center;justify-content:center;font-family:var(--m);font-size:20px;font-weight:800;color:var(--amber)}
-.type-toggle-row{display:flex;gap:8px;padding:10px 14px;border-top:1px solid var(--border2)}
-.tt-btn{flex:1;padding:9px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;text-align:center;transition:.12s;border:1px solid var(--border)}
-.tt-sh{background:rgba(96,165,250,.1);color:var(--blue)}
-.tt-cr{background:var(--amberD);color:var(--amber)}
-.tt-sh.active{background:rgba(96,165,250,.25);border-color:rgba(96,165,250,.5)}
-.tt-cr.active{background:rgba(245,158,11,.25);border-color:var(--amberB)}
+.sh-col-tot-val{width:54px;height:54px;background:rgba(0,0,0,.25);border:1px solid var(--border2);border-radius:10px;display:flex;align-items:center;justify-content:center;font-family:var(--m);font-size:20px;font-weight:800;color:var(--amber)}
+/* ADD MOB BUTTONS */
+.add-mob-row{display:flex;gap:8px;padding:8px 14px;border-top:1px solid var(--border2)}
+.amsh{flex:1;padding:8px;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;text-align:center;transition:.12s;background:rgba(96,165,250,.1);border:1px solid rgba(96,165,250,.3);color:var(--blue)}
+.amcr{flex:1;padding:8px;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;text-align:center;transition:.12s;background:var(--amberD);border:1px solid var(--amberB);color:var(--amber)}
+.amsh:active,.amcr:active{opacity:.7}
+/* ADD RUN */
 .add-run-wrap{padding:10px 14px 0}
 .add-run-btn{width:100%;padding:13px;background:none;border:1px dashed var(--border);border-radius:var(--r);color:var(--dim);font-size:14px;font-weight:600;cursor:pointer;transition:.12s;font-family:var(--b)}
 .add-run-btn:active{background:var(--card2)}
 .read-hint{margin:10px 14px 0;padding:9px 12px;background:var(--card2);border:1px solid var(--border);border-radius:8px;font-size:12px;color:var(--dim);text-align:center}
+/* SHEARER TOTALS TABLE */
+.sh-totals{margin:12px 14px 0;background:var(--card);border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
+.sht-hdr{padding:8px 14px;background:var(--card2);border-bottom:1px solid var(--border);font-family:var(--h);font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--dim)}
+.sht-col-hdr-row{display:flex;padding:5px 10px 3px;border-bottom:1px solid var(--border)}
+.sht-nc{flex:0 0 75px;font-size:10px;color:var(--dim);font-weight:700;text-transform:uppercase}
+.sht-ch{flex:1;text-align:center;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;color:var(--muted)}
+.sht-ch.sh{color:var(--blue)}.sht-ch.cr{color:var(--amber)}
+.sht-row{display:flex;align-items:center;padding:8px 10px;border-bottom:1px solid var(--border2)}
+.sht-row:last-child{border-bottom:none}
+.sht-name{flex:0 0 75px;font-size:12px;font-weight:600;color:var(--text)}
+.sht-v{flex:1;text-align:center;font-family:var(--m);font-size:12px;font-weight:600;color:var(--text)}
+.sht-v.today{color:var(--blue)}.sht-v.tot{font-weight:800}.sht-v.nil{color:var(--border2)}
+/* SHED STAFF */
 .shed-section{margin:14px 14px 0;background:var(--card);border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
 .shed-hdr{padding:10px 14px;background:var(--card2);border-bottom:1px solid var(--border);font-family:var(--h);font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted)}
 .role-grp-lbl{padding:8px 14px 4px;font-family:var(--h);font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--amber);background:rgba(245,158,11,.04);border-bottom:1px solid var(--border2)}
@@ -122,6 +144,7 @@ html,body{background:var(--bg);color:var(--text);font-family:var(--b);min-height
 .staff-row:last-child{border-bottom:none}
 .staff-info{flex:1;min-width:0}
 .staff-name{font-weight:600;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.staff-rate-lbl{font-size:11px;color:var(--amber);margin-top:1px}
 .staff-stats{display:flex;align-items:center;gap:10px;flex-shrink:0}
 .s-grp{display:flex;flex-direction:column;align-items:center;gap:1px}
 .s-lbl{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.3px;white-space:nowrap}
@@ -133,6 +156,7 @@ html,body{background:var(--bg);color:var(--text);font-family:var(--b);min-height
 .rs-btn:disabled{opacity:.28;cursor:default}
 .rs-btn:not(:disabled):active{background:var(--border)}
 .rs-val{font-family:var(--m);font-size:16px;font-weight:700;width:28px;text-align:center}
+/* NOTES */
 .notes-wrap{margin:10px 14px 0}
 .notes-lbl{font-family:var(--h);font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--dim);margin-bottom:6px}
 .notes-ta{width:100%;padding:11px 12px;background:var(--card);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:var(--b);font-size:14px;outline:none;resize:none;line-height:1.5}
@@ -144,10 +168,9 @@ html,body{background:var(--bg);color:var(--text);font-family:var(--b);min-height
 .admin-sec-title{font-family:var(--h);font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted)}
 .admin-sec-sub{font-size:11px;color:var(--dim);margin-top:2px}
 .rate-grid{display:grid;grid-template-columns:1fr 1fr;gap:0}
-.rate-cell{padding:12px 14px;border-right:1px solid var(--border);border-bottom:1px solid var(--border);position:relative}
+.rate-cell{padding:12px 14px;border-right:1px solid var(--border);border-bottom:1px solid var(--border)}
 .rate-cell:nth-child(even){border-right:none}
-.rate-cell.last-pair,.rate-cell.last-pair+.rate-cell{border-bottom:none}
-.rate-cell.full{grid-column:span 2;border-right:none;border-bottom:none}
+.rate-cell:nth-last-child(-n+2){border-bottom:none}
 .rate-cell.amber-bg{background:rgba(245,158,11,.06)}
 .rate-lbl{font-size:11px;color:var(--dim);margin-bottom:6px;font-weight:500}
 .rate-lbl.hi{color:var(--amber)}
@@ -162,12 +185,27 @@ html,body{background:var(--bg);color:var(--text);font-family:var(--b);min-height
 .lr-l{display:flex;align-items:center;gap:9px}
 .lr-name{font-weight:600;font-size:14px}
 .lr-role{font-size:12px;color:var(--muted)}
-.lr-r{display:flex;align-items:center;gap:5px}
+.lr-r{display:flex;align-items:center;gap:6px}
 .lr-prefix{font-family:var(--m);font-size:12px;color:var(--dim)}
-.lr-inp{width:72px;background:var(--card2);border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-family:var(--m);font-size:15px;font-weight:700;color:var(--text);text-align:right;outline:none;-moz-appearance:textfield}
+.lr-inp{width:70px;background:var(--card2);border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-family:var(--m);font-size:14px;font-weight:700;color:var(--text);text-align:right;outline:none;-moz-appearance:textfield}
 .lr-inp::-webkit-inner-spin-button,.lr-inp::-webkit-outer-spin-button{-webkit-appearance:none}
 .lr-inp:focus{border-color:var(--amber)}
-.lr-unit{font-size:11px;color:var(--dim)}
+.lr-unit{font-size:11px;color:var(--dim);white-space:nowrap}
+.travel-row{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--border)}
+.travel-row:last-child{border-bottom:none}
+.tr-fields{display:flex;align-items:center;gap:8px}
+.tr-pair{display:flex;align-items:center;gap:3px}
+.tr-inp{width:46px;background:var(--card2);border:1px solid var(--border);border-radius:6px;padding:5px 6px;font-family:var(--m);font-size:14px;font-weight:700;color:var(--text);text-align:right;outline:none;-moz-appearance:textfield}
+.tr-inp::-webkit-inner-spin-button,.tr-inp::-webkit-outer-spin-button{-webkit-appearance:none}
+.tr-inp:focus{border-color:var(--amber)}
+.tr-unit{font-size:11px;color:var(--dim);white-space:nowrap}
+/* SUMMARY TAB */
+.summary-wrap{padding:12px 14px 0}
+.summary-actions{display:flex;gap:8px;margin-bottom:10px}
+.btn-copy{padding:10px 16px;background:var(--amberD);border:1px solid var(--amberB);color:var(--amber);border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--b)}
+.btn-copy:active{opacity:.8}
+.btn-copy.ok{background:var(--greenD);border-color:var(--green);color:var(--green)}
+.summary-pre{background:var(--card);border:1px solid var(--border);border-radius:var(--r);padding:14px;font-family:var(--m);font-size:12px;line-height:1.7;color:var(--text);overflow-x:auto;white-space:pre;word-break:keep-all;margin-bottom:16px}
 /* PROGRESS */
 .prog-wrap{padding:10px 14px}
 .pc{background:var(--card);border:1px solid var(--border);border-radius:var(--r);padding:16px;margin-bottom:10px}
@@ -263,7 +301,6 @@ textarea.fi{resize:none;line-height:1.5}
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script>
 const {useState}=React,e=React.createElement;
-
 /* ════ FARMS ════ */
 const FARMS=[
   {id:'f1',name:'Datsun Station',address:'47 Datsun Road, Burra SA 5417',stands:4,notes:'Electric fencing around yards. Shearers quarters on site — twin share.'},
@@ -271,10 +308,7 @@ const FARMS=[
   {id:'f3',name:'Mitsubishi Downs',address:'88 Mitsubishi Way, Jamestown SA 5491',stands:3,notes:'Gate code 3391. Shearers quarters, BYO linen.'},
   {id:'f4',name:'Lexus Park',address:'203 Lexus Lane, Clare SA 5453',stands:3,notes:'Day trip only — no accommodation required.'},
 ];
-
-/* ════ CREW ════ */
 const CREW=[
-  /* Datsun */
   {id:'ds1',name:'Brady Hargreaves',role:'Shearer',      phone:'0411 222 333',hasVehicle:true},
   {id:'ds2',name:'Jacko Murphy',    role:'Shearer',      phone:'0422 333 444',hasVehicle:false},
   {id:'ds3',name:'Tommy Walsh',     role:'Shearer',      phone:'0433 444 555',hasVehicle:true},
@@ -283,7 +317,6 @@ const CREW=[
   {id:'ds6',name:'Susie Peters',    role:'Wool Handler', phone:'0466 777 888',hasVehicle:false},
   {id:'ds7',name:'Debbie Lane',     role:'Wool Classer', phone:'0477 888 999',hasVehicle:true},
   {id:'ds8',name:'Mick Talbot',     role:'Presser',      phone:'0488 999 000',hasVehicle:true},
-  /* Honda */
   {id:'dh1',name:'Dingo Fraser',    role:'Shearer',      phone:'0411 100 200',hasVehicle:true},
   {id:'dh2',name:'Clarky Reid',     role:'Shearer',      phone:'0422 200 300',hasVehicle:false},
   {id:'dh3',name:'Baz Mitchell',    role:'Shearer',      phone:'0433 300 400',hasVehicle:true},
@@ -291,7 +324,6 @@ const CREW=[
   {id:'dh5',name:'Abbie Nguyen',    role:'Wool Handler', phone:'0455 500 600',hasVehicle:true},
   {id:'dh6',name:'Kylie Turner',    role:'Wool Handler', phone:'0466 600 700',hasVehicle:false},
   {id:'dh7',name:'Pete Barker',     role:'Presser',      phone:'0477 700 800',hasVehicle:true},
-  /* Mitsubishi */
   {id:'dm1',name:'Robbo Denton',    role:'Shearer',      phone:'0411 110 220',hasVehicle:true},
   {id:'dm2',name:'Macca Thompson',  role:'Shearer',      phone:'0422 220 330',hasVehicle:false},
   {id:'dm3',name:'Willo Kerr',      role:'Shearer',      phone:'0433 330 440',hasVehicle:true},
@@ -299,198 +331,170 @@ const CREW=[
   {id:'dm5',name:'Chook Wilson',    role:'Wool Handler', phone:'0455 550 660',hasVehicle:true},
   {id:'dm6',name:'Phil Crawford',   role:'Wool Classer', phone:'0466 660 770',hasVehicle:false},
   {id:'dm7',name:'Jack Ryan',       role:'Presser',      phone:'0477 770 880',hasVehicle:true},
-  /* Lexus */
   {id:'dl1',name:'Cazza Burns',     role:'Shearer',      phone:'0411 010 020',hasVehicle:true},
   {id:'dl2',name:'Johnno Watts',    role:'Shearer',      phone:'0422 020 030',hasVehicle:false},
   {id:'dl3',name:'Spud Lynch',      role:'Shearer',      phone:'0433 030 040',hasVehicle:true},
   {id:'dl4',name:'Mel Hughes',      role:'Wool Handler', phone:'0444 040 050',hasVehicle:false},
   {id:'dl5',name:'Richo Palmer',    role:'Penner',       phone:'0455 050 060',hasVehicle:true},
 ];
-
-/* ════ DATES ════ */
 const D0='2026-03-26',D1='2026-03-27',D2='2026-03-30',D3='2026-03-31';
-
-/* ════ DEFAULT RATES ════ */
-const mkRates=(overrides={})=>({
-  shearingPerHead:4.80, crutchingPerHead:1.55,
-  woolHandlerPerRun:80, classerPerRun:110, pennerPerRun:85,
-  presserPerRun:85, presserPerBale:6.50, baleThreshold:13,
-  crewOverrides:{}, shearerLoadings:{}, ...overrides
-});
-
-/* ════ JOBS ════ */
+/* mkRun: wraps single mob into new multi-mob structure */
+const mkRun=(id,type,desc,counts,ro)=>({id,mobs:[{id:id+'_m1',type,desc,counts,...(ro!=null?{rateOverride:ro}:{})}]});
+const mkRates=(ov={})=>({shearingPerHead:4.80,crutchingPerHead:1.55,woolHandlerPerRun:80,classerPerRun:110,pennerPerRun:85,presserPerRun:85,presserPerBale:6.50,baleThreshold:13,crewOverrides:{},shearerLoadings:{},travelDays:{},travelRate:{},...ov});
 const INIT_JOBS=[
-  /* ── DATSUN (4 days, 4 shearers, target 4500, done ~2904) ── */
-  {
-    id:'j1',jobNumber:'002101',farmId:'f1',type:'Shearing',
-    notes_job:'Full shear — Merino Ewes, CRT and wig. 4 stands. BYO EVOs.',
-    startDate:'2026-03-26',daysAllocated:6,totalSheep:4500,
-    evos:'BYO',crutchingTrailer:false,transport:true,
-    accommodation:'Shearers quarters on property',status:'Active',
+  {id:'j1',jobNumber:'002101',farmId:'f1',type:'Shearing',notes_job:'Full shear — Merino Ewes, CRT and wig. 4 stands. BYO EVOs.',startDate:D0,daysAllocated:6,totalSheep:4500,evos:'BYO',crutchingTrailer:false,transport:true,accommodation:'Shearers quarters on property',status:'Active',
     crew:['ds1','ds2','ds3','ds4','ds5','ds6','ds7','ds8'],
-    rates:mkRates({crewOverrides:{ds5:90,ds7:115}}),
+    rates:mkRates({crewOverrides:{ds5:90,ds7:115},travelDays:{ds1:4,ds2:4,ds3:4,ds4:4,ds5:4,ds6:4,ds7:4,ds8:4},travelRate:{ds1:40,ds2:40,ds3:40,ds4:40,ds5:40,ds6:40,ds7:80,ds8:40}}),
     runs:{
-      [D0]:[
-        {id:'d0r1',type:'Shearing',desc:'Merino Ewes',counts:{ds1:49,ds2:47,ds3:45,ds4:41}},
-        {id:'d0r2',type:'Shearing',desc:'Merino Ewes',counts:{ds1:48,ds2:46,ds3:44,ds4:40}},
-        {id:'d0r3',type:'Shearing',desc:'Merino Ewes',counts:{ds1:50,ds2:47,ds3:46,ds4:42}},
-        {id:'d0r4',type:'Shearing',desc:'Merino Ewes',counts:{ds1:49,ds2:46,ds3:45,ds4:41}},
-      ],
-      [D1]:[
-        {id:'d1r1',type:'Shearing',desc:'Merino Ewes',counts:{ds1:48,ds2:47,ds3:45,ds4:40}},
-        {id:'d1r2',type:'Shearing',desc:'Merino Ewes',counts:{ds1:49,ds2:46,ds3:44,ds4:41}},
-        {id:'d1r3',type:'Shearing',desc:'Merino Ewes',counts:{ds1:50,ds2:48,ds3:46,ds4:42}},
-        {id:'d1r4',type:'Shearing',desc:'Merino Ewes',counts:{ds1:48,ds2:46,ds3:45,ds4:40}},
-      ],
-      [D2]:[
-        {id:'d2r1',type:'Shearing',desc:'Merino Ewes',counts:{ds1:49,ds2:47,ds3:46,ds4:41}},
-        {id:'d2r2',type:'Shearing',desc:'Merino Ewes',counts:{ds1:48,ds2:46,ds3:44,ds4:40}},
-        {id:'d2r3',type:'Shearing',desc:'Merino Ewes',counts:{ds1:50,ds2:47,ds3:45,ds4:42}},
-        {id:'d2r4',type:'Shearing',desc:'Merino Ewes',counts:{ds1:49,ds2:48,ds3:46,ds4:41}},
-      ],
-      [D3]:[
-        {id:'d3r1',type:'Shearing',desc:'Merino Ewes',counts:{ds1:48,ds2:46,ds3:44,ds4:40}},
-        {id:'d3r2',type:'Shearing',desc:'Merino Ewes',counts:{ds1:49,ds2:47,ds3:45,ds4:41}},
-        {id:'d3r3',type:'Shearing',desc:'Merino Ewes',counts:{ds1:50,ds2:48,ds3:46,ds4:42}},
-        {id:'d3r4',type:'Shearing',desc:'Merino Ewes',counts:{ds1:48,ds2:46,ds3:44,ds4:40}},
-      ],
+      [D0]:[mkRun('d0r1','Shearing','Merino Ewes',{ds1:49,ds2:47,ds3:45,ds4:41}),mkRun('d0r2','Shearing','Merino Ewes',{ds1:48,ds2:46,ds3:44,ds4:40}),mkRun('d0r3','Shearing','Merino Ewes',{ds1:50,ds2:47,ds3:46,ds4:42}),mkRun('d0r4','Shearing','Merino Ewes',{ds1:49,ds2:46,ds3:45,ds4:41})],
+      [D1]:[mkRun('d1r1','Shearing','Merino Ewes',{ds1:48,ds2:47,ds3:45,ds4:40}),mkRun('d1r2','Shearing','Merino Ewes',{ds1:49,ds2:46,ds3:44,ds4:41}),mkRun('d1r3','Shearing','Merino Ewes',{ds1:50,ds2:48,ds3:46,ds4:42}),mkRun('d1r4','Shearing','Merino Ewes',{ds1:48,ds2:46,ds3:45,ds4:40})],
+      [D2]:[mkRun('d2r1','Shearing','Merino Ewes',{ds1:49,ds2:47,ds3:46,ds4:41}),mkRun('d2r2','Shearing','Merino Ewes',{ds1:48,ds2:46,ds3:44,ds4:40}),mkRun('d2r3','Shearing','Merino Ewes',{ds1:50,ds2:47,ds3:45,ds4:42}),mkRun('d2r4','Shearing','Merino Ewes',{ds1:49,ds2:48,ds3:46,ds4:41})],
+      [D3]:[mkRun('d3r1','Shearing','Merino Ewes',{ds1:48,ds2:46,ds3:44,ds4:40}),mkRun('d3r2','Shearing','Merino Ewes',{ds1:49,ds2:47,ds3:45,ds4:41}),mkRun('d3r3','Shearing','Merino Ewes',{ds1:50,ds2:48,ds3:46,ds4:42}),mkRun('d3r4','Shearing','Merino Ewes',{ds1:48,ds2:46,ds3:44,ds4:40})],
     },
-    shedTallies:{
-      ds5:{[D0]:4,[D1]:4,[D2]:4,[D3]:4},
-      ds6:{[D0]:4,[D1]:4,[D2]:4,[D3]:4},
-      ds7:{[D0]:4,[D1]:4,[D2]:4,[D3]:4},
-      ds8:{[D0]:4,[D1]:4,[D2]:4,[D3]:4},
-    },
-    baleTallies:{ds8:{[D0]:24,[D1]:25,[D2]:26,[D3]:25}},
-    baleBF:{ds8:0},dayNotes:{[D3]:'Good run today, mob settled well after second run.'},
-  },
-
-  /* ── HONDA (2 days, 4 shearers, target 2400, Abbie shed lead) ── */
-  {
-    id:'j2',jobNumber:'002102',farmId:'f2',type:'Shearing',
-    notes_job:'Full shear — Merino Ewes. Cook on site.',
-    startDate:'2026-03-30',daysAllocated:4,totalSheep:2400,
-    evos:'BYO',crutchingTrailer:false,transport:true,
-    accommodation:'Shearers quarters — cook on site',status:'Active',
+    shedTallies:{ds5:{[D0]:4,[D1]:4,[D2]:4,[D3]:4},ds6:{[D0]:4,[D1]:4,[D2]:4,[D3]:4},ds7:{[D0]:4,[D1]:4,[D2]:4,[D3]:4},ds8:{[D0]:4,[D1]:4,[D2]:4,[D3]:4}},
+    baleTallies:{ds8:{[D0]:24,[D1]:25,[D2]:26,[D3]:25}},baleBF:{ds8:0},dayNotes:{[D3]:'Good run today — mob settled after second run.'}},
+  {id:'j2',jobNumber:'002102',farmId:'f2',type:'Shearing',notes_job:'Full shear — Merino Ewes. Cook on site.',startDate:D2,daysAllocated:4,totalSheep:2400,evos:'BYO',crutchingTrailer:false,transport:true,accommodation:'Shearers quarters — cook on site',status:'Active',
     crew:['dh1','dh2','dh3','dh4','dh5','dh6','dh7'],
-    rates:mkRates({crewOverrides:{dh5:90}}),
+    rates:mkRates({crewOverrides:{dh5:90},travelDays:{dh1:2,dh2:2,dh3:2,dh4:2,dh5:2,dh6:2,dh7:2},travelRate:{dh1:40,dh2:40,dh3:40,dh4:40,dh5:40,dh6:40,dh7:40}}),
     runs:{
-      [D2]:[
-        {id:'h0r1',type:'Shearing',desc:'Merino Ewes',counts:{dh1:52,dh2:50,dh3:48,dh4:46}},
-        {id:'h0r2',type:'Shearing',desc:'Merino Ewes',counts:{dh1:51,dh2:49,dh3:47,dh4:45}},
-        {id:'h0r3',type:'Shearing',desc:'Merino Ewes',counts:{dh1:53,dh2:51,dh3:49,dh4:47}},
-        {id:'h0r4',type:'Shearing',desc:'Merino Ewes',counts:{dh1:52,dh2:50,dh3:48,dh4:46}},
-      ],
-      [D3]:[
-        {id:'h1r1',type:'Shearing',desc:'Merino Ewes',counts:{dh1:52,dh2:50,dh3:48,dh4:46}},
-        {id:'h1r2',type:'Shearing',desc:'Merino Ewes',counts:{dh1:51,dh2:49,dh3:47,dh4:45}},
-        {id:'h1r3',type:'Shearing',desc:'Merino Ewes',counts:{dh1:53,dh2:51,dh3:48,dh4:47}},
-        {id:'h1r4',type:'Shearing',desc:'Merino Ewes',counts:{dh1:52,dh2:50,dh3:48,dh4:46}},
-      ],
+      [D2]:[mkRun('h0r1','Shearing','Merino Ewes',{dh1:52,dh2:50,dh3:48,dh4:46}),mkRun('h0r2','Shearing','Merino Ewes',{dh1:51,dh2:49,dh3:47,dh4:45}),mkRun('h0r3','Shearing','Merino Ewes',{dh1:53,dh2:51,dh3:49,dh4:47}),mkRun('h0r4','Shearing','Merino Ewes',{dh1:52,dh2:50,dh3:48,dh4:46})],
+      [D3]:[mkRun('h1r1','Shearing','Merino Ewes',{dh1:52,dh2:50,dh3:48,dh4:46}),mkRun('h1r2','Shearing','Merino Ewes',{dh1:51,dh2:49,dh3:47,dh4:45}),mkRun('h1r3','Shearing','Merino Ewes',{dh1:53,dh2:51,dh3:48,dh4:47}),mkRun('h1r4','Shearing','Merino Ewes',{dh1:52,dh2:50,dh3:48,dh4:46})],
     },
-    shedTallies:{
-      dh5:{[D2]:4,[D3]:4},
-      dh6:{[D2]:4,[D3]:4},
-      dh7:{[D2]:4,[D3]:4},
-    },
-    baleTallies:{dh7:{[D2]:25,[D3]:25}},
-    baleBF:{dh7:0},dayNotes:{},
-  },
-
-  /* ── MITSUBISHI (4 days, 3 shearers, 70-80/run, 8 bales/run) ── */
-  {
-    id:'j3',jobNumber:'002103',farmId:'f3',type:'Shearing',
-    notes_job:'Full shear — Merino Ewes. Gate code 3391.',
-    startDate:'2026-03-26',daysAllocated:6,totalSheep:5000,
-    evos:'Supplied at shed',crutchingTrailer:false,transport:true,
-    accommodation:'Shearers quarters — BYO linen',status:'Active',
+    shedTallies:{dh5:{[D2]:4,[D3]:4},dh6:{[D2]:4,[D3]:4},dh7:{[D2]:4,[D3]:4}},
+    baleTallies:{dh7:{[D2]:25,[D3]:25}},baleBF:{dh7:0},dayNotes:{}},
+  {id:'j3',jobNumber:'002103',farmId:'f3',type:'Shearing',notes_job:'Full shear — Merino Ewes. Gate code 3391.',startDate:D0,daysAllocated:6,totalSheep:5000,evos:'Supplied at shed',crutchingTrailer:false,transport:true,accommodation:'Shearers quarters — BYO linen',status:'Active',
     crew:['dm1','dm2','dm3','dm4','dm5','dm6','dm7'],
-    rates:mkRates(),
+    rates:mkRates({travelDays:{dm1:4,dm2:4,dm3:4,dm4:4,dm5:4,dm6:4,dm7:4},travelRate:{dm1:40,dm2:40,dm3:40,dm4:40,dm5:40,dm6:80,dm7:40}}),
     runs:{
-      [D0]:[
-        {id:'m0r1',type:'Shearing',desc:'Merino Ewes',counts:{dm1:78,dm2:74,dm3:72}},
-        {id:'m0r2',type:'Shearing',desc:'Merino Ewes',counts:{dm1:77,dm2:75,dm3:71}},
-        {id:'m0r3',type:'Shearing',desc:'Merino Ewes',counts:{dm1:79,dm2:76,dm3:73}},
-        {id:'m0r4',type:'Shearing',desc:'Merino Ewes',counts:{dm1:78,dm2:74,dm3:72}},
-      ],
-      [D1]:[
-        {id:'m1r1',type:'Shearing',desc:'Merino Ewes',counts:{dm1:78,dm2:75,dm3:72}},
-        {id:'m1r2',type:'Shearing',desc:'Merino Ewes',counts:{dm1:77,dm2:74,dm3:71}},
-        {id:'m1r3',type:'Shearing',desc:'Merino Ewes',counts:{dm1:80,dm2:76,dm3:73}},
-        {id:'m1r4',type:'Shearing',desc:'Merino Ewes',counts:{dm1:78,dm2:75,dm3:72}},
-      ],
-      [D2]:[
-        {id:'m2r1',type:'Shearing',desc:'Merino Ewes',counts:{dm1:79,dm2:75,dm3:73}},
-        {id:'m2r2',type:'Shearing',desc:'Merino Ewes',counts:{dm1:77,dm2:74,dm3:71}},
-        {id:'m2r3',type:'Shearing',desc:'Merino Ewes',counts:{dm1:80,dm2:76,dm3:74}},
-        {id:'m2r4',type:'Shearing',desc:'Merino Ewes',counts:{dm1:78,dm2:75,dm3:72}},
-      ],
-      [D3]:[
-        {id:'m3r1',type:'Shearing',desc:'Merino Ewes',counts:{dm1:78,dm2:75,dm3:72}},
-        {id:'m3r2',type:'Shearing',desc:'Merino Ewes',counts:{dm1:77,dm2:74,dm3:71}},
-        {id:'m3r3',type:'Shearing',desc:'Merino Ewes',counts:{dm1:80,dm2:76,dm3:73}},
-        {id:'m3r4',type:'Shearing',desc:'Merino Ewes',counts:{dm1:79,dm2:75,dm3:72}},
-      ],
+      [D0]:[mkRun('m0r1','Shearing','Merino Ewes',{dm1:78,dm2:74,dm3:72}),mkRun('m0r2','Shearing','Merino Ewes',{dm1:77,dm2:75,dm3:71}),mkRun('m0r3','Shearing','Merino Ewes',{dm1:79,dm2:76,dm3:73}),mkRun('m0r4','Shearing','Merino Ewes',{dm1:78,dm2:74,dm3:72})],
+      [D1]:[mkRun('m1r1','Shearing','Merino Ewes',{dm1:78,dm2:75,dm3:72}),mkRun('m1r2','Shearing','Merino Ewes',{dm1:77,dm2:74,dm3:71}),mkRun('m1r3','Shearing','Merino Ewes',{dm1:80,dm2:76,dm3:73}),mkRun('m1r4','Shearing','Merino Ewes',{dm1:78,dm2:75,dm3:72})],
+      [D2]:[mkRun('m2r1','Shearing','Merino Ewes',{dm1:79,dm2:75,dm3:73}),mkRun('m2r2','Shearing','Merino Ewes',{dm1:77,dm2:74,dm3:71}),mkRun('m2r3','Shearing','Merino Ewes',{dm1:80,dm2:76,dm3:74}),mkRun('m2r4','Shearing','Merino Ewes',{dm1:78,dm2:75,dm3:72})],
+      [D3]:[mkRun('m3r1','Shearing','Merino Ewes',{dm1:78,dm2:75,dm3:72}),mkRun('m3r2','Shearing','Merino Ewes',{dm1:77,dm2:74,dm3:71}),mkRun('m3r3','Shearing','Merino Ewes',{dm1:80,dm2:76,dm3:73}),mkRun('m3r4','Shearing','Merino Ewes',{dm1:79,dm2:75,dm3:72})],
     },
-    shedTallies:{
-      dm4:{[D0]:4,[D1]:4,[D2]:4,[D3]:4},
-      dm5:{[D0]:4,[D1]:4,[D2]:4,[D3]:4},
-      dm6:{[D0]:4,[D1]:4,[D2]:4,[D3]:4},
-      dm7:{[D0]:4,[D1]:4,[D2]:4,[D3]:4},
-    },
-    baleTallies:{dm7:{[D0]:32,[D1]:32,[D2]:32,[D3]:32}},
-    baleBF:{dm7:0},dayNotes:{},
-  },
-
-  /* ── LEXUS (today only, 3 runs, crutching ewes+lambs, Completed) ── */
-  {
-    id:'j4',jobNumber:'002100',farmId:'f4',type:'Crutching',
-    notes_job:'Mixed mob — Merino Ewes (full CRT) and Lambs. Day trip.',
-    startDate:'2026-03-31',daysAllocated:1,totalSheep:1900,
-    evos:'Supplied at shed',crutchingTrailer:true,transport:false,
-    accommodation:'Day trip — no accommodation',status:'Completed',
+    shedTallies:{dm4:{[D0]:4,[D1]:4,[D2]:4,[D3]:4},dm5:{[D0]:4,[D1]:4,[D2]:4,[D3]:4},dm6:{[D0]:4,[D1]:4,[D2]:4,[D3]:4},dm7:{[D0]:4,[D1]:4,[D2]:4,[D3]:4}},
+    baleTallies:{dm7:{[D0]:32,[D1]:32,[D2]:32,[D3]:32}},baleBF:{dm7:0},dayNotes:{}},
+  {id:'j4',jobNumber:'002100',farmId:'f4',type:'Crutching',notes_job:'Mixed mob — Merino Ewes (full CRT) and Lambs. Day trip.',startDate:D3,daysAllocated:1,totalSheep:1900,evos:'Supplied at shed',crutchingTrailer:true,transport:false,accommodation:'Day trip — no accommodation',status:'Completed',
     crew:['dl1','dl2','dl3','dl4','dl5'],
-    rates:mkRates({crutchingPerHead:1.50}),
-    runs:{
-      [D3]:[
-        {id:'l0r1',type:'Crutching',desc:'Merino Ewes — Full CRT',rateOverride:1.50,counts:{dl1:215,dl2:212,dl3:208}},
-        {id:'l0r2',type:'Crutching',desc:'Merino Lambs',rateOverride:1.20,counts:{dl1:210,dl2:208,dl3:205}},
-        {id:'l0r3',type:'Crutching',desc:'Merino Ewes — Full CRT',rateOverride:1.50,counts:{dl1:212,dl2:210,dl3:206}},
-      ],
-    },
-    shedTallies:{dl4:{[D3]:3},dl5:{[D3]:3}},
-    baleTallies:{},baleBF:{},dayNotes:{},
-  },
+    rates:mkRates({crutchingPerHead:1.50,travelDays:{dl1:1,dl2:1,dl3:1,dl4:1,dl5:1},travelRate:{dl1:40,dl2:40,dl3:40,dl4:40,dl5:40}}),
+    runs:{[D3]:[mkRun('l0r1','Crutching','Merino Ewes — Full CRT',{dl1:215,dl2:212,dl3:208},1.50),mkRun('l0r2','Crutching','Merino Lambs',{dl1:210,dl2:208,dl3:205},1.20),mkRun('l0r3','Crutching','Merino Ewes — Full CRT',{dl1:212,dl2:210,dl3:206},1.50)]},
+    shedTallies:{dl4:{[D3]:3},dl5:{[D3]:3}},baleTallies:{},baleBF:{},dayNotes:{}},
 ];
-
 /* ════ HELPERS ════ */
 const gf=id=>FARMS.find(f=>f.id===id);
 const gc=id=>CREW.find(c=>c.id===id);
 const AVC=[{bg:'#78350f',fg:'#fbbf24'},{bg:'#14532d',fg:'#4ade80'},{bg:'#1e3a5f',fg:'#60a5fa'},{bg:'#7f1d1d',fg:'#f87171'},{bg:'#3b0764',fg:'#c084fc'},{bg:'#064e3b',fg:'#34d399'},{bg:'#7c2d12',fg:'#fb923c'},{bg:'#581c87',fg:'#e879f9'},{bg:'#0c4a6e',fg:'#38bdf8'},{bg:'#1a2e05',fg:'#a3e635'},{bg:'#431407',fg:'#fdba74'},{bg:'#1e1b4b',fg:'#818cf8'}];
 const avc=n=>AVC[n.charCodeAt(0)%AVC.length];
 const init=n=>n.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+const sn=n=>{const p=n.split(' ');return p[0]+' '+p[p.length-1][0]+'.'};
+const DAY_NAMES=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 function Av({name,size=34}){const c=avc(name);return e('div',{className:'av',style:{width:size,height:size,background:c.bg,color:c.fg,fontSize:size*.38+'px'}},init(name));}
 function Bdg({status}){const m={Active:'b-active',Completed:'b-completed','Charged Out':'b-charged',Dispatched:'b-dispatched'};const d={Active:'● ',Dispatched:'◆ '};return e('span',{className:`badge ${m[status]||'b-active'}`},(d[status]||'')+status);}
 function addDays(d,n){const dt=new Date(d+'T00:00:00');dt.setDate(dt.getDate()+n);return dt.toISOString().split('T')[0];}
 function fmtDate(d){return new Date(d+'T00:00:00').toLocaleDateString('en-AU',{day:'2-digit',month:'2-digit',year:'numeric'}).replace(/\//g,'-');}
 function fmtDateLong(d){return new Date(d+'T00:00:00').toLocaleDateString('en-AU',{weekday:'short',day:'numeric',month:'short'});}
 function jobDates(j){const ds=[];for(let i=0;i<j.daysAllocated;i++)ds.push(addDays(j.startDate,i));return ds;}
-const sn=n=>{const p=n.split(' ');return p[0]+' '+p[p.length-1][0]+'.'};
+const mobsOf=run=>run.mobs||[];
 function calcProg(job){
   const shIds=job.crew.filter(id=>gc(id)?.role==='Shearer');
   let shorn=0,daysWorked=0;
-  Object.entries(job.runs||{}).forEach(([,rs])=>{if(rs&&rs.length){daysWorked++;rs.forEach(r=>{shIds.forEach(id=>{shorn+=r.counts[id]||0;});});}});
+  Object.entries(job.runs||{}).forEach(([,rs])=>{if(rs&&rs.length){daysWorked++;rs.forEach(run=>{mobsOf(run).forEach(mob=>{shIds.forEach(id=>{shorn+=mob.counts[id]||0;});});});}});
   return{shorn,pct:job.totalSheep>0?Math.min(shorn/job.totalSheep*100,100):0,daysWorked,shIds};
 }
-
+function shearerStats(job,viewDate,shIds){
+  const r={};shIds.forEach(id=>{r[id]={shBF:0,shDay:0,crBF:0,crDay:0};});
+  Object.entries(job.runs||{}).forEach(([date,runs])=>{
+    const isBefore=date<viewDate,isToday=date===viewDate;
+    if(!isBefore&&!isToday)return;
+    runs.forEach(run=>{mobsOf(run).forEach(mob=>{shIds.forEach(id=>{const cnt=mob.counts[id]||0;if(!cnt)return;if(mob.type==='Shearing'){if(isBefore)r[id].shBF+=cnt;if(isToday)r[id].shDay+=cnt;}else{if(isBefore)r[id].crBF+=cnt;if(isToday)r[id].crDay+=cnt;}});});});
+  });
+  return r;
+}
+/* PAY SUMMARY GENERATOR */
+function generateSummary(job){
+  const farm=gf(job.farmId);
+  const rates=job.rates||{};
+  const shIds=job.crew.filter(id=>gc(id)?.role==='Shearer');
+  const shedIds=job.crew.filter(id=>gc(id)?.role!=='Shearer');
+  const dash='\u2500'.repeat(50);
+  /* per-shearer earnings from all mobs, handling per-mob rate overrides */
+  const shornBy={};
+  shIds.forEach(id=>{shornBy[id]={sh:0,shEarn:0,cr:0,crEarn:0};});
+  Object.values(job.runs||{}).forEach(dayRuns=>{dayRuns.forEach(run=>{mobsOf(run).forEach(mob=>{const baseRate=mob.rateOverride!=null?mob.rateOverride:(mob.type==='Shearing'?rates.shearingPerHead:rates.crutchingPerHead)||0;shIds.forEach(id=>{const cnt=mob.counts[id]||0;if(!cnt)return;const load=(rates.shearerLoadings||{})[id]||0;if(mob.type==='Shearing'){shornBy[id].sh+=cnt;shornBy[id].shEarn+=cnt*(baseRate+load);}else{shornBy[id].cr+=cnt;shornBy[id].crEarn+=cnt*(baseRate+load);}});});});});
+  const td=rates.travelDays||{};const tr=rates.travelRate||{};
+  const trvl=id=>(td[id]||0)*(tr[id]||0);
+  let totalShEarn=0,totalShedEarn=0,totalTravel=0;
+  const lines=[];
+  lines.push('PAY SUMMARY \u2014 '+(farm?farm.name.toUpperCase():'JOB'));
+  lines.push('Contractor: Murphy Shearing');
+  if(farm)lines.push('Address: '+farm.address+'  |  From: '+job.startDate);
+  lines.push('Status: '+job.status.toUpperCase());
+  lines.push('');lines.push(dash);lines.push('');lines.push('SHEARERS');lines.push(dash);
+  shIds.forEach(id=>{
+    const c=gc(id);if(!c)return;
+    const s=shornBy[id];
+    const shRate=(rates.shearingPerHead||4.80)+((rates.shearerLoadings||{})[id]||0);
+    const crRate=rates.crutchingPerHead||1.55;
+    const travel=trvl(id);
+    const gross=s.shEarn+s.crEarn+travel;
+    totalShEarn+=s.shEarn+s.crEarn;totalTravel+=travel;
+    lines.push('');
+    lines.push(sn(c.name)+' \u2014 '+c.role);
+    if(s.sh>0)lines.push('  Sheep shorn: '+s.sh.toLocaleString()+' head @ $'+shRate.toFixed(2)+' = $'+s.shEarn.toFixed(2));
+    if(s.cr>0)lines.push('  Sheep crutched: '+s.cr.toLocaleString()+' head @ $'+crRate.toFixed(2)+' = $'+s.crEarn.toFixed(2));
+    if(td[id])lines.push('  Travel: '+td[id]+' days x $'+(tr[id]||0).toFixed(2)+'/day = $'+travel.toFixed(2));
+    lines.push('  GROSS TOTAL: $'+gross.toFixed(2));
+  });
+  lines.push('');lines.push(dash);lines.push('');lines.push('SHED STAFF');lines.push(dash);
+  shedIds.forEach(id=>{
+    const c=gc(id);if(!c)return;
+    const override=(rates.crewOverrides||{})[id];
+    const defRate=c.role==='Wool Classer'?rates.classerPerRun:c.role==='Penner'?rates.pennerPerRun:c.role==='Presser'?rates.presserPerRun:rates.woolHandlerPerRun;
+    const ratePerRun=override||defRate||80;
+    const totalRuns=Object.values(job.shedTallies[id]||{}).reduce((a,b)=>a+b,0);
+    const travel=trvl(id);
+    let earn=0,earnLine='';
+    if(c.role==='Presser'){
+      let rEarn=0,bEarn=0;
+      Object.entries(job.shedTallies[id]||{}).forEach(([date,runs])=>{
+        const bales=(job.baleTallies[id]||{})[date]||0;
+        if(bales>(rates.baleThreshold||13)){bEarn+=bales*(rates.presserPerBale||6.50);}
+        else{rEarn+=runs*ratePerRun;}
+      });
+      earn=rEarn+bEarn;
+      const totalBales=Object.values(job.baleTallies[id]||{}).reduce((a,b)=>a+b,0)+(job.baleBF[id]||0);
+      if(bEarn>0&&rEarn>0){earnLine='  '+totalRuns+' runs @ $'+ratePerRun.toFixed(2)+'/run = $'+rEarn.toFixed(2)+'\n  '+totalBales+' bales @ $'+(rates.presserPerBale||6.50).toFixed(2)+'/bale = $'+bEarn.toFixed(2);}
+      else if(bEarn>0){earnLine='  '+totalBales+' bales @ $'+(rates.presserPerBale||6.50).toFixed(2)+'/bale = $'+earn.toFixed(2);}
+      else{earnLine='  '+totalRuns+' runs @ $'+ratePerRun.toFixed(2)+'/run = $'+earn.toFixed(2);}
+    }else{earn=totalRuns*ratePerRun;earnLine='  '+totalRuns+' runs @ $'+ratePerRun.toFixed(2)+'/run = $'+earn.toFixed(2);}
+    const gross=earn+travel;
+    totalShedEarn+=earn;totalTravel+=travel;
+    lines.push('');
+    lines.push(sn(c.name)+' \u2014 '+c.role);
+    lines.push(earnLine);
+    if(td[id])lines.push('  Travel: '+td[id]+' days x $'+(tr[id]||0).toFixed(2)+'/day = $'+travel.toFixed(2));
+    lines.push('  GROSS TOTAL: $'+gross.toFixed(2));
+  });
+  const totalShorn=shIds.reduce((s,id)=>s+(shornBy[id].sh+shornBy[id].cr),0);
+  const jobTotal=totalShEarn+totalShedEarn+totalTravel;
+  lines.push('');lines.push(dash);lines.push('');lines.push('CONTRACTOR TOTALS');lines.push(dash);lines.push('');
+  lines.push('Total sheep: '+totalShorn.toLocaleString());
+  lines.push('Shearer wages:    $'+totalShEarn.toFixed(2));
+  lines.push('Shed staff wages: $'+totalShedEarn.toFixed(2));
+  lines.push('Travel:           $'+totalTravel.toFixed(2));
+  lines.push('');
+  lines.push('JOB TOTAL:        $'+jobTotal.toFixed(2));
+  return lines.join('\n');
+}
 /* ════ TOP BAR ════ */
-function TopBar({role,setRole,onBack,backLabel}){
+function TopBar({role,setRole,onBack,backLabel,dark,toggleDark}){
   return e('div',{className:'topbar'},
     onBack?e('button',{className:'back-btn',onClick:onBack},e('span',{className:'back-arr'},'←'),e('span',{className:'back-label'},backLabel||'Back')):e('div',{className:'logo'},'i',e('em',null,'Gang')),
-    e('div',{className:'role-toggle'},[['👁','View','read_only'],['📋','Lead','shed_lead'],['🔑','Admin','admin']].map(([ic,lbl,rv])=>e('button',{key:rv,className:`rt-btn${role===rv?' active':''}`,onClick:()=>setRole(rv)},`${ic} ${lbl}`)))
+    e('div',{className:'topbar-r'},
+      e('button',{className:'mode-btn',onClick:toggleDark},dark?'☀️':'🌙'),
+      e('div',{className:'role-toggle'},[['👁','View','read_only'],['📋','Lead','shed_lead'],['🔑','Admin','admin']].map(([ic,lbl,rv])=>e('button',{key:rv,className:`rt-btn${role===rv?' active':''}`,onClick:()=>setRole(rv)},`${ic} ${lbl}`)))
+    )
   );
 }
-
 /* ════ WEEK BANNER ════ */
 function WeekBanner({jobs}){
   const active=jobs.filter(j=>j.status==='Active');
@@ -503,7 +507,6 @@ function WeekBanner({jobs}){
     e('div',{className:'wb-stats'},e('div',{className:'wb-stat'},e('div',{className:'wb-num'},active.length),e('div',{className:'wb-lbl'},'Active')),e('div',{className:'wb-stat'},e('div',{className:'wb-num'},jobs.filter(j=>j.status==='Completed').length),e('div',{className:'wb-lbl'},'Done')),e('div',{className:'wb-stat'},e('div',{className:'wb-num'},crew),e('div',{className:'wb-lbl'},'Crew Out')),e('div',{className:'wb-stat'},e('div',{className:'wb-num'},total-shorn>0?(total-shorn).toLocaleString():'✓'),e('div',{className:'wb-lbl'},'Remaining')))
   );
 }
-
 /* ════ JOB LIST CARD ════ */
 function JLC({job,onClick}){
   const farm=gf(job.farmId),p=calcProg(job);
@@ -516,82 +519,122 @@ function JLC({job,onClick}){
     job.status==='Completed'&&e('div',{style:{fontSize:'12px',color:'var(--blue)',marginTop:'6px'}},'✓ '+p.shorn.toLocaleString()+' '+(job.type==='Crutching'?'crutched':'shorn'))
   );
 }
-
 /* ════════════════════════════════
    TALLY TAB
 ════════════════════════════════ */
 function TallyTab({job,setJob,role,viewDate,setViewDate}){
   const canEdit=role==='shed_lead'||role==='admin';
   const isAdmin=role==='admin';
-  const dates=jobDates(job),dIdx=dates.indexOf(viewDate);
+  const dates=jobDates(job);
   const todayStr=new Date().toISOString().split('T')[0];
   const dayRuns=(job.runs||{})[viewDate]||[];
   const shearers=job.crew.filter(id=>gc(id)?.role==='Shearer');
   const shedStaff=job.crew.filter(id=>{const c=gc(id);return c&&(c.role==='Wool Handler'||c.role==='Wool Classer'||c.role==='Penner');});
   const pressers=job.crew.filter(id=>gc(id)?.role==='Presser');
-  const runTot=run=>shearers.reduce((s,id)=>s+(run.counts[id]||0),0);
+  const rates=job.rates||{};
+  const mobRunTot=(mob)=>shearers.reduce((s,id)=>s+(mob.counts[id]||0),0);
+  const runTot=(run)=>mobsOf(run).reduce((s,mob)=>s+mobRunTot(mob),0);
   const dayGrand=dayRuns.reduce((s,r)=>s+runTot(r),0);
   const jobTotal=calcProg(job).shorn;
-  const dayLabel=new Date(viewDate+'T00:00:00').toLocaleDateString('en-AU',{weekday:'short'}).toUpperCase()+' '+String(new Date(viewDate+'T00:00:00').getDate()).padStart(2,'0')+'/'+String(new Date(viewDate+'T00:00:00').getMonth()+1).padStart(2,'0');
+  const dtLbl=new Date(viewDate+'T00:00:00').toLocaleDateString('en-AU',{weekday:'short'}).toUpperCase()+' '+String(new Date(viewDate+'T00:00:00').getDate()).padStart(2,'0')+'/'+String(new Date(viewDate+'T00:00:00').getMonth()+1).padStart(2,'0');
   const setRuns=fn=>setJob(prev=>({...prev,runs:{...prev.runs,[viewDate]:fn((prev.runs||{})[viewDate]||[])}}));
-  const addRun=()=>setRuns(r=>[...r,{id:'r'+Date.now(),type:'Shearing',desc:'',counts:{}}]);
+  const addRun=()=>setRuns(r=>[...r,{id:'r'+Date.now(),mobs:[{id:'m'+Date.now(),type:'Shearing',desc:'',counts:{}}]}]);
   const delRun=rid=>setRuns(r=>r.filter(x=>x.id!==rid));
-  const setDesc=(rid,v)=>setRuns(r=>r.map(x=>x.id===rid?{...x,desc:v}:x));
-  const setType=(rid,t)=>setRuns(r=>r.map(x=>x.id===rid?{...x,type:t}:x));
-  const setRunRate=(rid,v)=>setRuns(r=>r.map(x=>x.id===rid?{...x,rateOverride:v===''?null:parseFloat(v)||null}:x));
-  const setCnt=(rid,cid,v)=>setRuns(r=>r.map(x=>x.id===rid?{...x,counts:{...x.counts,[cid]:parseInt(v)||0}}:x));
+  const addMob=(rid,type)=>setRuns(r=>r.map(run=>run.id===rid?{...run,mobs:[...mobsOf(run),{id:'m'+Date.now(),type,desc:'',counts:{}}]}:run));
+  const delMob=(rid,mid)=>setRuns(r=>r.map(run=>run.id===rid?{...run,mobs:mobsOf(run).filter(m=>m.id!==mid)}:run));
+  const setMobDesc=(rid,mid,v)=>setRuns(r=>r.map(run=>run.id===rid?{...run,mobs:mobsOf(run).map(m=>m.id===mid?{...m,desc:v}:m)}:run));
+  const setMobType=(rid,mid,t)=>setRuns(r=>r.map(run=>run.id===rid?{...run,mobs:mobsOf(run).map(m=>m.id===mid?{...m,type:t}:m)}:run));
+  const setMobRate=(rid,mid,v)=>setRuns(r=>r.map(run=>run.id===rid?{...run,mobs:mobsOf(run).map(m=>m.id===mid?{...m,rateOverride:v===''?null:parseFloat(v)||null}:m)}:run));
+  const setMobCnt=(rid,mid,cid,v)=>setRuns(r=>r.map(run=>run.id===rid?{...run,mobs:mobsOf(run).map(m=>m.id===mid?{...m,counts:{...m.counts,[cid]:parseInt(v)||0}}:m)}:run));
   const setShed=(cid,v)=>setJob(prev=>({...prev,shedTallies:{...prev.shedTallies,[cid]:{...(prev.shedTallies[cid]||{}),[viewDate]:Math.max(0,v)}}}));
   const setBale=(cid,v)=>setJob(prev=>({...prev,baleTallies:{...prev.baleTallies,[cid]:{...(prev.baleTallies[cid]||{}),[viewDate]:Math.max(0,v)}}}));
   const baleTot=id=>Object.values(job.baleTallies[id]||{}).reduce((a,b)=>a+b,0);
   const setNote=v=>setJob(prev=>({...prev,dayNotes:{...prev.dayNotes,[viewDate]:v}}));
-  const rates=job.rates||{};
-  const effRate=run=>run.rateOverride!=null?run.rateOverride:(run.type==='Shearing'?rates.shearingPerHead:rates.crutchingPerHead)||0;
   const roleGroups=[{lbl:'WOOL HANDLER',ids:shedStaff.filter(id=>gc(id)?.role==='Wool Handler')},{lbl:'CLASSER',ids:shedStaff.filter(id=>gc(id)?.role==='Wool Classer')},{lbl:'PENNER',ids:shedStaff.filter(id=>gc(id)?.role==='Penner')}].filter(g=>g.ids.length>0);
+  const hasCrutch=Object.values(job.runs||{}).flat().some(run=>mobsOf(run).some(m=>m.type==='Crutching'));
+  const stats=shearerStats(job,viewDate,shearers);
 
   return e('div',null,
-    e('div',{className:'date-nav'},
-      e('button',{className:'dn-arr',disabled:dIdx<=0,onClick:()=>setViewDate(dates[dIdx-1])},'‹'),
-      e('div',{className:'dn-center'},e('div',{className:'dn-day'},'Day '+(dIdx+1)),e('div',{className:'dn-date'},fmtDateLong(viewDate)),viewDate===todayStr&&e('span',{className:'dn-today'},'TODAY')),
-      e('button',{className:'dn-arr',disabled:dIdx>=dates.length-1,onClick:()=>setViewDate(dates[dIdx+1])},'›')
+    /* DATE STRIP */
+    e('div',{className:'date-strip'},
+      dates.map(date=>{
+        const dt=new Date(date+'T00:00:00');
+        const hasData=(job.runs||{})[date]&&(job.runs[date].length>0);
+        return e('div',{key:date,className:`ds-chip${date===viewDate?' act':''}${!hasData?' no-data':''}`,onClick:()=>setViewDate(date)},
+          e('div',{className:'ds-day'},DAY_NAMES[dt.getDay()]),
+          e('div',{className:'ds-num'},String(dt.getDate()).padStart(2,'0')+'/'+String(dt.getMonth()+1).padStart(2,'0'))
+        );
+      })
     ),
+    /* DAY TOTALS */
     e('div',{className:'day-totals'},
-      e('div',{className:'dt-cell'},e('div',{className:'dt-lbl'},(job.type==='Crutching'?'Crutching ':'Shearing ')+dayLabel),e('div',{className:'dt-val'},dayGrand>0?dayGrand.toLocaleString():'—')),
+      e('div',{className:'dt-cell'},e('div',{className:'dt-lbl'},(job.type==='Crutching'?'Crutching ':'Shearing ')+dtLbl),e('div',{className:'dt-val'},dayGrand>0?dayGrand.toLocaleString():'—')),
       e('div',{className:'dt-cell'},e('div',{className:'dt-lbl'},'Shed Totals'),e('div',{className:'dt-sub'},e('span',{style:{fontWeight:600}},'Shorn: '),e('span',{style:{fontFamily:'var(--m)',fontSize:'15px',fontWeight:700,color:'var(--muted)'}},jobTotal.toLocaleString())))
     ),
     !canEdit&&e('div',{className:'read-hint'},'👁 View only — shed lead or admin can edit tallies'),
-    /* Run cards */
+    /* RUN CARDS */
     dayRuns.map((run,ri)=>{
-      const rt=runTot(run),eff=effRate(run);
+      const rt=runTot(run);
       return e('div',{key:run.id,className:'run-card'},
         e('div',{className:'run-hdr'},
           e('div',{className:'run-hdr-l'},e('div',{className:'run-num'},ri+1),e('div',null,e('div',{className:'run-title'},'Run '+(ri+1)))),
           e('div',{className:'run-hdr-r'},e('div',null,e('div',{className:'run-total-lbl'},'Run total'),e('div',{className:'run-total-val'},rt>0?rt:'—')),canEdit&&e('button',{className:'run-del',onClick:()=>delRun(run.id)},'×'))
         ),
-        e('div',{className:'mob-row'},
-          e('div',{className:'mob-type-row'},
-            e('span',{className:`mob-type-btn${run.type==='Shearing'?' sh':' cr'}`},run.type),
-            e('input',{className:'mob-desc',placeholder:'Mob description (e.g. Merino Ewes / Wethers + wig)',value:run.desc||'',disabled:!canEdit,onChange:ev=>setDesc(run.id,ev.target.value)})
-          ),
-          isAdmin&&e('div',{className:'rate-override-row'},
-            e('span',{className:'ro-lbl'},'Rate override $/head:'),
-            e('input',{type:'number',className:'ro-inp',placeholder:(run.type==='Shearing'?rates.shearingPerHead:rates.crutchingPerHead)||'',value:run.rateOverride!=null?run.rateOverride:'',onChange:ev=>setRunRate(run.id,ev.target.value),step:'0.05'}),
-            eff&&e('span',{className:'ro-eff'},'Effective: $'+eff.toFixed(2)+'/head')
-          ),
-          e('div',{className:'sh-grid'},
-            e('div',{className:'sh-grid-inner'},
-              shearers.map(id=>{const c=gc(id);if(!c)return null;return e('div',{key:id,className:'sh-col'},e('div',{className:'sh-col-name'},sn(c.name)),e('input',{type:'number',className:'sh-col-inp',placeholder:'—',value:run.counts[id]||'',disabled:!canEdit,inputMode:'numeric',onChange:ev=>setCnt(run.id,id,ev.target.value),onFocus:ev=>ev.target.select()}));}),
-              e('div',{className:'sh-col-tot'},e('div',{className:'sh-col-tot-lbl'},'Mob\nTotal'),e('div',{className:'sh-col-tot-val'},rt>0?rt:'—'))
+        mobsOf(run).map((mob,mi)=>{
+          const mt=mobRunTot(mob);
+          const effRate=mob.rateOverride!=null?mob.rateOverride:(mob.type==='Shearing'?rates.shearingPerHead:rates.crutchingPerHead)||0;
+          return e('div',{key:mob.id,className:'mob-entry'},
+            e('div',{className:'mob-type-row'},
+              e('span',{className:`mob-type-btn${mob.type==='Shearing'?' sh':' cr'}`},mob.type),
+              e('input',{className:'mob-desc',placeholder:'Mob description (e.g. Merino Ewes / Lambs + wig)',value:mob.desc||'',disabled:!canEdit,onChange:ev=>setMobDesc(run.id,mob.id,ev.target.value)}),
+              canEdit&&mobsOf(run).length>1&&e('button',{className:'mob-del-btn',onClick:()=>delMob(run.id,mob.id)},'✕')
+            ),
+            isAdmin&&e('div',{className:'rate-override-row'},
+              e('span',{className:'ro-lbl'},'Rate override $/head:'),
+              e('input',{type:'number',className:'ro-inp',placeholder:String(effRate||''),value:mob.rateOverride!=null?mob.rateOverride:'',onChange:ev=>setMobRate(run.id,mob.id,ev.target.value),step:'0.05'}),
+              e('span',{className:'ro-eff'},'Effective: $'+effRate.toFixed(2)+'/head')
+            ),
+            e('div',{className:'sh-grid'},
+              e('div',{className:'sh-grid-inner'},
+                shearers.map(id=>{const c=gc(id);if(!c)return null;return e('div',{key:id,className:'sh-col'},e('div',{className:'sh-col-name'},sn(c.name)),e('input',{type:'number',className:'sh-col-inp',placeholder:'—',value:mob.counts[id]||'',disabled:!canEdit,inputMode:'numeric',onChange:ev=>setMobCnt(run.id,mob.id,id,ev.target.value),onFocus:ev=>ev.target.select()}));}),
+                e('div',{className:'sh-col-tot'},e('div',{className:'sh-col-tot-lbl'},'Mob\nTotal'),e('div',{className:'sh-col-tot-val'},mt>0?mt:'—'))
+              )
             )
-          )
-        ),
-        canEdit&&e('div',{className:'type-toggle-row'},
-          e('button',{className:`tt-btn tt-sh${run.type==='Shearing'?' active':''}`,onClick:()=>setType(run.id,'Shearing')},'Shearing'),
-          e('button',{className:`tt-btn tt-cr${run.type==='Crutching'?' active':''}`,onClick:()=>setType(run.id,'Crutching')},'Crutching')
+          );
+        }),
+        canEdit&&e('div',{className:'add-mob-row'},
+          e('button',{className:'amsh',onClick:()=>addMob(run.id,'Shearing')},'+ Shearing'),
+          e('button',{className:'amcr',onClick:()=>addMob(run.id,'Crutching')},'+ Crutching')
         )
       );
     }),
     canEdit&&e('div',{className:'add-run-wrap'},e('button',{className:'add-run-btn',onClick:addRun},'+ Add Run')),
-    /* Shed staff */
+    /* SHEARER TOTALS TABLE */
+    shearers.length>0&&e('div',{className:'sh-totals'},
+      e('div',{className:'sht-hdr'},'\u2014 BF / DAY / TO DATE'),
+      e('div',{className:'sht-col-hdr-row'},
+        e('div',{className:'sht-nc'},''),
+        e('div',{className:'sht-ch sh'},'SH BF'),
+        e('div',{className:'sht-ch sh'},'SH Day'),
+        e('div',{className:'sht-ch sh'},'SH Tot'),
+        hasCrutch&&e('div',{className:'sht-ch cr'},'CR BF'),
+        hasCrutch&&e('div',{className:'sht-ch cr'},'CR Day'),
+        hasCrutch&&e('div',{className:'sht-ch cr'},'CR Tot'),
+      ),
+      shearers.map(id=>{
+        const c=gc(id);if(!c)return null;
+        const s=stats[id]||{shBF:0,shDay:0,crBF:0,crDay:0};
+        const V=(val,cls)=>e('div',{className:`sht-v${cls?' '+cls:''}`},val>0?val:'—');
+        return e('div',{key:id,className:'sht-row'},
+          e('div',{className:'sht-name'},sn(c.name)),
+          V(s.shBF),V(s.shDay,'today'),V(s.shBF+s.shDay,'tot'),
+          hasCrutch&&V(s.crBF),
+          hasCrutch&&V(s.crDay,'today'),
+          hasCrutch&&V(s.crBF+s.crDay,'tot'),
+        );
+      })
+    ),
+    /* SHED STAFF */
     (shedStaff.length>0||pressers.length>0)&&e('div',{className:'shed-section'},
       e('div',{className:'shed-hdr'},'Shed Staff'),
       roleGroups.map(({lbl,ids})=>e('div',{key:lbl},
@@ -601,11 +644,12 @@ function TallyTab({job,setJob,role,viewDate,setViewDate}){
           const runs=(job.shedTallies[id]||{})[viewDate]||0;
           const allRuns=Object.values(job.shedTallies[id]||{}).reduce((a,b)=>a+b,0);
           const bf=allRuns-runs;
-          const override=rates.crewOverrides&&rates.crewOverrides[id];
-          const rateDisplay=override||(lbl==='CLASSER'?rates.classerPerRun:lbl==='PENNER'?rates.pennerPerRun:rates.woolHandlerPerRun)||80;
+          const override=(rates.crewOverrides||{})[id];
+          const defR=lbl==='CLASSER'?rates.classerPerRun:lbl==='PENNER'?rates.pennerPerRun:rates.woolHandlerPerRun;
+          const rateDisp=override||(defR||80);
           return e('div',{key:id,className:'staff-row'},
             e(Av,{name:c.name,size:34}),
-            e('div',{className:'staff-info'},e('div',{className:'staff-name'},c.name),isAdmin&&e('div',{style:{fontSize:'11px',color:'var(--amber)',marginTop:'1px'}},`$${rateDisplay}/run`)),
+            e('div',{className:'staff-info'},e('div',{className:'staff-name'},c.name),isAdmin&&e('div',{className:'staff-rate-lbl'},'$'+rateDisp+'/run')),
             e('div',{className:'staff-stats'},
               e('div',{className:'s-grp'},e('div',{className:'s-lbl'},'Runs'),canEdit?e('div',{className:'rs'},e('button',{className:'rs-btn',disabled:runs<=0,onClick:()=>setShed(id,runs-1)},'−'),e('div',{className:'rs-val'},runs),e('button',{className:'rs-btn',onClick:()=>setShed(id,runs+1)},'+'))
                 :e('div',{className:'s-val'},runs)),
@@ -626,10 +670,9 @@ function TallyTab({job,setJob,role,viewDate,setViewDate}){
           const bf=job.baleBF[id]||0;
           const toDate=bf+baleTot(id);
           const allRuns=Object.values(job.shedTallies[id]||{}).reduce((a,b)=>a+b,0);
-          const bfRuns=allRuns-runs;
           return e('div',{key:id,className:'staff-row',style:{flexWrap:'wrap',rowGap:'8px'}},
             e(Av,{name:c.name,size:34}),
-            e('div',{className:'staff-info'},e('div',{className:'staff-name'},c.name),isAdmin&&e('div',{style:{fontSize:'11px',color:'var(--amber)',marginTop:'1px'}},'$'+(rates.presserPerRun||85)+'/run · $'+(rates.presserPerBale||6.50)+'/bale >'+rates.baleThreshold+'bales')),
+            e('div',{className:'staff-info'},e('div',{className:'staff-name'},c.name),isAdmin&&e('div',{className:'staff-rate-lbl'},'$'+(rates.presserPerRun||85)+'/run · $'+(rates.presserPerBale||6.50)+'/bale >'+rates.baleThreshold)),
             e('div',{className:'staff-stats',style:{flexWrap:'wrap',rowGap:'6px'}},
               e('div',{className:'s-grp'},e('div',{className:'s-lbl'},'Runs'),canEdit?e('div',{className:'rs'},e('button',{className:'rs-btn',disabled:runs<=0,onClick:()=>setShed(id,runs-1)},'−'),e('div',{className:'rs-val'},runs),e('button',{className:'rs-btn',onClick:()=>setShed(id,runs+1)},'+'))
                 :e('div',{className:'s-val'},runs)),
@@ -652,84 +695,66 @@ function TallyTab({job,setJob,role,viewDate,setViewDate}){
     e('div',{style:{height:16}})
   );
 }
-
-/* ════════════════════════════════
-   ADMIN TAB
-════════════════════════════════ */
+/* ════ SUMMARY TAB ════ */
+function SummaryTab({job}){
+  const [copied,setCopied]=useState(false);
+  const text=generateSummary(job);
+  const copy=()=>{navigator.clipboard.writeText(text).then(()=>{setCopied(true);setTimeout(()=>setCopied(false),2000);}).catch(()=>{});};
+  return e('div',{className:'summary-wrap'},
+    e('div',{className:'summary-actions'},e('button',{className:`btn-copy${copied?' ok':''}`,onClick:copy},copied?'✓ Copied to clipboard':'📋 Copy Pay Summary')),
+    e('pre',{className:'summary-pre'},text)
+  );
+}
+/* ════ ADMIN TAB ════ */
 function AdminTab({job,setJob}){
   const rates=job.rates||{};
   const setRate=(k,v)=>setJob(prev=>({...prev,rates:{...prev.rates,[k]:parseFloat(v)||0}}));
   const setOverride=(cid,v)=>setJob(prev=>({...prev,rates:{...prev.rates,crewOverrides:{...(prev.rates.crewOverrides||{}),[cid]:parseFloat(v)||0}}}));
   const setLoading=(cid,v)=>setJob(prev=>({...prev,rates:{...prev.rates,shearerLoadings:{...(prev.rates.shearerLoadings||{}),[cid]:parseFloat(v)||0}}}));
+  const setTravelDays=(cid,v)=>setJob(prev=>({...prev,rates:{...prev.rates,travelDays:{...(prev.rates.travelDays||{}),[cid]:parseInt(v)||0}}}));
+  const setTravelRate=(cid,v)=>setJob(prev=>({...prev,rates:{...prev.rates,travelRate:{...(prev.rates.travelRate||{}),[cid]:parseFloat(v)||0}}}));
   const shearers=job.crew.filter(id=>gc(id)?.role==='Shearer');
-  const shedStaff=job.crew.filter(id=>{const c=gc(id);return c&&c.role!=='Shearer';});
+  const shedStaff=job.crew.filter(id=>gc(id)?.role!=='Shearer');
   const RCell=({lbl,k,hi,prefix})=>e('div',{className:`rate-cell${hi?' amber-bg':''}`},
     e('div',{className:`rate-lbl${hi?' hi':''}`},lbl),
     e('div',{className:'rate-inp-row'},prefix&&e('span',{className:'rate-prefix'},prefix),e('input',{type:'number',className:`rate-inp${hi?' hi':''}`,value:rates[k]||'',step:'0.05',onChange:ev=>setRate(k,ev.target.value)}))
   );
   return e('div',{className:'admin-wrap'},
-    /* Shearer base rates */
     e('div',{className:'admin-section'},
       e('div',{className:'admin-sec-hdr'},e('div',{className:'admin-sec-title'},'Shearer Base Rates')),
-      e('div',{className:'rate-grid'},
-        e(RCell,{lbl:'Shearing $/head',k:'shearingPerHead',prefix:'$'}),
-        e(RCell,{lbl:'Crutching $/head',k:'crutchingPerHead',prefix:'$'}),
-      )
+      e('div',{className:'rate-grid'},e(RCell,{lbl:'Shearing $/head',k:'shearingPerHead',prefix:'$'}),e(RCell,{lbl:'Crutching $/head',k:'crutchingPerHead',prefix:'$'}))
     ),
-    /* Shed staff rates */
     e('div',{className:'admin-section'},
       e('div',{className:'admin-sec-hdr'},e('div',{className:'admin-sec-title'},'Shed Staff Rates'),e('div',{className:'admin-sec-sub'},'Per run. Presser switches to per-bale if daily bales exceed threshold.')),
-      e('div',{className:'rate-grid'},
-        e(RCell,{lbl:'Wool Handler',k:'woolHandlerPerRun',prefix:'$'}),
-        e(RCell,{lbl:'Classer',k:'classerPerRun',prefix:'$'}),
-        e(RCell,{lbl:'Penner',k:'pennerPerRun',prefix:'$'}),
-        e(RCell,{lbl:'Presser (per run)',k:'presserPerRun',prefix:'$'}),
-        e(RCell,{lbl:'Presser $/bale',k:'presserPerBale',prefix:'$',hi:true}),
-        e(RCell,{lbl:'Bale threshold/day',k:'baleThreshold',hi:true}),
-      )
+      e('div',{className:'rate-grid'},e(RCell,{lbl:'Wool Handler',k:'woolHandlerPerRun',prefix:'$'}),e(RCell,{lbl:'Classer',k:'classerPerRun',prefix:'$'}),e(RCell,{lbl:'Penner',k:'pennerPerRun',prefix:'$'}),e(RCell,{lbl:'Presser (per run)',k:'presserPerRun',prefix:'$'}),e(RCell,{lbl:'Presser $/bale',k:'presserPerBale',prefix:'$',hi:true}),e(RCell,{lbl:'Bale threshold/day',k:'baleThreshold',hi:true}))
     ),
-    /* Per-person overrides (shed staff with non-default rates) */
     shedStaff.length>0&&e('div',{className:'admin-section'},
-      e('div',{className:'admin-sec-hdr'},e('div',{className:'admin-sec-title'},'Per Person Rate Overrides'),e('div',{className:'admin-sec-sub'},'Override default rate for individual crew members ($/run)')),
-      shedStaff.map(id=>{
-        const c=gc(id);if(!c)return null;
-        const cur=(rates.crewOverrides||{})[id]||'';
-        const defRate=c.role==='Wool Classer'?rates.classerPerRun:c.role==='Penner'?rates.pennerPerRun:c.role==='Presser'?rates.presserPerRun:rates.woolHandlerPerRun;
-        return e('div',{key:id,className:'loading-row'},
-          e('div',{className:'lr-l'},e(Av,{name:c.name,size:32}),e('div',null,e('div',{className:'lr-name'},c.name),e('div',{className:'lr-role'},c.role+' — default $'+defRate+'/run'))),
-          e('div',{className:'lr-r'},e('span',{className:'lr-prefix'},'$'),e('input',{type:'number',className:'lr-inp',value:cur,placeholder:defRate,step:'1',onChange:ev=>setOverride(id,ev.target.value)}),e('span',{className:'lr-unit'},'/run'))
-        );
-      })
+      e('div',{className:'admin-sec-hdr'},e('div',{className:'admin-sec-title'},'Per Person Rate Overrides'),e('div',{className:'admin-sec-sub'},'Override default $/run for individual crew')),
+      shedStaff.map(id=>{const c=gc(id);if(!c)return null;const cur=(rates.crewOverrides||{})[id]||'';const defRate=c.role==='Wool Classer'?rates.classerPerRun:c.role==='Penner'?rates.pennerPerRun:c.role==='Presser'?rates.presserPerRun:rates.woolHandlerPerRun;return e('div',{key:id,className:'loading-row'},e('div',{className:'lr-l'},e(Av,{name:c.name,size:32}),e('div',null,e('div',{className:'lr-name'},c.name),e('div',{className:'lr-role'},c.role+' — default $'+defRate+'/run'))),e('div',{className:'lr-r'},e('span',{className:'lr-prefix'},'$'),e('input',{type:'number',className:'lr-inp',value:cur,placeholder:defRate,step:'1',onChange:ev=>setOverride(id,ev.target.value)}),e('span',{className:'lr-unit'},'/run')));})
     ),
-    /* Shearer rate loadings */
     shearers.length>0&&e('div',{className:'admin-section'},
-      e('div',{className:'admin-sec-hdr'},e('div',{className:'admin-sec-title'},'Shearer Rate Loadings'),e('div',{className:'admin-sec-sub'},'Added on top of base rate per head across entire job')),
-      shearers.map(id=>{
-        const c=gc(id);if(!c)return null;
-        const cur=(rates.shearerLoadings||{})[id]||0;
-        return e('div',{key:id,className:'loading-row'},
-          e('div',{className:'lr-l'},e(Av,{name:c.name,size:32}),e('div',null,e('div',{className:'lr-name'},c.name),e('div',{className:'lr-role'},'Shearer'))),
-          e('div',{className:'lr-r'},e('span',{className:'lr-prefix'},'+$'),e('input',{type:'number',className:'lr-inp',value:cur||'',placeholder:'0',step:'0.05',onChange:ev=>setLoading(id,ev.target.value)}),e('span',{className:'lr-unit'},'/head'))
-        );
-      })
+      e('div',{className:'admin-sec-hdr'},e('div',{className:'admin-sec-title'},'Shearer Rate Loadings'),e('div',{className:'admin-sec-sub'},'Added on top of base rate per head — entire job')),
+      shearers.map(id=>{const c=gc(id);if(!c)return null;const cur=(rates.shearerLoadings||{})[id]||0;return e('div',{key:id,className:'loading-row'},e('div',{className:'lr-l'},e(Av,{name:c.name,size:32}),e('div',null,e('div',{className:'lr-name'},c.name),e('div',{className:'lr-role'},'Shearer'))),e('div',{className:'lr-r'},e('span',{className:'lr-prefix'},'+$'),e('input',{type:'number',className:'lr-inp',value:cur||'',placeholder:'0',step:'0.05',onChange:ev=>setLoading(id,ev.target.value)}),e('span',{className:'lr-unit'},'/head')));})
+    ),
+    e('div',{className:'admin-section'},
+      e('div',{className:'admin-sec-hdr'},e('div',{className:'admin-sec-title'},'Travel'),e('div',{className:'admin-sec-sub'},'Days × rate per person — shown on pay summary')),
+      job.crew.map(id=>{const c=gc(id);if(!c)return null;const days=(rates.travelDays||{})[id]||'';const rate=(rates.travelRate||{})[id]||'';return e('div',{key:id,className:'travel-row'},e('div',{className:'lr-l'},e(Av,{name:c.name,size:32}),e('div',null,e('div',{className:'lr-name'},c.name),e('div',{className:'lr-role'},c.role))),e('div',{className:'tr-fields'},e('div',{className:'tr-pair'},e('input',{type:'number',className:'tr-inp',value:days,placeholder:'0',min:0,onChange:ev=>setTravelDays(id,ev.target.value)}),e('span',{className:'tr-unit'},'days')),e('div',{className:'tr-pair'},e('span',{className:'lr-prefix'},'$'),e('input',{type:'number',className:'tr-inp',style:{width:50},value:rate,placeholder:'40',step:'5',onChange:ev=>setTravelRate(id,ev.target.value)}),e('span',{className:'tr-unit'},'/day'))));})
     ),
     e('div',{style:{height:16}})
   );
 }
-
 /* ════ PROGRESS TAB ════ */
 function ProgressTab({job}){
   const p=calcProg(job);
   if(p.daysWorked===0)return e('div',{style:{padding:'40px 14px',textAlign:'center',color:'var(--dim)'}},e('div',{style:{fontSize:40,marginBottom:8}},'📊'),e('div',null,'No tallies yet'));
   const pCls=p.pct>=80?'fg':p.pct>=40?'fa':'fr';
-  const shTots=p.shIds.map(id=>{const tot=Object.values(job.runs).flat().reduce((s,r)=>s+(r.counts[id]||0),0);const days=Object.entries(job.runs).filter(([,rs])=>rs.some(r=>r.counts[id]>0)).length;return{id,tot,avg:days>0?Math.round(tot/days):0};});
+  const shTots=p.shIds.map(id=>{const tot=Object.values(job.runs).flat().flatMap(r=>mobsOf(r)).reduce((s,mob)=>s+(mob.counts[id]||0),0);const days=Object.entries(job.runs).filter(([,rs])=>rs.some(r=>mobsOf(r).some(m=>m.counts[id]>0))).length;return{id,tot,avg:days>0?Math.round(tot/days):0};});
   const maxT=Math.max(...shTots.map(x=>x.tot),1);
   return e('div',{className:'prog-wrap'},
     e('div',{className:'pc'},e('div',{className:'pc-lbl'},'Job Progress'),e('div',{className:'prog-big'},e('div',null,e('div',{className:'prog-count'},p.shorn.toLocaleString()),e('div',{className:'prog-of'},'of '+job.totalSheep.toLocaleString()+' sheep')),e('div',null,e('div',{className:'prog-pct'},Math.round(p.pct)+'%'),e('div',{className:'prog-day'},'Day '+p.daysWorked+' of '+job.daysAllocated))),e('div',{className:'pbar-lg'},e('div',{className:`pbar-lf ${pCls}`,style:{width:p.pct+'%'}})),e('div',{style:{fontSize:'12px',color:'var(--dim)',marginTop:4}},(job.totalSheep-p.shorn).toLocaleString()+' remaining — '+(job.daysAllocated-p.daysWorked)+' day'+(job.daysAllocated-p.daysWorked!==1?'s':'')+' left')),
     e('div',{className:'pc'},e('div',{className:'pc-lbl'},'By Shearer — Job Total'),shTots.map(({id,tot,avg})=>{const c=gc(id);if(!c)return null;return e('div',{key:id,className:'spr'},e('div',{className:'spr-name'},sn(c.name)),e('div',{className:'spr-bar'},e('div',{className:'spr-bar-f',style:{width:(tot/maxT*100)+'%'}})),e('div',{className:'spr-tot'},tot.toLocaleString()),e('div',{className:'spr-avg'},avg+'/day'));}))
   );
 }
-
 /* ════ OVERVIEW TAB ════ */
 function OverviewTab({job,role}){
   const farm=gf(job.farmId);
@@ -744,30 +769,29 @@ function OverviewTab({job,role}){
     e('div',{style:{height:16}})
   );
 }
-
 /* ════ JOB DETAIL ════ */
-function JobDetailScreen({job,setJob,role,setRole,onBack,onSend}){
+function JobDetailScreen({job,setJob,role,setRole,onBack,onSend,dark,toggleDark}){
   const [tab,setTab]=useState('tallies');
   const farm=gf(job.farmId);
   const dates=jobDates(job),todayStr=new Date().toISOString().split('T')[0];
   const defDate=dates.includes(todayStr)?todayStr:dates[dates.length-1];
   const [viewDate,setViewDate]=useState(defDate);
   const tabs=[['tallies','Tallies'],['progress','Progress'],['overview','Overview']];
-  if(role==='admin')tabs.push(['admin','Admin']);
+  if(role==='admin'){tabs.push(['summary','Summary']);tabs.push(['admin','Admin']);}
   return e('div',null,
-    e(TopBar,{role,setRole,onBack,backLabel:farm?farm.name:'Jobs'}),
+    e(TopBar,{role,setRole,onBack,backLabel:farm?farm.name:'Jobs',dark,toggleDark}),
     e('div',{className:'screen'},
       e('div',{className:'jd-hero'},e('div',{className:'jd-farm'},farm?farm.name:'Unknown Farm'),e('div',{className:'jd-sub'},e(Bdg,{status:job.status}),e('span',{className:'pill'},job.type),e('span',{style:{fontFamily:'var(--m)',fontSize:'11px',color:'var(--dim)'}},'#'+job.jobNumber))),
       e('div',{className:'tabs'},tabs.map(([k,l])=>e('button',{key:k,className:`tab-btn${tab===k?' on':''}`,onClick:()=>setTab(k)},l))),
       tab==='tallies'&&e(TallyTab,{job,setJob,role,viewDate,setViewDate}),
       tab==='progress'&&e(ProgressTab,{job}),
       tab==='overview'&&e(OverviewTab,{job,role}),
+      tab==='summary'&&role==='admin'&&e(SummaryTab,{job}),
       tab==='admin'&&role==='admin'&&e(AdminTab,{job,setJob}),
       (role==='admin'||role==='shed_lead')&&job.status!=='Completed'&&e('div',{className:'send-bar'},e('button',{className:'send-btn',onClick:onSend},'📱 Send Job Cards to Crew'))
     )
   );
 }
-
 /* ════ JOB CARD ════ */
 function JobCardView({job,crewId,onClose}){
   const farm=gf(job.farmId),crew=gc(crewId),team=job.crew.map(gc).filter(Boolean);
@@ -787,7 +811,6 @@ function JobCardView({job,crewId,onClose}){
     )
   ));
 }
-
 /* ════ SMS MODAL ════ */
 function SMSModal({job,onClose,onPreview}){
   const farm=gf(job.farmId),[sent,setSent]=useState(false);
@@ -796,11 +819,11 @@ function SMSModal({job,onClose,onPreview}){
     e('div',{className:'sheet-handle'}),
     e('div',{className:'sheet-title'},sent?'✅ Job Cards Sent!':'📱 Send Job Cards — '+(farm?farm.name:'Job')),
     e('div',{className:'sheet-scroll'},sent?e('div',{className:'sent-state'},e('div',{className:'sent-icon'},'✅'),e('div',{className:'sent-title'},job.crew.length+' messages sent'),e('div',{className:'sent-sub'},'All crew received their job card via SMS')):
-      e('div',null,e('div',{style:{padding:'8px 14px 4px',fontSize:'13px',color:'var(--muted)'}},job.crew.length+' crew will each receive a personalised SMS.'),job.crew.map(id=>{const c=gc(id);if(!c)return null;return e('div',{key:id,className:'sms-row'},e('div',{className:'sms-l'},e(Av,{name:c.name,size:40}),e('div',null,e('div',{className:'sms-name'},c.name),e('div',{className:'sms-role'},c.role),e('div',{className:'sms-ph'},c.phone))),e('button',{className:'prev-btn',onClick:()=>onPreview(id)},'Preview'));}))),
+      e('div',null,e('div',{style:{padding:'8px 14px 4px',fontSize:'13px',color:'var(--muted)'}},job.crew.length+' crew will each receive a personalised SMS.'),job.crew.map(id=>{const c=gc(id);if(!c)return null;return e('div',{key:id,className:'sms-row'},e('div',{className:'sms-l'},e(Av,{name:c.name,size:40}),e('div',null,e('div',{className:'sms-name'},c.name),e('div',{className:'sms-role'},c.role),e('div',{className:'sms-ph'},c.phone))),e('button',{className:'prev-btn',onClick:()=>onPreview(id)},'Preview'));}))
+    ),
     !sent&&e('div',{className:'sheet-footer'},e('button',{className:'btn-g',onClick:onClose},'Cancel'),e('button',{className:'btn-p',onClick:doSend},'Send to All '+job.crew.length))
   ));
 }
-
 /* ════ NEW JOB MODAL ════ */
 function NewJobModal({onClose,onCreate}){
   const [type,setType]=useState('Shearing'),[farmId,setFarmId]=useState(''),[startDate,setStartDate]=useState(''),[days,setDays]=useState(''),[sheep,setSheep]=useState(''),[evos,setEvos]=useState('BYO'),[transport,setTransport]=useState(true),[accomm,setAccomm]=useState(''),[notes,setNotes]=useState(''),[selCrew,setSelCrew]=useState([]);
@@ -825,31 +848,24 @@ function NewJobModal({onClose,onCreate}){
     e('div',{className:'sheet-footer'},e('button',{className:'btn-g',onClick:onClose},'Cancel'),e('button',{className:'btn-p',disabled:!ok,style:{opacity:ok?1:.4},onClick:doCreate},ok?'Create + Dispatch':'Fill required fields'))
   ));
 }
-
 /* ════ HOME ════ */
-function HomeScreen({jobs,role,setRole,onJob,onNew}){
-  const active=jobs.filter(j=>j.status==='Active');
-  const done=jobs.filter(j=>j.status==='Completed'||j.status==='Charged Out');
-  const dispatch=jobs.filter(j=>j.status==='Dispatched');
+function HomeScreen({jobs,role,setRole,onJob,onNew,dark,toggleDark}){
+  const active=jobs.filter(j=>j.status==='Active'),done=jobs.filter(j=>j.status==='Completed'||j.status==='Charged Out'),disp=jobs.filter(j=>j.status==='Dispatched');
   const Sec=({title,items})=>items.length===0?null:e('div',null,e('div',{className:'slbl'},title),items.map(j=>e(JLC,{key:j.id,job:j,onClick:()=>onJob(j.id)})));
-  return e('div',null,
-    e(TopBar,{role,setRole}),
-    e('div',{className:'screen'},e(WeekBanner,{jobs}),e(Sec,{title:'Active',items:active}),e(Sec,{title:'Dispatched',items:dispatch}),e(Sec,{title:'Completed',items:done})),
-    (role==='admin'||role==='shed_lead')&&e('button',{className:'fab',onClick:onNew},'+')
-  );
+  return e('div',null,e(TopBar,{role,setRole,dark,toggleDark}),e('div',{className:'screen'},e(WeekBanner,{jobs}),e(Sec,{title:'Active',items:active}),e(Sec,{title:'Dispatched',items:disp}),e(Sec,{title:'Completed',items:done})),(role==='admin'||role==='shed_lead')&&e('button',{className:'fab',onClick:onNew},'+'));
 }
-
 /* ════ APP ════ */
 function App(){
-  const [role,setRole]=useState('admin'),[screen,setScreen]=useState('home'),[selJobId,setSelJobId]=useState(null),[jobs,setJobs]=useState(INIT_JOBS),[showSMS,setShowSMS]=useState(false),[showNew,setShowNew]=useState(false),[previewId,setPreviewId]=useState(null);
+  const [role,setRole]=useState('admin'),[screen,setScreen]=useState('home'),[selJobId,setSelJobId]=useState(null),[jobs,setJobs]=useState(INIT_JOBS),[showSMS,setShowSMS]=useState(false),[showNew,setShowNew]=useState(false),[previewId,setPreviewId]=useState(null),[dark,setDark]=useState(true);
+  const toggleDark=()=>setDark(d=>!d);
   const selJob=jobs.find(j=>j.id===selJobId);
   const setSelJob=fn=>setJobs(prev=>prev.map(j=>j.id===selJobId?fn(j):j));
   const goJob=id=>{setSelJobId(id);setScreen('job');};
   const goHome=()=>{setScreen('home');setSelJobId(null);setShowSMS(false);setPreviewId(null);};
   const doCreate=job=>{setJobs(p=>[job,...p]);setShowNew(false);setSelJobId(job.id);setScreen('job');setTimeout(()=>setShowSMS(true),350);};
-  return e('div',null,
-    screen==='home'&&e(HomeScreen,{jobs,role,setRole,onJob:goJob,onNew:()=>setShowNew(true)}),
-    screen==='job'&&selJob&&e(JobDetailScreen,{job:selJob,setJob:setSelJob,role,setRole,onBack:goHome,onSend:()=>setShowSMS(true)}),
+  return e('div',{className:dark?'':'light'},
+    screen==='home'&&e(HomeScreen,{jobs,role,setRole,onJob:goJob,onNew:()=>setShowNew(true),dark,toggleDark}),
+    screen==='job'&&selJob&&e(JobDetailScreen,{job:selJob,setJob:setSelJob,role,setRole,onBack:goHome,onSend:()=>setShowSMS(true),dark,toggleDark}),
     showSMS&&selJob&&e(SMSModal,{job:selJob,onClose:()=>{setShowSMS(false);setPreviewId(null);},onPreview:id=>setPreviewId(id)}),
     previewId&&selJob&&e(JobCardView,{job:selJob,crewId:previewId,onClose:()=>setPreviewId(null)}),
     showNew&&e(NewJobModal,{onClose:()=>setShowNew(false),onCreate:doCreate})
