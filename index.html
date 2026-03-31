@@ -15,337 +15,230 @@
   --blue:#60a5fa;--blueD:rgba(96,165,250,.12);
   --purple:#a78bfa;--purpleD:rgba(167,139,250,.12);
   --text:#f1f5f9;--muted:#94a3b8;--dim:#475569;
-  --h:'Barlow Condensed',sans-serif;
-  --b:'DM Sans',sans-serif;
-  --m:'JetBrains Mono',monospace;
-  --r:12px;
+  --h:'Barlow Condensed',sans-serif;--b:'DM Sans',sans-serif;--m:'JetBrains Mono',monospace;--r:12px;
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 html,body{background:var(--bg);color:var(--text);font-family:var(--b);min-height:100dvh;font-size:15px;overscroll-behavior:none}
-#root{max-width:480px;margin:0 auto;min-height:100dvh;position:relative;overflow:hidden}
-
-/* ── LAYOUT ── */
+#root{max-width:480px;margin:0 auto;min-height:100dvh;position:relative}
 .screen{overflow-y:auto;height:calc(100dvh - 58px);padding-bottom:88px}
-.topbar{
-  height:58px;
-  background:rgba(12,14,20,.95);backdrop-filter:blur(16px);
-  border-bottom:1px solid var(--border);
-  padding:0 14px;
-  display:flex;align-items:center;justify-content:space-between;gap:10px;
-}
+.topbar{position:sticky;top:0;z-index:50;height:58px;background:rgba(12,14,20,.97);backdrop-filter:blur(16px);border-bottom:1px solid var(--border);padding:0 14px;display:flex;align-items:center;justify-content:space-between;gap:10px}
 .logo{font-family:var(--h);font-size:24px;font-weight:800;letter-spacing:-.5px;color:var(--amber);line-height:1}
-.logo em{color:var(--text);font-style:normal;opacity:.45;font-weight:500}
-.back-btn{
-  display:flex;align-items:center;gap:6px;font-size:14px;
-  color:var(--muted);cursor:pointer;background:none;border:none;padding:4px 0;flex-shrink:0;
-}
+.logo em{color:var(--text);font-style:normal;opacity:.4;font-weight:500}
+.back-btn{display:flex;align-items:center;gap:5px;font-size:14px;color:var(--muted);cursor:pointer;background:none;border:none;padding:4px 0;flex-shrink:0}
 .back-arr{font-size:18px;line-height:1}
-.back-label{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:140px}
-
-/* Role Toggle */
+.back-label{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:130px}
 .role-toggle{display:flex;background:var(--card);border:1px solid var(--border);border-radius:8px;overflow:hidden;flex-shrink:0}
-.rt-btn{
-  padding:5px 8px;font-size:10.5px;font-weight:700;letter-spacing:.3px;text-transform:uppercase;
-  cursor:pointer;border:none;background:none;color:var(--dim);transition:.15s;white-space:nowrap;
-}
+.rt-btn{padding:5px 8px;font-size:10.5px;font-weight:700;letter-spacing:.3px;text-transform:uppercase;cursor:pointer;border:none;background:none;color:var(--dim);transition:.15s;white-space:nowrap}
 .rt-btn.active{background:var(--amber);color:#000}
-
-/* FAB */
-.fab{
-  position:fixed;bottom:22px;right:calc(50% - 226px);
-  width:52px;height:52px;border-radius:50%;background:var(--amber);
-  border:none;cursor:pointer;font-size:26px;color:#000;font-weight:700;
-  display:flex;align-items:center;justify-content:center;
-  box-shadow:0 6px 24px rgba(245,158,11,.45);z-index:40;
-  transition:transform .15s,box-shadow .15s;
-}
-.fab:active{transform:scale(.92);box-shadow:0 2px 10px rgba(245,158,11,.3)}
+.fab{position:fixed;bottom:22px;right:calc(50% - 226px);width:52px;height:52px;border-radius:50%;background:var(--amber);border:none;cursor:pointer;font-size:26px;color:#000;font-weight:700;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 24px rgba(245,158,11,.45);z-index:40;transition:transform .15s}
+.fab:active{transform:scale(.91)}
 @media(max-width:480px){.fab{right:18px}}
 
-/* ── WEEK BANNER ── */
-.week-banner{
-  margin:14px 14px 0;padding:16px;
-  background:linear-gradient(135deg,rgba(245,158,11,.13),rgba(245,158,11,.04));
-  border:1px solid rgba(245,158,11,.28);border-radius:var(--r);
-}
-.wb-top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:14px}
-.wb-title{font-family:var(--h);font-size:12px;font-weight:700;color:var(--amber);letter-spacing:1.2px;text-transform:uppercase}
+/* WEEK BANNER */
+.week-banner{margin:14px 14px 0;padding:16px;background:linear-gradient(135deg,rgba(245,158,11,.12),rgba(245,158,11,.03));border:1px solid rgba(245,158,11,.25);border-radius:var(--r)}
+.wb-top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px}
+.wb-title{font-family:var(--h);font-size:11px;font-weight:700;color:var(--amber);letter-spacing:1.2px;text-transform:uppercase}
 .wb-date{font-size:12px;color:var(--dim)}
 .wb-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
-.wb-stat{text-align:center;padding:8px 4px;background:rgba(0,0,0,.2);border-radius:8px}
+.wb-stat{text-align:center;padding:8px 4px;background:rgba(0,0,0,.22);border-radius:8px}
 .wb-num{font-family:var(--h);font-size:26px;font-weight:800;color:var(--text);line-height:1}
 .wb-lbl{font-size:10px;color:var(--muted);margin-top:2px;text-transform:uppercase;letter-spacing:.4px}
 
-/* ── SECTION ── */
-.section-lbl{
-  font-family:var(--h);font-size:11px;font-weight:700;letter-spacing:1.2px;
-  text-transform:uppercase;color:var(--dim);
-  padding:0 14px;margin:18px 0 8px;
-}
+/* SECTION LABEL */
+.slbl{font-family:var(--h);font-size:11px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--dim);padding:0 14px;margin:18px 0 8px}
 
-/* ── JOB LIST CARD ── */
-.jlc{
-  margin:0 14px 8px;padding:14px;
-  background:var(--card);border:1px solid var(--border);border-radius:var(--r);
-  cursor:pointer;transition:.12s;position:relative;overflow:hidden;
-}
-.jlc::before{
-  content:'';position:absolute;left:0;top:0;bottom:0;width:3px;
-  background:var(--amber);opacity:0;transition:.15s;
-}
+/* JOB LIST CARD */
+.jlc{margin:0 14px 8px;padding:14px;background:var(--card);border:1px solid var(--border);border-radius:var(--r);cursor:pointer;transition:.12s}
 .jlc:active{background:var(--card2)}
-.jlc:active::before{opacity:1}
 .jlc-top{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:6px}
-.jlc-name{font-family:var(--h);font-size:21px;font-weight:700;line-height:1.1;flex:1;color:var(--text)}
+.jlc-name{font-family:var(--h);font-size:21px;font-weight:700;line-height:1.1;flex:1}
 .jlc-num{font-family:var(--m);font-size:11px;color:var(--dim);margin-top:2px}
-.badge{
-  display:inline-flex;align-items:center;padding:3px 8px;border-radius:20px;
-  font-size:11px;font-weight:700;letter-spacing:.2px;white-space:nowrap;flex-shrink:0;
-}
+.badge{display:inline-flex;align-items:center;padding:3px 8px;border-radius:20px;font-size:11px;font-weight:700;white-space:nowrap;flex-shrink:0}
 .b-active{background:var(--greenD);color:var(--green)}
 .b-completed{background:var(--blueD);color:var(--blue)}
 .b-charged{background:var(--purpleD);color:var(--purple)}
 .b-dispatched{background:var(--amberD);color:var(--amber)}
-.jlc-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px}
-.pill{
-  display:inline-block;padding:2px 7px;border-radius:4px;
-  font-size:11px;font-weight:600;background:var(--card2);color:var(--muted);
-}
-.jlc-prog-row{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-bottom:5px}
-.jlc-pct{font-family:var(--m);font-weight:600;color:var(--text)}
+.jlc-meta{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:8px;align-items:center}
+.pill{display:inline-block;padding:2px 7px;border-radius:4px;font-size:11px;font-weight:600;background:var(--card2);color:var(--muted)}
+.jlc-pr{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-bottom:5px}
+.pct-lbl{font-family:var(--m);font-weight:600;color:var(--text)}
 .pbar{height:4px;background:var(--border);border-radius:2px;overflow:hidden}
-.pbar-fill{height:100%;border-radius:2px;transition:width .5s}
-.fill-g{background:var(--green)}.fill-a{background:var(--amber)}.fill-r{background:var(--red)}.fill-b{background:var(--blue)}
+.pbar-f{height:100%;border-radius:2px;transition:width .5s}
+.fg{background:var(--green)}.fa{background:var(--amber)}.fr{background:var(--red)}.fb{background:var(--blue)}
 
-/* ── JOB DETAIL ── */
-.jd-hero{padding:16px 14px 10px}
-.jd-farm{font-family:var(--h);font-size:30px;font-weight:800;line-height:1.1;margin-bottom:6px}
+/* JOB DETAIL */
+.jd-hero{padding:14px 14px 10px}
+.jd-farm{font-family:var(--h);font-size:28px;font-weight:800;line-height:1.1;margin-bottom:6px}
 .jd-sub{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
-.tabs{display:flex;border-bottom:1px solid var(--border);padding:0 14px;margin-bottom:2px}
-.tab-btn{
-  padding:10px 14px;font-size:13px;font-weight:600;color:var(--dim);cursor:pointer;
-  border-bottom:2px solid transparent;margin-bottom:-1px;transition:.15s;background:none;border-top:none;border-left:none;border-right:none;
-}
+.tabs{display:flex;border-bottom:1px solid var(--border);padding:0 14px;position:sticky;top:58px;z-index:40;background:var(--bg)}
+.tab-btn{padding:10px 14px;font-size:13px;font-weight:600;color:var(--dim);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;transition:.15s;background:none;border-top:none;border-left:none;border-right:none;white-space:nowrap}
 .tab-btn.on{color:var(--amber);border-bottom-color:var(--amber)}
-.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:0 14px;margin-bottom:12px}
+
+/* ══ TALLY SCREEN ══ */
+.date-nav{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--border);background:var(--card);position:sticky;top:100px;z-index:35}
+.dn-arr{width:36px;height:36px;border-radius:8px;background:var(--card2);border:1px solid var(--border);color:var(--text);font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:.12s;line-height:1}
+.dn-arr:disabled{opacity:.28;cursor:default}
+.dn-arr:not(:disabled):active{background:var(--border)}
+.dn-center{text-align:center}
+.dn-day{font-family:var(--h);font-size:22px;font-weight:800;color:var(--text);line-height:1}
+.dn-date{font-size:12px;color:var(--muted);margin-top:1px}
+.dn-today{display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:700;background:var(--amberD);color:var(--amber);margin-top:3px}
+.mob-strip{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--border);overflow-x:auto;scrollbar-width:none}
+.mob-strip::-webkit-scrollbar{display:none}
+.mob-chip{flex-shrink:0;padding:6px 12px;border-radius:20px;font-size:12px;font-weight:700;cursor:pointer;border:1px solid var(--border);background:var(--card2);color:var(--muted);transition:.12s}
+.mob-chip.act{background:var(--amberD);border-color:var(--amberB);color:var(--amber)}
+
+/* Shearer block */
+.sh-block{border-bottom:1px solid var(--border2)}
+.sh-hdr{display:flex;align-items:center;justify-content:space-between;padding:11px 14px 5px}
+.sh-left{display:flex;align-items:center;gap:10px}
+.sh-name{font-weight:700;font-size:15px}
+.sh-role{font-size:12px;color:var(--muted)}
+.sh-daily{font-family:var(--h);font-size:28px;font-weight:800;color:var(--amber);line-height:1;text-align:right}
+.sh-daily-lbl{font-size:10px;color:var(--dim);text-align:right;text-transform:uppercase;letter-spacing:.3px}
+.runs-row{display:flex;gap:7px;padding:4px 14px 12px;overflow-x:auto;scrollbar-width:none}
+.runs-row::-webkit-scrollbar{display:none}
+.run-cell{flex-shrink:0;width:70px}
+.run-lbl{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--dim);text-align:center;margin-bottom:4px}
+.run-inp{width:100%;height:46px;background:var(--card2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:var(--m);font-size:19px;font-weight:600;text-align:center;outline:none;transition:.15s}
+.run-inp:focus{border-color:var(--amber);background:rgba(245,158,11,.07)}
+.run-inp:disabled{opacity:.3;background:var(--bg)}
+.run-inp::placeholder{color:var(--border2)}
+.run-tot-cell{flex-shrink:0;width:58px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end}
+.run-tot-lbl{font-size:9px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;text-align:center;margin-bottom:4px}
+.run-tot-val{width:58px;height:46px;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.22);border-radius:8px;display:flex;align-items:center;justify-content:center;font-family:var(--m);font-size:18px;font-weight:700;color:var(--amber)}
+
+/* Shed staff */
+.staff-block{border-bottom:1px solid var(--border);padding:12px 14px}
+.sec-lbl{font-family:var(--h);font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--dim);margin-bottom:10px}
+.sr2{display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)}
+.sr2:last-child{border-bottom:none}
+.sr2-l{display:flex;align-items:center;gap:9px}
+.sr2-name{font-weight:600;font-size:14px}
+.sr2-role{font-size:12px;color:var(--muted)}
+.stepper{display:flex;align-items:center;gap:2px}
+.step-btn{width:34px;height:34px;border-radius:7px;background:var(--card2);border:1px solid var(--border);color:var(--text);font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:.12s;line-height:1;flex-shrink:0}
+.step-btn:disabled{opacity:.28;cursor:default}
+.step-btn:not(:disabled):active{background:var(--border)}
+.step-val{width:38px;text-align:center;font-family:var(--m);font-size:17px;font-weight:700;color:var(--text)}
+
+/* Presser */
+.press-block{border-bottom:1px solid var(--border);padding:12px 14px}
+.bale-row{display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)}
+.bale-row:last-child{border-bottom:none}
+.bale-name{font-weight:600;font-size:14px;flex:1}
+.bale-stats{display:flex;gap:14px;align-items:center}
+.bale-s{text-align:center;min-width:40px}
+.bale-v{font-family:var(--m);font-size:16px;font-weight:700;color:var(--text)}
+.bale-l{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.4px;margin-top:1px}
+.bale-ctrl{display:flex;align-items:center;gap:2px;flex-direction:column}
+
+/* Day summary */
+.day-summary{margin:12px 14px;padding:12px 14px;background:var(--card);border:1px solid var(--border);border-radius:10px}
+.ds-row{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px}
+.ds-row:last-child{border-bottom:none}
+.ds-l{color:var(--muted)}
+.ds-v{font-family:var(--m);font-weight:700;color:var(--text)}
+.ds-big{font-size:20px;color:var(--amber)}
+.read-hint{margin:10px 14px;padding:9px 12px;background:var(--card2);border:1px solid var(--border);border-radius:8px;font-size:12px;color:var(--dim);text-align:center}
+
+/* PROGRESS TAB */
+.prog-wrap{padding:10px 14px}
+.pc{background:var(--card);border:1px solid var(--border);border-radius:var(--r);padding:16px;margin-bottom:10px}
+.pc-lbl{font-family:var(--h);font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--dim);margin-bottom:12px}
+.prog-big{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:8px}
+.prog-count{font-family:var(--h);font-size:44px;font-weight:800;line-height:1}
+.prog-of{font-family:var(--m);font-size:12px;color:var(--muted);margin-top:3px}
+.prog-pct{font-family:var(--h);font-size:40px;font-weight:800;line-height:1;color:var(--amber)}
+.prog-day{font-size:12px;color:var(--muted);margin-top:2px;text-align:right}
+.pbar-lg{height:8px;background:var(--border);border-radius:4px;overflow:hidden;margin-bottom:4px}
+.pbar-lf{height:100%;border-radius:4px;transition:width .6s}
+.spr{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)}
+.spr:last-child{border-bottom:none}
+.spr-name{font-size:13px;font-weight:600;flex:1}
+.spr-bar{flex:2;height:5px;background:var(--border);border-radius:3px;overflow:hidden}
+.spr-bar-f{height:100%;border-radius:3px;background:var(--amber)}
+.spr-tot{font-family:var(--m);font-size:12px;font-weight:600;color:var(--text);width:52px;text-align:right;flex-shrink:0}
+.spr-avg{font-family:var(--m);font-size:11px;color:var(--dim);width:48px;text-align:right;flex-shrink:0}
+
+/* OVERVIEW TAB */
+.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:0 14px;margin-bottom:10px}
 .ic{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:11px}
 .ic-l{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px}
 .ic-v{font-size:14px;font-weight:600;color:var(--text)}
-.ic-v.mn{font-family:var(--m);font-size:13px}
 .full-ic{grid-column:span 2}
-.crew-hdr{
-  display:flex;justify-content:space-between;align-items:center;
-  font-family:var(--h);font-size:12px;font-weight:700;letter-spacing:.8px;
-  text-transform:uppercase;color:var(--dim);
-  padding:0 14px;margin:14px 0 6px;
-}
-.crew-row{
-  display:flex;align-items:center;justify-content:space-between;
-  padding:10px 14px;border-bottom:1px solid var(--border);
-}
+.crew-hdr{display:flex;justify-content:space-between;align-items:center;font-family:var(--h);font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--dim);padding:0 14px;margin:10px 0 6px}
+.crew-row{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--border)}
 .crew-row:last-child{border-bottom:none}
 .cr-l{display:flex;align-items:center;gap:10px}
-.av{
-  border-radius:50%;display:flex;align-items:center;justify-content:center;
-  font-family:var(--h);font-weight:700;flex-shrink:0;
-}
+.av{border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:var(--h);font-weight:700;flex-shrink:0}
 .cr-name{font-weight:600;font-size:14px}
 .cr-role{font-size:12px;color:var(--muted)}
 .car-tag{font-size:10px;padding:2px 6px;border-radius:4px;background:var(--amberD);color:var(--amber);font-weight:700;margin-left:6px}
+.map-link{display:inline-flex;align-items:center;gap:6px;margin-top:7px;padding:7px 12px;background:var(--blueD);border:1px solid rgba(96,165,250,.3);color:var(--blue);border-radius:8px;font-size:12px;font-weight:600;text-decoration:none}
 
-/* Progress tab */
-.pt{padding:0 14px}
-.pc{background:var(--card);border:1px solid var(--border);border-radius:var(--r);padding:16px;margin-bottom:10px}
-.pc-lbl{font-family:var(--h);font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--dim);margin-bottom:12px}
-.pc-big{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:8px}
-.pc-count{font-family:var(--h);font-size:40px;font-weight:800;line-height:1;color:var(--text)}
-.pc-of{font-family:var(--m);font-size:12px;color:var(--muted);margin-top:3px}
-.pc-pct-block{text-align:right}
-.pc-pct{font-family:var(--h);font-size:36px;font-weight:800;line-height:1}
-.pc-day{font-size:12px;color:var(--muted);margin-top:2px}
-.pbar-lg{height:8px;background:var(--border);border-radius:4px;overflow:hidden;margin-bottom:12px}
-.pbar-lg-fill{height:100%;border-radius:4px;transition:width .6s}
-.pace-row{
-  display:flex;justify-content:space-between;align-items:center;
-  padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;
-}
-.pace-row:last-child{border-bottom:none}
-.pace-l{color:var(--muted)}
-.pace-v{font-family:var(--m);font-weight:600}
-.c-g{color:var(--green)}.c-r{color:var(--red)}.c-a{color:var(--amber)}
-.sr-row{
-  display:flex;align-items:center;gap:8px;
-  padding:9px 0;border-bottom:1px solid var(--border);
-}
-.sr-row:last-child{border-bottom:none}
-.sr-name{font-size:13px;font-weight:600;width:110px;flex-shrink:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.sr-bar-w{flex:1}
-.sr-bar{height:5px;background:var(--border);border-radius:3px;overflow:hidden}
-.sr-bar-f{height:100%;border-radius:3px;background:var(--amber);transition:width .4s}
-.sr-today{font-family:var(--m);font-size:12px;font-weight:600;width:32px;text-align:right;flex-shrink:0}
-.sr-tot{font-family:var(--m);font-size:11px;color:var(--dim);width:52px;text-align:right;flex-shrink:0}
-
-/* ── MODALS ── */
-.overlay{
-  position:fixed;inset:0;background:rgba(0,0,0,.72);backdrop-filter:blur(5px);
-  z-index:200;display:flex;flex-direction:column;justify-content:flex-end;
-  animation:fadeIn .18s ease;
-}
+/* MODALS */
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.72);backdrop-filter:blur(5px);z-index:200;display:flex;flex-direction:column;justify-content:flex-end;animation:fadeIn .18s ease}
 .overlay2{z-index:300}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
-.sheet{
-  background:var(--card);border-top:1px solid var(--border);
-  border-radius:20px 20px 0 0;
-  max-height:88vh;display:flex;flex-direction:column;
-  animation:slideUp .22s ease;
-}
+.sheet{background:var(--card);border-top:1px solid var(--border);border-radius:20px 20px 0 0;max-height:88vh;display:flex;flex-direction:column;animation:slideUp .22s ease}
 @keyframes slideUp{from{transform:translateY(40px);opacity:.5}to{transform:none;opacity:1}}
 .sheet-handle{width:36px;height:4px;background:var(--border2);border-radius:2px;margin:12px auto 0;flex-shrink:0}
-.sheet-title{
-  font-family:var(--h);font-size:22px;font-weight:700;
-  padding:10px 16px 14px;border-bottom:1px solid var(--border);flex-shrink:0;
-}
+.sheet-title{font-family:var(--h);font-size:22px;font-weight:700;padding:10px 16px 14px;border-bottom:1px solid var(--border);flex-shrink:0}
 .sheet-scroll{overflow-y:auto;flex:1}
-.sheet-footer{
-  border-top:1px solid var(--border);padding:12px 14px;
-  display:flex;gap:8px;flex-shrink:0;
-  background:var(--card);
-}
-.btn-p{
-  flex:1;padding:13px;background:var(--amber);color:#000;
-  border:none;border-radius:10px;font-size:15px;font-weight:700;
-  cursor:pointer;font-family:var(--b);transition:.12s;
-}
+.sheet-footer{border-top:1px solid var(--border);padding:12px 14px;display:flex;gap:8px;flex-shrink:0;background:var(--card)}
+.btn-p{flex:1;padding:13px;background:var(--amber);color:#000;border:none;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;font-family:var(--b);transition:.12s}
 .btn-p:active{opacity:.82}
 .btn-p:disabled{opacity:.4;cursor:default}
-.btn-g{
-  padding:13px 16px;background:none;color:var(--muted);
-  border:1px solid var(--border);border-radius:10px;font-size:14px;
-  cursor:pointer;font-family:var(--b);white-space:nowrap;
-}
-
-/* SMS Modal items */
-.sms-row{
-  display:flex;align-items:center;justify-content:space-between;
-  padding:12px 14px;border-bottom:1px solid var(--border);
-  cursor:pointer;transition:.12s;
-}
+.btn-g{padding:13px 16px;background:none;color:var(--muted);border:1px solid var(--border);border-radius:10px;font-size:14px;cursor:pointer;font-family:var(--b);white-space:nowrap}
+.sms-row{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid var(--border);cursor:pointer;transition:.12s}
 .sms-row:active{background:var(--card2)}
 .sms-l{display:flex;align-items:center;gap:10px}
 .sms-name{font-weight:600;font-size:14px}
 .sms-role{font-size:12px;color:var(--muted)}
 .sms-ph{font-family:var(--m);font-size:11px;color:var(--dim);margin-top:1px}
-.prev-btn{
-  padding:6px 12px;border-radius:6px;
-  background:var(--amberD);border:1px solid var(--amberB);
-  color:var(--amber);font-size:12px;font-weight:700;
-  cursor:pointer;white-space:nowrap;
-}
-
-/* ── JOB CARD (white) ── */
-.jc-white{
-  background:#fff;color:#111;border-radius:20px 20px 0 0;
-  max-height:90vh;display:flex;flex-direction:column;
-  animation:slideUp .22s ease;
-}
-.jcw-hdr{
-  background:#111;color:#fff;
-  padding:12px 16px;
-  display:flex;align-items:center;justify-content:space-between;
-  border-radius:20px 20px 0 0;flex-shrink:0;
-}
-.jcw-logo{font-family:var(--h);font-size:20px;font-weight:800;color:var(--amber)}
-.jcw-sub{font-size:12px;color:#888}
-.jcw-x{background:none;border:none;color:#888;font-size:22px;cursor:pointer;padding:0 4px}
-.jcw-body{padding:20px 16px;overflow-y:auto;flex:1}
-.jcw-greet{font-size:15px;color:#444;margin-bottom:6px}
-.jcw-alloc{font-size:13px;color:#666;margin-bottom:20px;line-height:1.5}
-.jcw-title{
-  font-family:var(--h);font-size:24px;font-weight:800;text-transform:uppercase;
-  letter-spacing:-.3px;border-bottom:2px solid #111;padding-bottom:12px;margin-bottom:20px;
-}
-.jcw-f{margin-bottom:16px}
-.jcw-fl{font-family:var(--h);font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:#333;margin-bottom:3px}
-.jcw-fv{font-size:16px;color:#111;font-weight:500;line-height:1.4}
-.map-btn{
-  display:inline-flex;align-items:center;gap:6px;margin-top:7px;
-  padding:8px 14px;background:#1a73e8;color:#fff;
-  border-radius:8px;font-size:13px;font-weight:600;text-decoration:none;cursor:pointer;border:none;
-}
-.team-item{
-  display:flex;align-items:center;gap:10px;
-  padding:10px;background:#f4f4f4;border-radius:8px;margin-bottom:6px;
-}
-.ti-name{font-weight:600;font-size:14px;color:#111}
-.ti-role{font-size:12px;color:#555}
-.ti-car{font-size:11px;color:#1a73e8;font-weight:700;margin-top:2px}
-
-/* ── NEW JOB FORM ── */
-.ff{padding:0 14px;margin-bottom:14px}
-.fl{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
-.fi{
-  width:100%;padding:11px 12px;background:var(--card2);border:1px solid var(--border);
-  border-radius:8px;color:var(--text);font-family:var(--b);font-size:14px;
-  outline:none;transition:.15s;
-}
-.fi:focus{border-color:var(--amber)}
-.fi::placeholder{color:var(--dim)}
-textarea.fi{resize:none;line-height:1.5}
-.tog-row{display:flex;background:var(--card2);border:1px solid var(--border);border-radius:8px;overflow:hidden}
-.tog-opt{
-  flex:1;padding:10px;text-align:center;font-size:14px;font-weight:600;
-  cursor:pointer;color:var(--muted);transition:.15s;border:none;background:none;
-}
-.tog-opt.on{background:var(--amber);color:#000}
-.farm-list{background:var(--card2);border:1px solid var(--border);border-radius:8px;max-height:190px;overflow-y:auto}
-.farm-opt{padding:11px 12px;border-bottom:1px solid var(--border);cursor:pointer;transition:.12s}
-.farm-opt:last-child{border-bottom:none}
-.farm-opt:active,.farm-opt.sel{background:var(--amberD)}
-.fo-name{font-weight:600;font-size:14px}
-.fo-addr{font-size:12px;color:var(--muted);margin-top:2px}
-.chip-wrap{display:flex;flex-wrap:wrap;gap:6px}
-.chip{
-  padding:6px 10px;border-radius:20px;font-size:12px;font-weight:600;
-  cursor:pointer;transition:.15s;
-  background:var(--card2);border:1px solid var(--border);color:var(--muted);
-}
-.chip.sel{background:var(--amberD);border-color:var(--amberB);color:var(--amber)}
-
-/* Sent confirmation */
+.prev-btn{padding:6px 12px;border-radius:6px;background:var(--amberD);border:1px solid var(--amberB);color:var(--amber);font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap}
 .sent-state{padding:40px 20px;text-align:center}
 .sent-icon{font-size:56px;margin-bottom:14px}
 .sent-title{font-family:var(--h);font-size:24px;font-weight:800;color:var(--green);margin-bottom:6px}
 .sent-sub{font-size:14px;color:var(--muted)}
-
-/* Map link in overview */
-.map-link{
-  display:inline-flex;align-items:center;gap:6px;
-  margin-top:7px;padding:7px 12px;background:var(--blueD);
-  border:1px solid rgba(96,165,250,.3);color:var(--blue);
-  border-radius:8px;font-size:12px;font-weight:600;text-decoration:none;
-}
-
-/* ── SEND BUTTON ── */
+.jc-white{background:#fff;color:#111;border-radius:20px 20px 0 0;max-height:90vh;display:flex;flex-direction:column;animation:slideUp .22s ease}
+.jcw-hdr{background:#111;color:#fff;padding:12px 16px;display:flex;align-items:center;justify-content:space-between;border-radius:20px 20px 0 0;flex-shrink:0}
+.jcw-logo{font-family:var(--h);font-size:20px;font-weight:800;color:var(--amber)}
+.jcw-sub{font-size:12px;color:#888}
+.jcw-x{background:none;border:none;color:#888;font-size:22px;cursor:pointer;padding:0 4px}
+.jcw-body{padding:20px 16px;overflow-y:auto;flex:1}
+.jcw-greet{font-size:15px;color:#444;margin-bottom:4px}
+.jcw-alloc{font-size:13px;color:#666;margin-bottom:20px;line-height:1.5;white-space:pre-line}
+.jcw-title{font-family:var(--h);font-size:24px;font-weight:800;text-transform:uppercase;letter-spacing:-.3px;border-bottom:2px solid #111;padding-bottom:12px;margin-bottom:20px}
+.jcw-f{margin-bottom:16px}
+.jcw-fl{font-family:var(--h);font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:#333;margin-bottom:3px}
+.jcw-fv{font-size:15px;color:#111;font-weight:500;line-height:1.4}
+.map-btn{display:inline-flex;align-items:center;gap:6px;margin-top:7px;padding:8px 14px;background:#1a73e8;color:#fff;border-radius:8px;font-size:13px;font-weight:600;text-decoration:none;cursor:pointer;border:none}
+.team-item{display:flex;align-items:center;gap:10px;padding:10px;background:#f4f4f4;border-radius:8px;margin-bottom:6px}
+.ti-name{font-weight:600;font-size:14px;color:#111}
+.ti-role{font-size:12px;color:#555}
+.ti-car{font-size:11px;color:#1a73e8;font-weight:700;margin-top:2px}
+.ff{padding:0 14px;margin-bottom:14px}
+.fl{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
+.fi{width:100%;padding:11px 12px;background:var(--card2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:var(--b);font-size:14px;outline:none;transition:.15s}
+.fi:focus{border-color:var(--amber)}.fi::placeholder{color:var(--dim)}
+textarea.fi{resize:none;line-height:1.5}
+.tog-row{display:flex;background:var(--card2);border:1px solid var(--border);border-radius:8px;overflow:hidden}
+.tog-opt{flex:1;padding:10px;text-align:center;font-size:14px;font-weight:600;cursor:pointer;color:var(--muted);transition:.15s;border:none;background:none}
+.tog-opt.on{background:var(--amber);color:#000}
+.farm-list{background:var(--card2);border:1px solid var(--border);border-radius:8px;max-height:180px;overflow-y:auto}
+.farm-opt{padding:11px 12px;border-bottom:1px solid var(--border);cursor:pointer;transition:.12s}
+.farm-opt:last-child{border-bottom:none}
+.farm-opt.sel,.farm-opt:active{background:var(--amberD)}
+.fo-name{font-weight:600;font-size:14px}
+.fo-addr{font-size:12px;color:var(--muted);margin-top:2px}
+.chip-wrap{display:flex;flex-wrap:wrap;gap:6px}
+.chip{padding:6px 10px;border-radius:20px;font-size:12px;font-weight:600;cursor:pointer;background:var(--card2);border:1px solid var(--border);color:var(--muted);transition:.15s}
+.chip.sel{background:var(--amberD);border-color:var(--amberB);color:var(--amber)}
 .send-bar{padding:14px}
-.send-btn{
-  width:100%;padding:14px;background:linear-gradient(135deg,var(--amber),#e08b00);
-  color:#000;border:none;border-radius:12px;font-size:15px;font-weight:700;
-  cursor:pointer;font-family:var(--b);display:flex;align-items:center;justify-content:center;gap:8px;
-  box-shadow:0 4px 16px rgba(245,158,11,.3);transition:.12s;
-}
-.send-btn:active{opacity:.85;transform:scale(.98)}
-
-/* No tallies state */
-.no-data{padding:32px 14px;text-align:center;color:var(--dim);font-size:14px}
-.no-data-icon{font-size:40px;margin-bottom:8px}
-
-/* Dispatched card hint */
-.dispatch-hint{
-  margin:0 14px;padding:12px 14px;
-  background:var(--amberD);border:1px solid var(--amberB);border-radius:10px;
-  font-size:13px;color:var(--amber);display:flex;align-items:center;gap:8px;
-  margin-bottom:14px;
-}
+.send-btn{width:100%;padding:14px;background:linear-gradient(135deg,var(--amber),#e08b00);color:#000;border:none;border-radius:12px;font-size:15px;font-weight:700;cursor:pointer;font-family:var(--b);display:flex;align-items:center;justify-content:center;gap:8px;box-shadow:0 4px 16px rgba(245,158,11,.3);transition:.12s}
+.send-btn:active{opacity:.85}
 </style>
 </head>
 <body>
@@ -353,145 +246,81 @@ textarea.fi{resize:none;line-height:1.5}
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script>
-const {useState,useMemo} = React;
+const {useState} = React;
 const e = React.createElement;
 
-/* ═══════════════════════════════════════════
-   MOCK DATA  (future: replace with Supabase)
-═══════════════════════════════════════════ */
-const FARMS = [
+/* ══════════ DATA ══════════ */
+const FARMS=[
   {id:'f1',name:'Mulgathing Pastoral',address:'73 Eyre Highway, Glendambo SA 5703',stands:6,notes:'Gate code 4472. No fuel within 50km — fill up in Peterborough.'},
-  {id:'f2',name:'Saltwell Station',address:'735 Saltwell Road, Wangolina SA 5275',stands:5,notes:'EVOs supplied at shed. Dog on property.'},
+  {id:'f2',name:'Saltwell Station',address:'735 Saltwell Road, Wangolina SA 5275',stands:5,notes:'EVOs supplied at shed.'},
   {id:'f3',name:'Wirrabara Forest Run',address:'44 Forest Drive, Wirrabara SA 5481',stands:4,notes:'No mobile coverage on property.'},
   {id:'f4',name:'Broken Hill Pastoral Co.',address:'Silver City Highway, Broken Hill NSW 2880',stands:8,notes:'Accommodation on site — dinner provided nightly.'},
   {id:'f5',name:'Hillgrove Station',address:'221 Hillgrove Road, Burra SA 5417',stands:3,notes:''},
 ];
-
-const CREW = [
-  {id:'c1',name:'Jack Morrison',role:'Shearer',phone:'0412 345 678',hasVehicle:false},
-  {id:'c2',name:'Dave Pearce',role:'Shearer',phone:'0423 456 789',hasVehicle:true},
-  {id:'c3',name:'Nathan Cooper',role:'Shearer',phone:'0434 567 890',hasVehicle:false},
-  {id:'c4',name:'Sharna Williams',role:'Shearer',phone:'0445 678 901',hasVehicle:true},
-  {id:'c5',name:'Tyler Reeves',role:'Shearer',phone:'0456 789 012',hasVehicle:false},
-  {id:'c6',name:'Bec Nguyen',role:'Wool Handler',phone:'0467 890 123',hasVehicle:false},
-  {id:'c7',name:'Mick Thomson',role:'Presser',phone:'0478 901 234',hasVehicle:true},
-  {id:'c8',name:'Amy Fraser',role:'Wool Classer',phone:'0489 012 345',hasVehicle:false},
-  {id:'c9',name:'Sam Doyle',role:'Shearer',phone:'0490 123 456',hasVehicle:true},
-  {id:'c10',name:'Lena Cross',role:'Wool Handler',phone:'0401 234 567',hasVehicle:false},
-  {id:'c11',name:'Ryan Oakes',role:'Shearer',phone:'0412 345 670',hasVehicle:false},
-  {id:'c12',name:'Pete Drummond',role:'Penner',phone:'0423 456 781',hasVehicle:true},
+const CREW=[
+  {id:'c1',name:'Jack Morrison',   role:'Shearer',      phone:'0412 345 678',hasVehicle:false},
+  {id:'c2',name:'Dave Pearce',     role:'Shearer',      phone:'0423 456 789',hasVehicle:true},
+  {id:'c3',name:'Nathan Cooper',   role:'Shearer',      phone:'0434 567 890',hasVehicle:false},
+  {id:'c4',name:'Sharna Williams', role:'Shearer',      phone:'0445 678 901',hasVehicle:true},
+  {id:'c5',name:'Tyler Reeves',    role:'Shearer',      phone:'0456 789 012',hasVehicle:false},
+  {id:'c6',name:'Bec Nguyen',      role:'Wool Handler', phone:'0467 890 123',hasVehicle:false},
+  {id:'c7',name:'Mick Thomson',    role:'Presser',      phone:'0478 901 234',hasVehicle:true},
+  {id:'c8',name:'Amy Fraser',      role:'Wool Classer', phone:'0489 012 345',hasVehicle:false},
+  {id:'c9',name:'Sam Doyle',       role:'Shearer',      phone:'0490 123 456',hasVehicle:true},
+  {id:'c10',name:'Lena Cross',     role:'Wool Handler', phone:'0401 234 567',hasVehicle:false},
+  {id:'c11',name:'Ryan Oakes',     role:'Shearer',      phone:'0412 345 670',hasVehicle:false},
+  {id:'c12',name:'Pete Drummond',  role:'Penner',       phone:'0423 456 781',hasVehicle:true},
 ];
 
-const INIT_JOBS = [
-  {
-    id:'j1',jobNumber:'001401',farmId:'f1',type:'Shearing',
-    notes:'Full shear — Merino, crt and wig. 6 stands. Bring own EVOs.',
-    startDate:'2026-03-30',daysAllocated:5,totalSheep:5000,
-    evos:'BYO',crutchingTrailer:false,transport:true,
-    accommodation:'Shearers quarters on property',
-    status:'Active',
-    crew:['c1','c2','c3','c4','c5','c6','c7','c8'],
-    tallies:{c1:[185,192,188],c2:[220,228,215],c3:[168,175,171],c4:[198,205,202],c5:[180,188,184]}
-  },
-  {
-    id:'j2',jobNumber:'001402',farmId:'f2',type:'Crutching',
-    notes:'Pre-lamb crutch. Ewes only.',
-    startDate:'2026-03-31',daysAllocated:2,totalSheep:1800,
-    evos:'Supplied at shed',crutchingTrailer:true,transport:false,
-    accommodation:'Day trip — no accommodation',
-    status:'Active',
-    crew:['c9','c10','c11','c12'],
-    tallies:{c9:[380],c11:[350]}
-  },
-  {
-    id:'j3',jobNumber:'001399',farmId:'f3',type:'Shearing',
-    notes:'Full shear. Completed ahead of schedule.',
-    startDate:'2026-03-24',daysAllocated:3,totalSheep:2400,
-    evos:'Supplied at shed',crutchingTrailer:false,transport:true,
-    accommodation:'None',
-    status:'Completed',
-    crew:['c1','c2','c9','c6','c7'],
-    tallies:{c1:[128,135,140],c2:[150,158,162],c9:[210,218,225]}
-  },
-  {
-    id:'j4',jobNumber:'001403',farmId:'f4',type:'Shearing',
-    notes:'Big mob — 8 stands. Merino crossbred. Accommodation on site.',
-    startDate:'2026-04-07',daysAllocated:6,totalSheep:8500,
-    evos:'BYO',crutchingTrailer:false,transport:true,
-    accommodation:'Shearers quarters — dinner provided nightly',
-    status:'Dispatched',
-    crew:['c1','c2','c3','c4','c5','c9','c11','c6','c10','c7','c8','c12'],
-    tallies:{}
-  },
+const mk=(dates,runsArr)=>{const t={};dates.forEach((d,i)=>{t[d]=runsArr[i]||[0,0,0,0];});return t;};
+const D0='2026-03-28',D1='2026-03-29',D2='2026-03-30',D3='2026-03-31';
+
+const INIT_JOBS=[
+  {id:'j1',jobNumber:'001401',farmId:'f1',type:'Shearing',notes:'Full shear — Merino, crt and wig. 6 stands. Bring own EVOs.',startDate:'2026-03-28',daysAllocated:5,totalSheep:5000,evos:'BYO',crutchingTrailer:false,transport:true,accommodation:'Shearers quarters on property',status:'Active',crew:['c1','c2','c3','c4','c5','c6','c7','c8'],mobs:['Merino Ewes','Wethers'],
+    tallies:{
+      c1:mk([D0,D1,D2,D3],[[162,178,0,0],[185,183,191,0],[188,192,0,0],[174,0,0,0]]),
+      c2:mk([D0,D1,D2,D3],[[198,210,0,0],[220,218,228,0],[215,222,0,0],[208,0,0,0]]),
+      c3:mk([D0,D1,D2,D3],[[145,152,0,0],[168,171,175,0],[171,178,0,0],[165,0,0,0]]),
+      c4:mk([D0,D1,D2,D3],[[175,182,0,0],[198,201,205,0],[202,196,0,0],[190,0,0,0]]),
+      c5:mk([D0,D1,D2,D3],[[155,168,0,0],[180,184,188,0],[184,179,0,0],[172,0,0,0]]),
+    },
+    shedTallies:{c6:{[D0]:2,[D1]:3,[D2]:2,[D3]:1},c8:{[D0]:2,[D1]:3,[D2]:2,[D3]:1}},
+    baleTallies:{c7:{[D0]:4,[D1]:5,[D2]:4,[D3]:2}},baleBF:{c7:12}},
+  {id:'j2',jobNumber:'001402',farmId:'f2',type:'Crutching',notes:'Pre-lamb crutch. Ewes only.',startDate:'2026-03-31',daysAllocated:2,totalSheep:1800,evos:'Supplied at shed',crutchingTrailer:true,transport:false,accommodation:'Day trip — no accommodation',status:'Active',crew:['c9','c10','c11','c12'],mobs:['Merino Ewes'],
+    tallies:{c9:mk([D3],[[310,0,0,0]]),c11:mk([D3],[[285,0,0,0]])},
+    shedTallies:{c10:{[D3]:1},c12:{[D3]:1}},baleTallies:{},baleBF:{}},
+  {id:'j3',jobNumber:'001399',farmId:'f3',type:'Shearing',notes:'Full shear. Completed ahead of schedule.',startDate:'2026-03-24',daysAllocated:3,totalSheep:2400,evos:'Supplied at shed',crutchingTrailer:false,transport:true,accommodation:'None',status:'Completed',crew:['c1','c2','c9','c6','c7'],mobs:['Merino Ewes','Wethers'],
+    tallies:{c1:mk(['2026-03-24','2026-03-25','2026-03-26'],[[260,0,0,0],[268,0,0,0],[275,0,0,0]]),c2:mk(['2026-03-24','2026-03-25','2026-03-26'],[[302,0,0,0],[315,0,0,0],[320,0,0,0]]),c9:mk(['2026-03-24','2026-03-25','2026-03-26'],[[280,0,0,0],[290,0,0,0],[298,0,0,0]])},
+    shedTallies:{c6:{'2026-03-24':1,'2026-03-25':1,'2026-03-26':1}},
+    baleTallies:{c7:{'2026-03-24':3,'2026-03-25':4,'2026-03-26':3}},baleBF:{c7:8}},
+  {id:'j4',jobNumber:'001403',farmId:'f4',type:'Shearing',notes:'Big mob — 8 stands. Merino crossbred.',startDate:'2026-04-07',daysAllocated:6,totalSheep:8500,evos:'BYO',crutchingTrailer:false,transport:true,accommodation:'Shearers quarters — dinner provided nightly',status:'Dispatched',crew:['c1','c2','c3','c4','c5','c9','c11','c6','c10','c7','c8','c12'],mobs:['Merino Ewes'],
+    tallies:{},shedTallies:{},baleTallies:{},baleBF:{}},
 ];
 
-/* ═════════════ HELPERS ═════════════ */
-const gf = id => FARMS.find(f=>f.id===id);
-const gc = id => CREW.find(c=>c.id===id);
-
-const AVCOLS = [
-  {bg:'#78350f',fg:'#fbbf24'},{bg:'#14532d',fg:'#4ade80'},
-  {bg:'#1e3a5f',fg:'#60a5fa'},{bg:'#7f1d1d',fg:'#f87171'},
-  {bg:'#3b0764',fg:'#c084fc'},{bg:'#064e3b',fg:'#34d399'},
-  {bg:'#7c2d12',fg:'#fb923c'},{bg:'#581c87',fg:'#e879f9'},
-  {bg:'#0c4a6e',fg:'#38bdf8'},{bg:'#1a2e05',fg:'#a3e635'},
-  {bg:'#431407',fg:'#fdba74'},{bg:'#1e1b4b',fg:'#818cf8'},
-];
-const avc = name => AVCOLS[name.charCodeAt(0)%AVCOLS.length];
-const init = name => name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
-
-function Av({name,size=34}){
-  const c=avc(name);
-  return e('div',{className:'av',style:{width:size,height:size,background:c.bg,color:c.fg,fontSize:size*.38+'px'}},init(name));
-}
-
-function Bdg({status}){
-  const m={Active:'b-active',Completed:'b-completed','Charged Out':'b-charged',Dispatched:'b-dispatched'};
-  const dots={Active:'● ',Completed:'● ',Dispatched:'◆ '};
-  return e('span',{className:`badge ${m[status]||'b-active'}`},(dots[status]||'')+status);
-}
-
+/* ══ HELPERS ══ */
+const gf=id=>FARMS.find(f=>f.id===id);
+const gc=id=>CREW.find(c=>c.id===id);
+const AVC=[{bg:'#78350f',fg:'#fbbf24'},{bg:'#14532d',fg:'#4ade80'},{bg:'#1e3a5f',fg:'#60a5fa'},{bg:'#7f1d1d',fg:'#f87171'},{bg:'#3b0764',fg:'#c084fc'},{bg:'#064e3b',fg:'#34d399'},{bg:'#7c2d12',fg:'#fb923c'},{bg:'#581c87',fg:'#e879f9'},{bg:'#0c4a6e',fg:'#38bdf8'},{bg:'#1a2e05',fg:'#a3e635'},{bg:'#431407',fg:'#fdba74'},{bg:'#1e1b4b',fg:'#818cf8'}];
+const avc=n=>AVC[n.charCodeAt(0)%AVC.length];
+const init=n=>n.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+function Av({name,size=34}){const c=avc(name);return e('div',{className:'av',style:{width:size,height:size,background:c.bg,color:c.fg,fontSize:size*.38+'px'}},init(name));}
+function Bdg({status}){const m={Active:'b-active',Completed:'b-completed','Charged Out':'b-charged',Dispatched:'b-dispatched'};const d={Active:'● ',Completed:'● ',Dispatched:'◆ '};return e('span',{className:`badge ${m[status]||'b-active'}`},(d[status]||'')+status);}
+function addDays(d,n){const dt=new Date(d+'T00:00:00');dt.setDate(dt.getDate()+n);return dt.toISOString().split('T')[0];}
+function fmtDate(d){return new Date(d+'T00:00:00').toLocaleDateString('en-AU',{day:'2-digit',month:'2-digit',year:'numeric'}).replace(/\//g,'-');}
+function fmtDateLong(d){return new Date(d+'T00:00:00').toLocaleDateString('en-AU',{weekday:'short',day:'numeric',month:'short'});}
+function jobDates(j){const ds=[];for(let i=0;i<j.daysAllocated;i++)ds.push(addDays(j.startDate,i));return ds;}
 function calcProg(job){
   const shIds=job.crew.filter(id=>{const c=gc(id);return c&&c.role==='Shearer';});
-  let shorn=0,maxD=0;
-  shIds.forEach(id=>{
-    const d=job.tallies[id]||[];
-    shorn+=d.reduce((a,b)=>a+b,0);
-    maxD=Math.max(maxD,d.length);
-  });
-  const pct=job.totalSheep>0?(shorn/job.totalSheep)*100:0;
-  const avgDay=maxD>0?shorn/maxD:0;
-  const rem=job.totalSheep-shorn;
-  const dRem=job.daysAllocated-maxD;
-  const needDay=dRem>0?rem/dRem:0;
-  const diff=avgDay-needDay;
-  const pace=diff<-60?'behind':diff<0?'tight':'good';
-  return{shorn,pct,avgDay,rem,dRem,dWorked:maxD,needDay,diff,pace,shIds};
+  let shorn=0,daysWorked=0;
+  shIds.forEach(id=>{const t=job.tallies[id]||{};Object.values(t).forEach(r=>{shorn+=r.reduce((a,b)=>a+b,0);});daysWorked=Math.max(daysWorked,Object.keys(t).length);});
+  return{shorn,pct:job.totalSheep>0?Math.min(shorn/job.totalSheep*100,100):0,daysWorked,shIds};
 }
 
-function fmtDate(d){
-  const dt=new Date(d+'T00:00:00');
-  return dt.toLocaleDateString('en-AU',{day:'2-digit',month:'2-digit',year:'numeric'}).replace(/\//g,'-');
-}
-function addDays(d,n){
-  const dt=new Date(d+'T00:00:00');
-  dt.setDate(dt.getDate()+n);
-  return dt.toISOString().split('T')[0];
-}
-function fmtDateLong(d){
-  const dt=new Date(d+'T00:00:00');
-  return dt.toLocaleDateString('en-AU',{weekday:'short',day:'numeric',month:'short'});
-}
-
-/* ═════════════ TOP BAR ═════════════ */
+/* ══ TOP BAR ══ */
 function TopBar({role,setRole,onBack,backLabel}){
   return e('div',{className:'topbar'},
-    onBack
-      ? e('button',{className:'back-btn',onClick:onBack},
-          e('span',{className:'back-arr'},'←'),
-          e('span',{className:'back-label'},backLabel||'Back')
-        )
-      : e('div',{className:'logo'},'i',e('em',null,'Gang')),
+    onBack?e('button',{className:'back-btn',onClick:onBack},e('span',{className:'back-arr'},'←'),e('span',{className:'back-label'},backLabel||'Back'))
+          :e('div',{className:'logo'},'i',e('em',null,'Gang')),
     e('div',{className:'role-toggle'},
       [['👁','View','read_only'],['📋','Lead','shed_lead'],['🔑','Admin','admin']].map(([ic,lbl,rv])=>
         e('button',{key:rv,className:`rt-btn${role===rv?' active':''}`,onClick:()=>setRole(rv)},`${ic} ${lbl}`)
@@ -500,334 +329,336 @@ function TopBar({role,setRole,onBack,backLabel}){
   );
 }
 
-/* ═════════════ WEEK BANNER ═════════════ */
+/* ══ WEEK BANNER ══ */
 function WeekBanner({jobs}){
   const active=jobs.filter(j=>j.status==='Active');
-  const allCrew=new Set(jobs.filter(j=>j.status==='Active'||j.status==='Dispatched').flatMap(j=>j.crew)).size;
-  const totSheep=active.reduce((s,j)=>s+j.totalSheep,0);
-  const shorn=active.reduce((s,j)=>{
-    const p=calcProg(j);return s+p.shorn;
-  },0);
-  const rem=totSheep-shorn;
+  const crew=new Set(jobs.filter(j=>j.status==='Active'||j.status==='Dispatched').flatMap(j=>j.crew)).size;
+  const shorn=active.reduce((s,j)=>s+calcProg(j).shorn,0);
+  const total=active.reduce((s,j)=>s+j.totalSheep,0);
   const today=new Date().toLocaleDateString('en-AU',{weekday:'long',day:'numeric',month:'short'});
   return e('div',{className:'week-banner'},
-    e('div',{className:'wb-top'},
-      e('div',{className:'wb-title'},'This Week'),
-      e('div',{className:'wb-date'},today)
-    ),
+    e('div',{className:'wb-top'},e('div',{className:'wb-title'},'This Week'),e('div',{className:'wb-date'},today)),
     e('div',{className:'wb-stats'},
       e('div',{className:'wb-stat'},e('div',{className:'wb-num'},active.length),e('div',{className:'wb-lbl'},'Active')),
-      e('div',{className:'wb-stat'},e('div',{className:'wb-num'},jobs.filter(j=>j.status==='Dispatched').length),e('div',{className:'wb-lbl'},'Dispatched')),
-      e('div',{className:'wb-stat'},e('div',{className:'wb-num'},allCrew),e('div',{className:'wb-lbl'},'Crew Out')),
-      e('div',{className:'wb-stat'},e('div',{className:'wb-num'},rem>0?rem.toLocaleString():'✓'),e('div',{className:'wb-lbl'},'Sheep Left'))
+      e('div',{className:'wb-stat'},e('div',{className:'wb-num'},jobs.filter(j=>j.status==='Dispatched').length),e('div',{className:'wb-lbl'},'Upcoming')),
+      e('div',{className:'wb-stat'},e('div',{className:'wb-num'},crew),e('div',{className:'wb-lbl'},'Crew Out')),
+      e('div',{className:'wb-stat'},e('div',{className:'wb-num'},total-shorn>0?(total-shorn).toLocaleString():'✓'),e('div',{className:'wb-lbl'},'Remaining'))
     )
   );
 }
 
-/* ═════════════ JOB LIST CARD ═════════════ */
-function JLC({job,onClick,role}){
+/* ══ JOB LIST CARD ══ */
+function JLC({job,onClick}){
   const farm=gf(job.farmId);
   const p=calcProg(job);
-  const fillCls=p.pace==='behind'?'fill-r':p.pace==='tight'?'fill-a':'fill-g';
-  const statusCls=job.status==='Completed'||job.status==='Charged Out'?'fill-b':fillCls;
+  const cls=p.pct>=80?'fg':p.pct>=40?'fa':'fr';
   return e('div',{className:'jlc',onClick},
-    e('div',{className:'jlc-top'},
-      e('div',null,
-        e('div',{className:'jlc-name'},farm?farm.name:'Unknown Farm'),
-        e('div',{className:'jlc-num'},'#'+job.jobNumber)
-      ),
-      e(Bdg,{status:job.status})
+    e('div',{className:'jlc-top'},e('div',null,e('div',{className:'jlc-name'},farm?farm.name:'Unknown'),e('div',{className:'jlc-num'},'#'+job.jobNumber)),e(Bdg,{status:job.status})),
+    e('div',{className:'jlc-meta'},e('span',{className:'pill'},job.type),e('span',{style:{fontSize:'12px',color:'var(--muted)'}},job.totalSheep.toLocaleString()+' sheep'),e('span',{style:{fontSize:'12px',color:'var(--muted)'}},job.crew.length+' crew')),
+    job.status==='Active'&&p.daysWorked>0&&e('div',null,
+      e('div',{className:'jlc-pr'},e('span',null,p.shorn.toLocaleString()+' / '+job.totalSheep.toLocaleString()+' — Day '+p.daysWorked+' of '+job.daysAllocated),e('span',{className:'pct-lbl'},Math.round(p.pct)+'%')),
+      e('div',{className:'pbar'},e('div',{className:`pbar-f ${cls}`,style:{width:p.pct+'%'}}))
     ),
-    e('div',{className:'jlc-meta'},
-      e('span',{className:'pill'},job.type),
-      e('span',{style:{fontSize:'12px',color:'var(--muted)'}},job.totalSheep.toLocaleString()+' sheep'),
-      e('span',{style:{fontSize:'12px',color:'var(--muted)'}},job.crew.length+' crew')
-    ),
-    job.status==='Active'&&p.dWorked>0&&e('div',null,
-      e('div',{className:'jlc-prog-row'},
-        e('span',null,p.shorn.toLocaleString()+' / '+job.totalSheep.toLocaleString()+' shorn — Day '+p.dWorked+' of '+job.daysAllocated),
-        e('span',{className:'jlc-pct'},Math.round(p.pct)+'%')
-      ),
-      e('div',{className:'pbar'},e('div',{className:`pbar-fill ${statusCls}`,style:{width:Math.min(p.pct,100)+'%'}}))
-    ),
-    job.status==='Dispatched'&&e('div',{style:{fontSize:'12px',color:'var(--amber)',marginTop:'6px'}},
-      '📱 Job cards dispatched — starts '+fmtDateLong(job.startDate)
-    ),
-    job.status==='Completed'&&e('div',{style:{fontSize:'12px',color:'var(--blue)',marginTop:'6px'}},
-      '✓ '+p.shorn.toLocaleString()+' sheep shorn'
-    )
+    job.status==='Dispatched'&&e('div',{style:{fontSize:'12px',color:'var(--amber)',marginTop:'6px'}},'📱 Dispatched — starts '+fmtDateLong(job.startDate)),
+    job.status==='Completed'&&e('div',{style:{fontSize:'12px',color:'var(--blue)',marginTop:'6px'}},'✓ '+p.shorn.toLocaleString()+' shorn')
   );
 }
 
-/* ═════════════ HOME SCREEN ═════════════ */
-function HomeScreen({jobs,role,setRole,onJob,onNew}){
-  const active=jobs.filter(j=>j.status==='Active');
-  const dispatched=jobs.filter(j=>j.status==='Dispatched');
-  const done=jobs.filter(j=>j.status==='Completed'||j.status==='Charged Out');
-  const Sec=({title,items})=>items.length===0?null:e('div',null,
-    e('div',{className:'section-lbl'},title),
-    items.map(j=>e(JLC,{key:j.id,job:j,role,onClick:()=>onJob(j.id)}))
-  );
-  return e('div',null,
-    e(TopBar,{role,setRole}),
-    e('div',{className:'screen'},
-      e(WeekBanner,{jobs}),
-      e(Sec,{title:'Active',items:active}),
-      e(Sec,{title:'Dispatched — Upcoming',items:dispatched}),
-      e(Sec,{title:'Completed',items:done}),
-    ),
-    (role==='admin'||role==='shed_lead')&&e('button',{className:'fab',onClick:onNew},'+')
-  );
-}
+/* ══════════════════════════════════
+   TALLY TAB — the hero screen
+══════════════════════════════════ */
+function TallyTab({job,setJob,role,viewDate,setViewDate}){
+  const canEdit=role==='shed_lead'||role==='admin';
+  const dates=jobDates(job);
+  const dIdx=dates.indexOf(viewDate);
+  const todayStr=new Date().toISOString().split('T')[0];
+  const [mob,setMob]=useState(job.mobs&&job.mobs[0]||'All Sheep');
 
-/* ═════════════ OVERVIEW TAB ═════════════ */
-function OverviewTab({job,role}){
-  const farm=gf(job.farmId);
-  const IC=({l,v,mn,full})=>e('div',{className:'ic'+(full?' full-ic':'')},e('div',{className:'ic-l'},l),e('div',{className:'ic-v'+(mn?' mn':'')},v));
+  const shearers=job.crew.filter(id=>{const c=gc(id);return c&&c.role==='Shearer';});
+  const shedStaff=job.crew.filter(id=>{const c=gc(id);return c&&(c.role==='Wool Handler'||c.role==='Wool Classer'||c.role==='Penner');});
+  const pressers=job.crew.filter(id=>{const c=gc(id);return c&&c.role==='Presser';});
+
+  const setRun=(crewId,ri,val)=>{
+    setJob(prev=>{
+      const j={...prev,tallies:{...prev.tallies}};
+      const day={...((j.tallies[crewId]||{}))};
+      const runs=[...(day[viewDate]||[0,0,0,0])];
+      runs[ri]=parseInt(val)||0;
+      day[viewDate]=runs;
+      j.tallies[crewId]=day;
+      return j;
+    });
+  };
+
+  const setShed=(crewId,val)=>{
+    setJob(prev=>{
+      const j={...prev,shedTallies:{...prev.shedTallies}};
+      j.shedTallies[crewId]={...(j.shedTallies[crewId]||{}),[viewDate]:Math.max(0,val)};
+      return j;
+    });
+  };
+
+  const setBale=(crewId,val)=>{
+    setJob(prev=>{
+      const j={...prev,baleTallies:{...prev.baleTallies}};
+      j.baleTallies[crewId]={...(j.baleTallies[crewId]||{}),[viewDate]:Math.max(0,val)};
+      return j;
+    });
+  };
+
+  const baleTot=id=>Object.values(job.baleTallies[id]||{}).reduce((a,b)=>a+b,0);
+
+  const dayTotals=shearers.map(id=>{
+    const runs=(job.tallies[id]||{})[viewDate]||[0,0,0,0];
+    return{id,runs,total:runs.reduce((a,b)=>a+b,0)};
+  });
+  const dayGrand=dayTotals.reduce((s,x)=>s+x.total,0);
+
   return e('div',null,
-    e('div',{className:'info-grid'},
-      e(IC,{l:'Job Type',v:job.type}),
-      e(IC,{l:'Total Sheep',v:job.totalSheep.toLocaleString(),mn:true}),
-      e(IC,{l:'Start Date',v:fmtDateLong(job.startDate)}),
-      e(IC,{l:'Days Allocated',v:job.daysAllocated+' days'}),
-      e(IC,{l:'EVOs',v:job.evos}),
-      e(IC,{l:'Transport',v:job.transport?'✓ Available':'BYO transport'}),
-      e(IC,{l:'Crutching Trailer',v:job.crutchingTrailer?'✓ Provided':'Not provided'}),
-      e(IC,{l:'Accommodation',v:job.accommodation,full:true}),
+    /* Date nav */
+    e('div',{className:'date-nav'},
+      e('button',{className:'dn-arr',disabled:dIdx<=0,onClick:()=>setViewDate(dates[dIdx-1])},'‹'),
+      e('div',{className:'dn-center'},
+        e('div',{className:'dn-day'},'Day '+(dIdx+1)),
+        e('div',{className:'dn-date'},fmtDateLong(viewDate)),
+        viewDate===todayStr&&e('span',{className:'dn-today'},'TODAY')
+      ),
+      e('button',{className:'dn-arr',disabled:dIdx>=dates.length-1,onClick:()=>setViewDate(dates[dIdx+1])},'›')
     ),
-    job.notes&&e('div',{style:{padding:'0 14px',marginBottom:'12px'}},
-      e('div',{className:'ic'},
-        e('div',{className:'ic-l'},'Notes'),
-        e('div',{className:'ic-v',style:{fontSize:'13px',color:'var(--muted)',fontWeight:'400'}},job.notes)
-      )
+    /* Mob strip */
+    job.mobs&&job.mobs.length>1&&e('div',{className:'mob-strip'},
+      job.mobs.map(m=>e('div',{key:m,className:`mob-chip${mob===m?' act':''}`,onClick:()=>setMob(m)},m))
     ),
-    farm&&e('div',{style:{padding:'0 14px',marginBottom:'12px'}},
-      e('div',{className:'ic'},
-        e('div',{className:'ic-l'},'Farm Address'),
-        e('div',{className:'ic-v',style:{fontSize:'14px'}},farm.address),
-        farm.notes&&e('div',{style:{fontSize:'12px',color:'var(--dim)',marginTop:'4px'}},farm.notes),
-        e('a',{
-          href:'https://maps.google.com/?q='+encodeURIComponent(farm.address),
-          target:'_blank',className:'map-link'
-        },'📍 Open in Maps')
-      )
-    ),
-    e('div',{className:'crew-hdr'},e('span',null,'Crew — '+job.crew.length)),
-    job.crew.map(id=>{
+    !canEdit&&e('div',{className:'read-hint'},'👁 View only — shed lead or admin can edit tallies'),
+
+    /* SHEARERS */
+    dayTotals.map(({id,runs,total})=>{
       const c=gc(id);if(!c)return null;
-      return e('div',{key:id,className:'crew-row'},
-        e('div',{className:'cr-l'},
-          e(Av,{name:c.name}),
-          e('div',null,
-            e('div',{className:'cr-name'},c.name,c.hasVehicle&&e('span',{className:'car-tag'},'🚗 Car')),
-            e('div',{className:'cr-role'},c.role)
-          )
+      return e('div',{key:id,className:'sh-block'},
+        e('div',{className:'sh-hdr'},
+          e('div',{className:'sh-left'},e(Av,{name:c.name}),e('div',null,e('div',{className:'sh-name'},c.name),e('div',{className:'sh-role'},c.role))),
+          e('div',null,e('div',{className:'sh-daily'},total||'—'),e('div',{className:'sh-daily-lbl'},'Today'))
         ),
-        role==='admin'&&e('div',{style:{fontFamily:'var(--m)',fontSize:'12px',color:'var(--dim)'}},c.phone)
+        e('div',{className:'runs-row'},
+          [0,1,2,3].map(ri=>
+            e('div',{key:ri,className:'run-cell'},
+              e('div',{className:'run-lbl'},'Run '+(ri+1)),
+              e('input',{type:'number',className:'run-inp',placeholder:'—',value:runs[ri]||'',disabled:!canEdit,inputMode:'numeric',onChange:ev=>setRun(id,ri,ev.target.value),onFocus:ev=>ev.target.select()})
+            )
+          ),
+          e('div',{className:'run-tot-cell'},
+            e('div',{className:'run-tot-lbl'},'Total'),
+            e('div',{className:'run-tot-val'},total||'—')
+          )
+        )
       );
-    })
+    }),
+
+    /* SHED STAFF */
+    shedStaff.length>0&&e('div',{className:'staff-block'},
+      e('div',{className:'sec-lbl'},'Shed Staff — Runs'),
+      shedStaff.map(id=>{
+        const c=gc(id);if(!c)return null;
+        const val=(job.shedTallies[id]||{})[viewDate]||0;
+        return e('div',{key:id,className:'sr2'},
+          e('div',{className:'sr2-l'},e(Av,{name:c.name,size:36}),e('div',null,e('div',{className:'sr2-name'},c.name),e('div',{className:'sr2-role'},c.role))),
+          e('div',{className:'stepper'},
+            e('button',{className:'step-btn',disabled:!canEdit||val<=0,onClick:()=>setShed(id,val-1)},'−'),
+            e('div',{className:'step-val'},val),
+            e('button',{className:'step-btn',disabled:!canEdit,onClick:()=>setShed(id,val+1)},'+')
+          )
+        );
+      })
+    ),
+
+    /* PRESSER */
+    pressers.length>0&&e('div',{className:'press-block'},
+      e('div',{className:'sec-lbl'},'Presser — Bale Tally'),
+      pressers.map(id=>{
+        const c=gc(id);if(!c)return null;
+        const todayB=(job.baleTallies[id]||{})[viewDate]||0;
+        const bf=job.baleBF[id]||0;
+        const toDate=bf+baleTot(id);
+        return e('div',{key:id,className:'bale-row'},
+          e('div',null,e('div',{className:'bale-name'},c.name),e('div',{className:'cr-role'},c.role)),
+          e('div',{className:'bale-stats'},
+            e('div',{className:'bale-s'},e('div',{className:'bale-v'},bf),e('div',{className:'bale-l'},'B/F')),
+            e('div',{className:'bale-s bale-ctrl'},
+              e('div',{className:'stepper'},
+                e('button',{className:'step-btn',style:{width:28,height:28,fontSize:16},disabled:!canEdit||todayB<=0,onClick:()=>setBale(id,todayB-1)},'−'),
+                e('div',{className:'step-val',style:{width:32}},todayB),
+                e('button',{className:'step-btn',style:{width:28,height:28,fontSize:16},disabled:!canEdit,onClick:()=>setBale(id,todayB+1)},'+')
+              ),
+              e('div',{className:'bale-l'},'Today')
+            ),
+            e('div',{className:'bale-s'},e('div',{className:'bale-v',style:{color:'var(--amber)'}},toDate),e('div',{className:'bale-l'},'To Date'))
+          )
+        );
+      })
+    ),
+
+    /* DAY SUMMARY */
+    dayGrand>0&&e('div',{className:'day-summary'},
+      e('div',{className:'ds-row'},e('span',{className:'ds-l'},'Day '+(dIdx+1)+' — Shearers'),e('span',{className:'ds-v ds-big'},dayGrand.toLocaleString())),
+      e('div',{className:'ds-row'},e('span',{className:'ds-l'},'Job Total to Date'),e('span',{className:'ds-v'},calcProg(job).shorn.toLocaleString()+' / '+job.totalSheep.toLocaleString())),
+      pressers.length>0&&e('div',{className:'ds-row'},
+        e('span',{className:'ds-l'},'Bales to Date'),
+        e('span',{className:'ds-v'},pressers.map(id=>(job.baleBF[id]||0)+baleTot(id)).join(', '))
+      )
+    ),
+    e('div',{style:{height:8}})
   );
 }
 
-/* ═════════════ PROGRESS TAB ═════════════ */
+/* ══ PROGRESS TAB (simplified) ══ */
 function ProgressTab({job}){
   const p=calcProg(job);
-  if(p.dWorked===0)return e('div',{className:'no-data'},
-    e('div',{className:'no-data-icon'},'📊'),
-    e('div',null,'No tallies entered yet'),
-    e('div',{style:{fontSize:'12px',marginTop:'6px'}},'Shed lead enters counts each run break')
-  );
-  const fillCls=p.pace==='behind'?'fill-r':p.pace==='tight'?'fill-a':'fill-g';
-  const pceCls=p.pace==='behind'?'c-r':p.pace==='tight'?'c-a':'c-g';
-  const pceLabel=p.pace==='behind'
-    ?`⚠ Behind — ${Math.abs(Math.round(p.diff))}/day short`
-    :p.pace==='tight'
-    ?`△ Tight — ${Math.abs(Math.round(p.diff))}/day short`
-    :`✓ On track`;
-  const projDays=p.avgDay>0?p.rem/p.avgDay:0;
-  const projLabel=projDays<=p.dRem?`Finish Day ${p.dWorked+Math.ceil(projDays)} ✓`
-    :`${Math.ceil(projDays-p.dRem)} day(s) over budget`;
-  const maxToday=Math.max(...p.shIds.map(id=>{const d=job.tallies[id]||[];return d[d.length-1]||0;}),1);
-  return e('div',{className:'pt'},
+  if(p.daysWorked===0) return e('div',{style:{padding:'40px 14px',textAlign:'center',color:'var(--dim)'}},e('div',{style:{fontSize:40,marginBottom:8}},'📊'),e('div',null,'No tallies yet'));
+  const pCls=p.pct>=80?'fg':p.pct>=40?'fa':'fr';
+  const maxTot=Math.max(...p.shIds.map(id=>{const t=job.tallies[id]||{};return Object.values(t).reduce((s,r)=>s+r.reduce((a,b)=>a+b,0),0);}),1);
+  return e('div',{className:'prog-wrap'},
     e('div',{className:'pc'},
-      e('div',{className:'pc-lbl'},'Completion'),
-      e('div',{className:'pc-big'},
-        e('div',null,
-          e('div',{className:'pc-count'},p.shorn.toLocaleString()),
-          e('div',{className:'pc-of'},'of '+job.totalSheep.toLocaleString()+' sheep')
-        ),
-        e('div',{className:'pc-pct-block'},
-          e('div',{className:'pc-pct',style:{color:'var(--'+( p.pace==='good'?'green':p.pace==='tight'?'amber':'red')+')'}},Math.round(p.pct)+'%'),
-          e('div',{className:'pc-day'},'Day '+p.dWorked+' of '+job.daysAllocated)
-        )
+      e('div',{className:'pc-lbl'},'Job Progress'),
+      e('div',{className:'prog-big'},
+        e('div',null,e('div',{className:'prog-count'},p.shorn.toLocaleString()),e('div',{className:'prog-of'},'of '+job.totalSheep.toLocaleString()+' sheep')),
+        e('div',null,e('div',{className:'prog-pct'},Math.round(p.pct)+'%'),e('div',{className:'prog-day'},'Day '+p.daysWorked+' of '+job.daysAllocated))
       ),
-      e('div',{className:'pbar-lg'},e('div',{className:`pbar-lg-fill ${fillCls}`,style:{width:Math.min(p.pct,100)+'%'}})),
-      e('div',{className:'pace-row'},e('span',{className:'pace-l'},'Status'),e('span',{className:`pace-v ${pceCls}`},pceLabel)),
-      e('div',{className:'pace-row'},e('span',{className:'pace-l'},'Running avg'),e('span',{className:'pace-v'},Math.round(p.avgDay).toLocaleString()+'/day')),
-      e('div',{className:'pace-row'},e('span',{className:'pace-l'},'Need to finish'),e('span',{className:'pace-v'},Math.round(p.needDay).toLocaleString()+'/day')),
-      e('div',{className:'pace-row'},e('span',{className:'pace-l'},'Projection'),e('span',{className:`pace-v ${p.avgDay>0&&p.rem/p.avgDay<=p.dRem?'c-g':'c-a'}`},projLabel)),
-      e('div',{className:'pace-row'},e('span',{className:'pace-l'},'Remaining'),e('span',{className:'pace-v'},p.rem.toLocaleString()+' sheep, '+p.dRem+' day'+(p.dRem!==1?'s':'')+' left'))
+      e('div',{className:'pbar-lg'},e('div',{className:`pbar-lf ${pCls}`,style:{width:p.pct+'%'}})),
+      e('div',{style:{fontSize:'12px',color:'var(--dim)',marginTop:4}},(job.totalSheep-p.shorn).toLocaleString()+' sheep remaining — '+(job.daysAllocated-p.daysWorked)+' day'+(job.daysAllocated-p.daysWorked!==1?'s':'')+' left')
     ),
-    p.shIds.length>0&&e('div',{className:'pc'},
-      e('div',{className:'pc-lbl'},'Today — Day '+p.dWorked),
+    e('div',{className:'pc'},
+      e('div',{className:'pc-lbl'},'By Shearer — Job Total'),
       p.shIds.map(id=>{
         const c=gc(id);if(!c)return null;
-        const days=job.tallies[id]||[];
-        const today=days[days.length-1]||0;
-        const total=days.reduce((a,b)=>a+b,0);
+        const t=job.tallies[id]||{};
+        const tot=Object.values(t).reduce((s,r)=>s+r.reduce((a,b)=>a+b,0),0);
+        const days=Object.keys(t).filter(d=>t[d].some(x=>x>0)).length;
+        const avg=days>0?Math.round(tot/days):0;
         const fn=c.name.split(' ')[0]+' '+c.name.split(' ').slice(-1)[0][0]+'.';
-        return e('div',{key:id,className:'sr-row'},
-          e('div',{className:'sr-name'},fn),
-          e('div',{className:'sr-bar-w'},e('div',{className:'sr-bar'},e('div',{className:'sr-bar-f',style:{width:(today/maxToday*100)+'%'}}))),
-          e('div',{className:'sr-today'},today),
-          e('div',{className:'sr-tot'},total.toLocaleString()+' tot')
+        return e('div',{key:id,className:'spr'},
+          e('div',{className:'spr-name'},fn),
+          e('div',{className:'spr-bar'},e('div',{className:'spr-bar-f',style:{width:(tot/maxTot*100)+'%'}})),
+          e('div',{className:'spr-tot'},tot.toLocaleString()),
+          e('div',{className:'spr-avg'},avg+'/day')
         );
       })
     )
   );
 }
 
-/* ═════════════ JOB DETAIL SCREEN ═════════════ */
-function JobDetailScreen({job,role,setRole,onBack,onSend}){
-  const [tab,setTab]=useState('overview');
+/* ══ OVERVIEW TAB ══ */
+function OverviewTab({job,role}){
   const farm=gf(job.farmId);
+  const IC=({l,v,full})=>e('div',{className:'ic'+(full?' full-ic':'')},e('div',{className:'ic-l'},l),e('div',{className:'ic-v'},v));
+  return e('div',null,
+    e('div',{style:{height:10}}),
+    e('div',{className:'info-grid'},
+      e(IC,{l:'Job Type',v:job.type}),e(IC,{l:'Total Sheep',v:job.totalSheep.toLocaleString()}),
+      e(IC,{l:'Start Date',v:fmtDateLong(job.startDate)}),e(IC,{l:'Days Allocated',v:job.daysAllocated+' days'}),
+      e(IC,{l:'EVOs',v:job.evos}),e(IC,{l:'Transport',v:job.transport?'✓ Available':'BYO'}),
+      e(IC,{l:'Crutching Trailer',v:job.crutchingTrailer?'✓ Provided':'Not provided'}),
+      e(IC,{l:'Accommodation',v:job.accommodation,full:true}),
+    ),
+    job.notes&&e('div',{style:{padding:'0 14px',marginBottom:10}},e('div',{className:'ic'},e('div',{className:'ic-l'},'Notes'),e('div',{className:'ic-v',style:{fontSize:'13px',color:'var(--muted)',fontWeight:400}},job.notes))),
+    farm&&e('div',{style:{padding:'0 14px',marginBottom:10}},
+      e('div',{className:'ic'},
+        e('div',{className:'ic-l'},'Farm Address'),e('div',{className:'ic-v'},farm.address),
+        farm.notes&&e('div',{style:{fontSize:'12px',color:'var(--dim)',marginTop:4}},farm.notes),
+        e('a',{href:'https://maps.google.com/?q='+encodeURIComponent(farm.address),target:'_blank',className:'map-link'},'📍 Open in Maps')
+      )
+    ),
+    e('div',{className:'crew-hdr'},e('span',null,'Crew — '+job.crew.length)),
+    job.crew.map(id=>{
+      const c=gc(id);if(!c)return null;
+      return e('div',{key:id,className:'crew-row'},
+        e('div',{className:'cr-l'},e(Av,{name:c.name}),e('div',null,e('div',{className:'cr-name'},c.name,c.hasVehicle&&e('span',{className:'car-tag'},'🚗')),e('div',{className:'cr-role'},c.role))),
+        role==='admin'&&e('div',{style:{fontFamily:'var(--m)',fontSize:'11px',color:'var(--dim)'}},c.phone)
+      );
+    }),
+    e('div',{style:{height:16}})
+  );
+}
+
+/* ══ JOB DETAIL SCREEN ══ */
+function JobDetailScreen({job,setJob,role,setRole,onBack,onSend}){
+  const [tab,setTab]=useState('tallies');
+  const farm=gf(job.farmId);
+  const dates=jobDates(job);
+  const todayStr=new Date().toISOString().split('T')[0];
+  const defDate=dates.includes(todayStr)?todayStr:dates[dates.length-1];
+  const [viewDate,setViewDate]=useState(defDate);
   return e('div',null,
     e(TopBar,{role,setRole,onBack,backLabel:farm?farm.name:'Jobs'}),
     e('div',{className:'screen'},
       e('div',{className:'jd-hero'},
         e('div',{className:'jd-farm'},farm?farm.name:'Unknown Farm'),
-        e('div',{className:'jd-sub'},
-          e(Bdg,{status:job.status}),
-          e('span',{className:'pill'},job.type),
-          e('span',{style:{fontFamily:'var(--m)',fontSize:'11px',color:'var(--dim)'}},'#'+job.jobNumber)
-        )
+        e('div',{className:'jd-sub'},e(Bdg,{status:job.status}),e('span',{className:'pill'},job.type),e('span',{style:{fontFamily:'var(--m)',fontSize:'11px',color:'var(--dim)'}},'#'+job.jobNumber))
       ),
       e('div',{className:'tabs'},
-        ['overview','progress'].map(t=>
-          e('button',{key:t,className:`tab-btn${tab===t?' on':''}`,onClick:()=>setTab(t)},t.charAt(0).toUpperCase()+t.slice(1))
+        [['tallies','Tallies'],['progress','Progress'],['overview','Overview']].map(([k,l])=>
+          e('button',{key:k,className:`tab-btn${tab===k?' on':''}`,onClick:()=>setTab(k)},l)
         )
       ),
-      tab==='overview'?e(OverviewTab,{job,role}):e(ProgressTab,{job}),
-      role==='admin'&&job.status!=='Completed'&&job.status!=='Charged Out'&&
-        e('div',{className:'send-bar'},
-          e('button',{className:'send-btn',onClick:onSend},'📱 Send Job Cards to Crew')
-        )
+      tab==='tallies'&&e(TallyTab,{job,setJob,role,viewDate,setViewDate}),
+      tab==='progress'&&e(ProgressTab,{job}),
+      tab==='overview'&&e(OverviewTab,{job,role}),
+      (role==='admin'||role==='shed_lead')&&job.status!=='Completed'&&
+        e('div',{className:'send-bar'},e('button',{className:'send-btn',onClick:onSend},'📱 Send Job Cards to Crew'))
     )
   );
 }
 
-/* ═════════════ JOB CARD (read-only white) ═════════════ */
+/* ══ JOB CARD (white read-only) ══ */
 function JobCardView({job,crewId,onClose}){
-  const farm=gf(job.farmId);
-  const crew=gc(crewId);
-  const team=job.crew.map(gc).filter(Boolean);
+  const farm=gf(job.farmId);const crew=gc(crewId);const team=job.crew.map(gc).filter(Boolean);
   const endD=fmtDate(addDays(job.startDate,job.daysAllocated-1));
-  return e('div',{className:'overlay overlay2',onClick:ev=>{if(ev.target.className.includes('overlay'))onClose()}},
+  return e('div',{className:'overlay overlay2'},
     e('div',{className:'jc-white'},
-      e('div',{className:'sheet-handle',style:{background:'#ddd'}}),
-      e('div',{className:'jcw-hdr'},
-        e('div',{className:'jcw-logo'},'iGang'),
-        e('div',{className:'jcw-sub'},'Quality Shearing'),
-        e('button',{className:'jcw-x',onClick:onClose},'×')
-      ),
+      e('div',{className:'sheet-handle',style:{background:'#ccc'}}),
+      e('div',{className:'jcw-hdr'},e('div',{className:'jcw-logo'},'iGang'),e('div',{className:'jcw-sub'},'Quality Shearing'),e('button',{className:'jcw-x',onClick:onClose},'×')),
       e('div',{className:'jcw-body'},
         crew&&e('div',{className:'jcw-greet'},'Hi '+crew.name.split(' ')[0]+','),
-        e('div',{className:'jcw-alloc'},
-          'You have been allocated to the job —\n'+(farm?farm.name:'Farm')+' (#'+job.jobNumber+')'
-        ),
+        e('div',{className:'jcw-alloc'},'You have been allocated to the job —\n'+(farm?farm.name:'Farm')+' (#'+job.jobNumber+')'),
         e('div',{className:'jcw-title'},'Job Details'),
-        ...[
-          ['Job Number',job.jobNumber],
-          ['Job Name',farm?farm.name:''],
-          ['Job Type',job.type],
-          ['Start Date',fmtDate(job.startDate)],
-          ['End Date',endD],
-          ['Farm Address',farm?farm.address:'',true],
-          ['Total Sheep',job.totalSheep.toLocaleString()],
-          ['EVOs',job.evos],
-          ['Crutching Trailer',job.crutchingTrailer?'Provided':'No crutching trailer'],
-          ['Transport',job.transport?'Available':'BYO transport'],
-          ['Accommodation',job.accommodation],
-        ].map(([lbl,val,isAddr])=>
-          e('div',{key:lbl,className:'jcw-f'},
-            e('div',{className:'jcw-fl'},lbl),
-            isAddr
-              ? e('div',null,
-                  e('div',{className:'jcw-fv'},val),
-                  e('a',{href:'https://maps.google.com/?q='+encodeURIComponent(val),target:'_blank',className:'map-btn'},'📍 Open in Maps')
-                )
-              : e('div',{className:'jcw-fv'},val)
-          )
+        ...[['Job Number',job.jobNumber],['Job Name',farm?farm.name:''],['Job Type',job.type],['Start Date',fmtDate(job.startDate)],['End Date',endD],['Farm Address',farm?farm.address:'',true],['Total Sheep',job.totalSheep.toLocaleString()],['EVOs',job.evos],['Crutching Trailer',job.crutchingTrailer?'Provided':'No crutching trailer'],['Transport',job.transport?'Available':'BYO'],['Accommodation',job.accommodation]].map(([lbl,val,isAddr])=>
+          e('div',{key:lbl,className:'jcw-f'},e('div',{className:'jcw-fl'},lbl),
+            isAddr?e('div',null,e('div',{className:'jcw-fv'},val),e('a',{href:'https://maps.google.com/?q='+encodeURIComponent(val),target:'_blank',className:'map-btn'},'📍 Open in Maps'))
+                  :e('div',{className:'jcw-fv'},val))
         ),
-        job.notes&&e('div',{className:'jcw-f'},
-          e('div',{className:'jcw-fl'},'Further Details'),
-          e('div',{className:'jcw-fv',style:{fontSize:'14px',color:'#444'}},job.notes)
-        ),
-        e('div',{className:'jcw-f'},
-          e('div',{className:'jcw-fl'},'Your Team'),
-          e('div',null,
-            team.map(c=>e('div',{key:c.id,className:'team-item'},
-              e('div',{style:{width:36,height:36,borderRadius:'50%',background:avc(c.name).bg,color:avc(c.name).fg,display:'flex',alignItems:'center',justifyContent:'center',fontFamily:'var(--h)',fontSize:'14px',fontWeight:'700',flexShrink:0}},init(c.name)),
-              e('div',null,
-                e('div',{className:'ti-name'},c.name),
-                e('div',{className:'ti-role'},c.role),
-                c.hasVehicle&&e('div',{className:'ti-car'},'🚗 Has a vehicle')
-              )
-            ))
-          )
+        job.notes&&e('div',{className:'jcw-f'},e('div',{className:'jcw-fl'},'Further Details'),e('div',{className:'jcw-fv',style:{fontSize:'14px',color:'#444'}},job.notes)),
+        e('div',{className:'jcw-f'},e('div',{className:'jcw-fl'},'Your Team'),
+          team.map(c=>e('div',{key:c.id,className:'team-item'},
+            e('div',{style:{width:36,height:36,borderRadius:'50%',background:avc(c.name).bg,color:avc(c.name).fg,display:'flex',alignItems:'center',justifyContent:'center',fontFamily:'var(--h)',fontSize:'14px',fontWeight:'700',flexShrink:0}},init(c.name)),
+            e('div',null,e('div',{className:'ti-name'},c.name),e('div',{className:'ti-role'},c.role),c.hasVehicle&&e('div',{className:'ti-car'},'🚗 Has a vehicle'))
+          ))
         )
       )
     )
   );
 }
 
-/* ═════════════ SMS PREVIEW MODAL ═════════════ */
+/* ══ SMS MODAL ══ */
 function SMSModal({job,onClose,onPreview}){
   const farm=gf(job.farmId);
   const [sent,setSent]=useState(false);
   const doSend=()=>{setSent(true);setTimeout(onClose,2800);};
-  return e('div',{className:'overlay',onClick:ev=>{if(ev.target.className==='overlay')onClose()}},
+  return e('div',{className:'overlay'},
     e('div',{className:'sheet'},
       e('div',{className:'sheet-handle'}),
-      e('div',{className:'sheet-title'},
-        sent?'✅ Job Cards Sent!':'📱 Send Job Cards — '+(farm?farm.name:'Job')
-      ),
+      e('div',{className:'sheet-title'},sent?'✅ Job Cards Sent!':'📱 Send Job Cards — '+(farm?farm.name:'Job')),
       e('div',{className:'sheet-scroll'},
-        sent
-          ? e('div',{className:'sent-state'},
-              e('div',{className:'sent-icon'},'✅'),
-              e('div',{className:'sent-title'},job.crew.length+' messages sent'),
-              e('div',{className:'sent-sub'},'All crew have received their job card via SMS')
-            )
-          : e('div',null,
-              e('div',{style:{padding:'8px 14px 4px',fontSize:'13px',color:'var(--muted)'}},
-                job.crew.length+' crew members will each receive a personalised SMS with a link to their job card.'
-              ),
-              job.crew.map(id=>{
-                const c=gc(id);if(!c)return null;
-                return e('div',{key:id,className:'sms-row'},
-                  e('div',{className:'sms-l'},
-                    e(Av,{name:c.name,size:40}),
-                    e('div',null,
-                      e('div',{className:'sms-name'},c.name),
-                      e('div',{className:'sms-role'},c.role),
-                      e('div',{className:'sms-ph'},c.phone)
-                    )
-                  ),
-                  e('button',{className:'prev-btn',onClick:()=>onPreview(id)},'Preview')
-                );
-              })
+        sent?e('div',{className:'sent-state'},e('div',{className:'sent-icon'},'✅'),e('div',{className:'sent-title'},job.crew.length+' messages sent'),e('div',{className:'sent-sub'},'All crew received their job card via SMS'))
+          :e('div',null,
+              e('div',{style:{padding:'8px 14px 4px',fontSize:'13px',color:'var(--muted)'}},job.crew.length+' crew will each receive a personalised SMS with a link to their job card.'),
+              job.crew.map(id=>{const c=gc(id);if(!c)return null;return e('div',{key:id,className:'sms-row'},e('div',{className:'sms-l'},e(Av,{name:c.name,size:40}),e('div',null,e('div',{className:'sms-name'},c.name),e('div',{className:'sms-role'},c.role),e('div',{className:'sms-ph'},c.phone))),e('button',{className:'prev-btn',onClick:()=>onPreview(id)},'Preview'));})
             )
       ),
-      !sent&&e('div',{className:'sheet-footer'},
-        e('button',{className:'btn-g',onClick:onClose},'Cancel'),
-        e('button',{className:'btn-p',onClick:doSend},'Send to All '+job.crew.length)
-      )
+      !sent&&e('div',{className:'sheet-footer'},e('button',{className:'btn-g',onClick:onClose},'Cancel'),e('button',{className:'btn-p',onClick:doSend},'Send to All '+job.crew.length))
     )
   );
 }
 
-/* ═════════════ NEW JOB MODAL ═════════════ */
+/* ══ NEW JOB MODAL ══ */
 function NewJobModal({onClose,onCreate}){
   const [type,setType]=useState('Shearing');
   const [farmId,setFarmId]=useState('');
@@ -839,95 +670,45 @@ function NewJobModal({onClose,onCreate}){
   const [accomm,setAccomm]=useState('');
   const [notes,setNotes]=useState('');
   const [selCrew,setSelCrew]=useState([]);
-  const togCrew=id=>setSelCrew(p=>p.includes(id)?p.filter(x=>x!==id):[...p,id]);
-  const canCreate=farmId&&startDate&&days&&sheep&&selCrew.length>0;
-  const doCreate=()=>{
-    if(!canCreate)return;
-    const nums=Math.floor(1404+Math.random()*50);
-    onCreate({
-      id:'j'+Date.now(),jobNumber:String(nums).padStart(6,'0'),
-      farmId,type,notes,startDate,
-      daysAllocated:parseInt(days),totalSheep:parseInt(sheep),
-      evos,crutchingTrailer:false,transport,accommodation:accomm,
-      status:'Dispatched',crew:selCrew,tallies:{}
-    });
-  };
+  const tog=id=>setSelCrew(p=>p.includes(id)?p.filter(x=>x!==id):[...p,id]);
+  const ok=farmId&&startDate&&days&&sheep&&selCrew.length>0;
+  const doCreate=()=>{if(!ok)return;onCreate({id:'j'+Date.now(),jobNumber:String(Math.floor(1404+Math.random()*50)).padStart(6,'0'),farmId,type,notes,startDate,daysAllocated:parseInt(days),totalSheep:parseInt(sheep),evos,crutchingTrailer:false,transport,accommodation:accomm,status:'Dispatched',crew:selCrew,tallies:{},shedTallies:{},baleTallies:{},baleBF:{},mobs:['All Sheep']});};
   const FF=({label,children})=>e('div',{className:'ff'},e('div',{className:'fl'},label),children);
-  return e('div',{className:'overlay',onClick:ev=>{if(ev.target.className==='overlay')onClose()}},
+  return e('div',{className:'overlay'},
     e('div',{className:'sheet'},
       e('div',{className:'sheet-handle'}),
       e('div',{className:'sheet-title'},'New Job'),
       e('div',{className:'sheet-scroll'},
-        e(FF,{label:'Job Type'},
-          e('div',{className:'tog-row'},
-            ['Shearing','Crutching'].map(t=>
-              e('button',{key:t,className:`tog-opt${type===t?' on':''}`,onClick:()=>setType(t)},t)
-            )
-          )
-        ),
-        e(FF,{label:'Select Farm'},
-          e('div',{className:'farm-list'},
-            FARMS.map(f=>
-              e('div',{key:f.id,className:`farm-opt${farmId===f.id?' sel':''}`,onClick:()=>setFarmId(f.id)},
-                e('div',{className:'fo-name'},f.name),
-                e('div',{className:'fo-addr'},f.address)
-              )
-            )
-          )
-        ),
-        e(FF,{label:'Start Date'},
-          e('input',{type:'date',className:'fi',value:startDate,onChange:ev=>setStartDate(ev.target.value)})
-        ),
-        e(FF,{label:'Days Allocated'},
-          e('input',{type:'number',className:'fi',placeholder:'e.g. 5',value:days,onChange:ev=>setDays(ev.target.value),min:1})
-        ),
-        e(FF,{label:'Total Sheep'},
-          e('input',{type:'number',className:'fi',placeholder:'e.g. 3000',value:sheep,onChange:ev=>setSheep(ev.target.value),min:1})
-        ),
-        e(FF,{label:'EVOs'},
-          e('div',{className:'tog-row'},
-            ['BYO','Supplied at shed'].map(opt=>
-              e('button',{key:opt,className:`tog-opt${evos===opt?' on':''}`,onClick:()=>setEvos(opt)},opt)
-            )
-          )
-        ),
-        e(FF,{label:'Transport Available'},
-          e('div',{className:'tog-row'},
-            [['Yes',true],['No',false]].map(([l,v])=>
-              e('button',{key:l,className:`tog-opt${transport===v?' on':''}`,onClick:()=>setTransport(v)},l)
-            )
-          )
-        ),
-        e(FF,{label:'Accommodation'},
-          e('input',{type:'text',className:'fi',placeholder:'e.g. Shearers quarters on property',value:accomm,onChange:ev=>setAccomm(ev.target.value)})
-        ),
-        e(FF,{label:'Notes (breed, style, extra info)'},
-          e('textarea',{className:'fi',rows:3,
-            placeholder:'e.g. Merino full crt and wig. Gate code 4472.',
-            value:notes,onChange:ev=>setNotes(ev.target.value)})
-        ),
-        e(FF,{label:`Select Crew (${selCrew.length} selected)`},
-          e('div',{className:'chip-wrap'},
-            CREW.map(c=>
-              e('div',{key:c.id,className:`chip${selCrew.includes(c.id)?' sel':''}`,onClick:()=>togCrew(c.id)},
-                c.name.split(' ')[0]+' ('+c.role.split(' ').map(w=>w[0]).join('')+')'
-              )
-            )
-          )
-        ),
-        e('div',{style:{height:'8px'}})
+        e(FF,{label:'Job Type'},e('div',{className:'tog-row'},...['Shearing','Crutching'].map(t=>e('button',{key:t,className:`tog-opt${type===t?' on':''}`,onClick:()=>setType(t)},t)))),
+        e(FF,{label:'Select Farm'},e('div',{className:'farm-list'},FARMS.map(f=>e('div',{key:f.id,className:`farm-opt${farmId===f.id?' sel':''}`,onClick:()=>setFarmId(f.id)},e('div',{className:'fo-name'},f.name),e('div',{className:'fo-addr'},f.address))))),
+        e(FF,{label:'Start Date'},e('input',{type:'date',className:'fi',value:startDate,onChange:ev=>setStartDate(ev.target.value)})),
+        e(FF,{label:'Days Allocated'},e('input',{type:'number',className:'fi',placeholder:'e.g. 5',value:days,onChange:ev=>setDays(ev.target.value),min:1})),
+        e(FF,{label:'Total Sheep'},e('input',{type:'number',className:'fi',placeholder:'e.g. 3000',value:sheep,onChange:ev=>setSheep(ev.target.value),min:1})),
+        e(FF,{label:'EVOs'},e('div',{className:'tog-row'},...['BYO','Supplied at shed'].map(o=>e('button',{key:o,className:`tog-opt${evos===o?' on':''}`,onClick:()=>setEvos(o)},o)))),
+        e(FF,{label:'Transport'},e('div',{className:'tog-row'},...[['Yes',true],['No',false]].map(([l,v])=>e('button',{key:l,className:`tog-opt${transport===v?' on':''}`,onClick:()=>setTransport(v)},l)))),
+        e(FF,{label:'Accommodation'},e('input',{type:'text',className:'fi',placeholder:'e.g. Shearers quarters on property',value:accomm,onChange:ev=>setAccomm(ev.target.value)})),
+        e(FF,{label:'Notes'},e('textarea',{className:'fi',rows:3,placeholder:'e.g. Merino full crt and wig.',value:notes,onChange:ev=>setNotes(ev.target.value)})),
+        e(FF,{label:`Select Crew (${selCrew.length} selected)`},e('div',{className:'chip-wrap'},CREW.map(c=>e('div',{key:c.id,className:`chip${selCrew.includes(c.id)?' sel':''}`,onClick:()=>tog(c.id)},c.name.split(' ')[0]+' ('+c.role.split(' ').map(w=>w[0]).join('.')+')'))))
       ),
-      e('div',{className:'sheet-footer'},
-        e('button',{className:'btn-g',onClick:onClose},'Cancel'),
-        e('button',{className:'btn-p',disabled:!canCreate,onClick:doCreate,style:{opacity:canCreate?1:.4}},
-          canCreate?`Create + Dispatch Job`:'Fill in required fields'
-        )
-      )
+      e('div',{className:'sheet-footer'},e('button',{className:'btn-g',onClick:onClose},'Cancel'),e('button',{className:'btn-p',disabled:!ok,style:{opacity:ok?1:.4},onClick:doCreate},ok?'Create + Dispatch':'Fill required fields'))
     )
   );
 }
 
-/* ═════════════ APP ═════════════ */
+/* ══ HOME ══ */
+function HomeScreen({jobs,role,setRole,onJob,onNew}){
+  const active=jobs.filter(j=>j.status==='Active');
+  const dispatched=jobs.filter(j=>j.status==='Dispatched');
+  const done=jobs.filter(j=>j.status==='Completed'||j.status==='Charged Out');
+  const Sec=({title,items})=>items.length===0?null:e('div',null,e('div',{className:'slbl'},title),items.map(j=>e(JLC,{key:j.id,job:j,onClick:()=>onJob(j.id)})));
+  return e('div',null,
+    e(TopBar,{role,setRole}),
+    e('div',{className:'screen'},e(WeekBanner,{jobs}),e(Sec,{title:'Active',items:active}),e(Sec,{title:'Dispatched — Upcoming',items:dispatched}),e(Sec,{title:'Completed',items:done})),
+    (role==='admin'||role==='shed_lead')&&e('button',{className:'fab',onClick:onNew},'+')
+  );
+}
+
+/* ══ APP ══ */
 function App(){
   const [role,setRole]=useState('admin');
   const [screen,setScreen]=useState('home');
@@ -936,29 +717,19 @@ function App(){
   const [showSMS,setShowSMS]=useState(false);
   const [showNew,setShowNew]=useState(false);
   const [previewId,setPreviewId]=useState(null);
-
   const selJob=jobs.find(j=>j.id===selJobId);
-
+  const setSelJob=fn=>setJobs(prev=>prev.map(j=>j.id===selJobId?fn(j):j));
   const goJob=id=>{setSelJobId(id);setScreen('job');};
   const goHome=()=>{setScreen('home');setSelJobId(null);setShowSMS(false);setPreviewId(null);};
-
-  const doCreate=job=>{
-    setJobs(p=>[job,...p]);
-    setShowNew(false);
-    setSelJobId(job.id);
-    setScreen('job');
-    setTimeout(()=>setShowSMS(true),350);
-  };
-
+  const doCreate=job=>{setJobs(p=>[job,...p]);setShowNew(false);setSelJobId(job.id);setScreen('job');setTimeout(()=>setShowSMS(true),350);};
   return e('div',null,
     screen==='home'&&e(HomeScreen,{jobs,role,setRole,onJob:goJob,onNew:()=>setShowNew(true)}),
-    screen==='job'&&selJob&&e(JobDetailScreen,{job:selJob,role,setRole,onBack:goHome,onSend:()=>setShowSMS(true)}),
+    screen==='job'&&selJob&&e(JobDetailScreen,{job:selJob,setJob:setSelJob,role,setRole,onBack:goHome,onSend:()=>setShowSMS(true)}),
     showSMS&&selJob&&e(SMSModal,{job:selJob,onClose:()=>{setShowSMS(false);setPreviewId(null);},onPreview:id=>setPreviewId(id)}),
     previewId&&selJob&&e(JobCardView,{job:selJob,crewId:previewId,onClose:()=>setPreviewId(null)}),
     showNew&&e(NewJobModal,{onClose:()=>setShowNew(false),onCreate:doCreate})
   );
 }
-
 ReactDOM.createRoot(document.getElementById('root')).render(e(App));
 </script>
 </body>
