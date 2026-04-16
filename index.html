@@ -386,10 +386,9 @@ textarea.fi{resize:none;line-height:1.5}
 const {useState,useEffect,useRef}=React,e=React.createElement;
 
 /* ── SUPABASE CONFIG — update these 3 lines per deployment ── */
-const SUPABASE_URL='YOUR_SUPABASE_URL';
-const SUPABASE_ANON_KEY='YOUR_SUPABASE_ANON_KEY';
-const CONTRACTOR_SLUG='your-contractor-slug'; /* e.g. 'quality-shearing' */
-
+const SUPABASE_URL='https://yhkcdycypwxzxxwaxnzj.supabase.co';
+const SUPABASE_ANON_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inloa2NkeWN5cHd4enh4d2F4bnpqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYzMjgxMTgsImV4cCI6MjA5MTkwNDExOH0.q9u1O_uixHxDcb8bJgPJg-CaSSPU3XNZxfqYV6YnHWE';
+const CONTRACTOR_SLUG='quality-shearing';
 const sb=supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
 
 /* ── OFFLINE / LOCAL CACHE ── */
