@@ -1271,16 +1271,120 @@ function JobCardView({job,crewId,onClose}){
   ));
 }
 /* ── SMS MODAL ── */
-function SMSModal({job,onClose,onPreview}){
-  const farm=gf(job.farmId),[sent,setSent]=useState(false);
-  const doSend=()=>{setSent(true);setTimeout(onClose,2800);};
+function buildJobCardSMS(job,crewId,farmList,crewList){
+  const gcl=id=>crewList.find(c=>c.id===id);
+  const gfl=id=>farmList.find(f=>f.id===id);
+  const farm=gfl(job.farmId);
+  const crew=gcl(crewId);
+  if(!crew)return null;
+  const endDate=addDays(job.startDate,job.daysAllocated-1);
+  const teamNames=job.crew.map(id=>gcl(id)).filter(Boolean).map(c=>c.name+' ('+c.role+')').join(', ');
+  return [
+    'Hi '+crew.name.split(' ')[0]+'! You have been added to a job with '+CONTRACTOR_NAME+'.',
+    '',
+    'JOB: '+(farm?farm.name:'Farm'),
+    'TYPE: '+job.type,
+    'START: '+fmtDate(job.startDate),
+    'END: '+fmtDate(endDate),
+    'SHEEP: '+job.totalSheep.toLocaleString(),
+    'ACCOMM: '+(job.accommodation||'TBC'),
+    'EVOS: '+job.evos,
+    '',
+    'YOUR TEAM: '+teamNames,
+    '',
+    farm?'ADDRESS: '+farm.address:'',
+    '',
+    'Questions? Reply to this message.',
+    '— '+CONTRACTOR_NAME+' via myGang'
+  ].filter(l=>l!==null).join('\n');
+}
+
+function SMSModal({job,onClose,onPreview,farmList,crewList}){
+  const gfl=id=>farmList?farmList.find(f=>f.id===id):null;
+  const gcl=id=>crewList?crewList.find(c=>c.id===id):null;
+  const farm=gfl(job.farmId);
+  const [status,setStatus]=useState('idle'); /* idle | sending | done | error */
+  const [results,setResults]=useState([]);
+  const [sentCount,setSentCount]=useState(0);
+
+  const doSend=async()=>{
+    setStatus('sending');
+    const messages=job.crew.map(id=>{
+      const c=gcl(id);
+      if(!c||!c.phone)return null;
+      return{to:c.phone,body:buildJobCardSMS(job,id,farmList,crewList)};
+    }).filter(Boolean);
+
+    if(messages.length===0){setStatus('error');return;}
+
+    try{
+      const res=await fetch('/api/send-sms',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({messages}),
+      });
+      const data=await res.json();
+      setSentCount(data.sent||0);
+      setResults(data.results||[]);
+      setStatus(data.failed>0?'partial':'done');
+    }catch(err){
+      setStatus('error');
+    }
+  };
+
+  const crewWithPhone=job.crew.filter(id=>{const c=gcl(id);return c&&c.phone;});
+  const crewNoPhone=job.crew.filter(id=>{const c=gcl(id);return c&&!c.phone;});
+
   return e('div',{className:'overlay'},e('div',{className:'sheet'},
     e('div',{className:'sheet-handle'}),
-    e('div',{className:'sheet-title'},sent?'✅ Job Cards Sent!':'📱 Send Job Cards — '+(farm?farm.name:'Job')),
-    e('div',{className:'sheet-scroll'},sent?e('div',{className:'sent-state'},e('div',{className:'sent-icon'},'✅'),e('div',{className:'sent-title'},job.crew.length+' messages sent'),e('div',{className:'sent-sub'},'All crew received their job card via SMS')):
-      e('div',null,e('div',{style:{padding:'8px 16px 4px',fontSize:'13px',color:'var(--muted)'}},job.crew.length+' crew will each receive a personalised SMS.'),job.crew.map(id=>{const c=gc(id);if(!c)return null;return e('div',{key:id,className:'sms-row'},e('div',{className:'sms-l'},e(Av,{name:c.name,size:40}),e('div',null,e('div',{className:'sms-name'},c.name),e('div',{className:'sms-role'},c.role),e('div',{className:'sms-ph'},c.phone))),e('button',{className:'prev-btn',onClick:()=>onPreview(id)},'Preview'));}))
+    e('div',{className:'sheet-title'},
+      status==='done'?'✅ Job Cards Sent!':
+      status==='partial'?'⚠️ Partially Sent':
+      status==='error'?'❌ Send Failed':
+      '📱 Send Job Cards — '+(farm?farm.name:'Job')
     ),
-    !sent&&e('div',{className:'sheet-footer'},e('button',{className:'btn-g',onClick:onClose},'Cancel'),e('button',{className:'btn-p',onClick:doSend},'Send to All '+job.crew.length))
+    e('div',{className:'sheet-scroll'},
+      status==='idle'&&e('div',null,
+        e('div',{style:{padding:'8px 16px 4px',fontSize:'13px',color:'var(--muted)'}},'Each crew member receives a personalised SMS with job details.'),
+        crewNoPhone.length>0&&e('div',{style:{padding:'6px 16px',fontSize:'12px',color:'var(--red)',fontWeight:600}},'⚠ '+crewNoPhone.length+' crew have no phone number — add in Admin → Crew Details'),
+        job.crew.map(id=>{
+          const c=gcl(id);if(!c)return null;
+          return e('div',{key:id,className:'sms-row'},
+            e('div',{className:'sms-l'},
+              e(Av,{name:c.name,size:40}),
+              e('div',null,
+                e('div',{className:'sms-name'},c.name),
+                e('div',{className:'sms-role'},c.role),
+                e('div',{className:'sms-ph'},c.phone||e('span',{style:{color:'var(--red)'}},`No number`))
+              )
+            ),
+            c.phone&&e('button',{className:'prev-btn',onClick:()=>onPreview(id)},'Preview')
+          );
+        })
+      ),
+      status==='sending'&&e('div',{className:'sent-state'},
+        e('div',{style:{fontSize:40,marginBottom:8}},'📤'),
+        e('div',{className:'sent-title',style:{color:'var(--amber)'}},'Sending...'),
+        e('div',{className:'sent-sub'},'Sending '+crewWithPhone.length+' messages')
+      ),
+      (status==='done'||status==='partial')&&e('div',{className:'sent-state'},
+        e('div',{className:'sent-icon'},status==='done'?'✅':'⚠️'),
+        e('div',{className:'sent-title',style:{color:status==='done'?'var(--green)':'var(--amber)'}},sentCount+' of '+crewWithPhone.length+' sent'),
+        e('div',{className:'sent-sub'},status==='done'?'All crew have received their job card':'Some messages failed — check crew phone numbers'),
+        status==='partial'&&e('div',{style:{marginTop:12}},
+          results.filter(r=>r.status==='error').map((r,i)=>e('div',{key:i,style:{fontSize:'12px',color:'var(--red)',margin:'4px 0'}},r.to+': '+r.error))
+        )
+      ),
+      status==='error'&&e('div',{className:'sent-state'},
+        e('div',{className:'sent-icon'},'❌'),
+        e('div',{className:'sent-title',style:{color:'var(--red)'}},'Send Failed'),
+        e('div',{className:'sent-sub'},'Check your internet connection and try again.')
+      )
+    ),
+    e('div',{className:'sheet-footer'},
+      e('button',{className:'btn-g',onClick:onClose},status==='idle'?'Cancel':'Close'),
+      status==='idle'&&crewWithPhone.length>0&&e('button',{className:'btn-p',onClick:doSend},'Send to '+crewWithPhone.length+' crew')
+    )
   ));
 }
 /* ── NEW JOB ── */
@@ -1519,7 +1623,7 @@ function App(){
     e(StatusBar),
     screen==='home'&&e(HomeScreen,{jobs,role,setRole,onJob:goJob,onNew:()=>setShowNew(true),contractorName:CONTRACTOR_NAME}),
     screen==='job'&&selJob&&e(JobDetailScreen,{job:selJob,setJob:setSelJob,role,setRole,onBack:goHome,onSend:()=>setShowSMS(true),gfl,gcl}),
-    showSMS&&selJob&&e(SMSModal,{job:selJob,onClose:()=>{setShowSMS(false);setPreviewId(null);},onPreview:id=>setPreviewId(id),gcl}),
+    showSMS&&selJob&&e(SMSModal,{job:selJob,onClose:()=>{setShowSMS(false);setPreviewId(null);},onPreview:id=>setPreviewId(id),farmList,crewList}),
     previewId&&selJob&&e(JobCardView,{job:selJob,crewId:previewId,onClose:()=>setPreviewId(null),gfl,gcl}),
     showNew&&e(NewJobModal,{onClose:()=>setShowNew(false),onCreate:doCreate,farmList,crewList,addFarm,addCrew}),
     /* Job PIN gate */
