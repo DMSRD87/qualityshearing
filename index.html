@@ -735,7 +735,7 @@ function getPin(type){return lsGet(LS_PIN+'_'+type)||(type==='admin'?DEFAULT_ADM
 function setPin(type,val){lsSet(LS_PIN+'_'+type,val);}
 
 /* ── PIN PAD (reusable) ── */
-function PinPad({onSuccess,onCancel,label,subtitle,allowChange,changeLabel}){
+function PinPad({onSuccess,onCancel,label,subtitle,allowChange,changeLabel,_overridePin}){
   const [entry,setEntry]=useState('');
   const [err,setErr]=useState('');
   const [changing,setChanging]=useState(false);
@@ -744,7 +744,8 @@ function PinPad({onSuccess,onCancel,label,subtitle,allowChange,changeLabel}){
 
   const tryPin=p=>{
     const type=label==='Admin PIN'?'admin':'lead';
-    if(p===getPin(type)){setErr('');onSuccess();}
+    const correct=_overridePin||getPin(type);
+    if(p===correct){setErr('');onSuccess();}
     else{setErr('Incorrect PIN');setEntry('');setTimeout(()=>setErr(''),1500);}
   };
   const press=n=>{
@@ -850,7 +851,7 @@ function JLC({job,onClick}){
   const farm=gf(job.farmId),p=calcProg(job);
   const cls=p.pct>=80?'fg':p.pct>=40?'fa':'fr';
   return e('div',{className:'jlc',onClick},
-    e('div',{className:'jlc-top'},e('div',null,e('div',{className:'jlc-name'},farm?farm.name:'Unknown'),e('div',{className:'jlc-num'},'#'+job.jobNumber)),e(Bdg,{status:job.status})),
+    e('div',{className:'jlc-top'},e('div',null,e('div',{className:'jlc-name'},farm?farm.name:'Unknown',job.jobPin&&e('span',{style:{fontSize:'14px',marginLeft:6,opacity:.5}},'🔒')),e('div',{className:'jlc-num'},'#'+job.jobNumber)),e(Bdg,{status:job.status})),
     e('div',{className:'jlc-meta'},e('span',{className:'pill'},job.type),e('span',{style:{fontSize:'12px',color:'var(--muted)'}},job.totalSheep.toLocaleString()+' sheep'),e('span',{style:{fontSize:'12px',color:'var(--muted)'}},job.crew.length+' crew')),
     job.status==='Active'&&p.daysWorked>0&&e('div',null,e('div',{className:'jlc-pr'},e('span',null,p.shorn.toLocaleString()+' / '+job.totalSheep.toLocaleString()+' — Day '+p.daysWorked+' of '+job.daysAllocated),e('span',{className:'pct-lbl'},Math.round(p.pct)+'%')),e('div',{className:'pbar'},e('div',{className:`pbar-f ${cls}`,style:{width:p.pct+'%'}}))),
     job.status==='Dispatched'&&e('div',{style:{fontSize:'12px',color:'var(--amber)',marginTop:'6px'}},'📱 Dispatched — starts '+fmtDateLong(job.startDate)),
@@ -1285,6 +1286,7 @@ function SMSModal({job,onClose,onPreview}){
 /* ── NEW JOB ── */
 function NewJobModal({onClose,onCreate,farmList,crewList,addFarm,addCrew}){
   const [type,setType]=useState('Shearing'),[farmId,setFarmId]=useState(''),[startDate,setStartDate]=useState(localToday()),[days,setDays]=useState(''),[sheep,setSheep]=useState(''),[evos,setEvos]=useState('BYO'),[transport,setTransport]=useState(true),[accomm,setAccomm]=useState(''),[notes,setNotes]=useState(''),[selCrew,setSelCrew]=useState([]);
+  const [jobPin,setJobPin]=useState('');
   const [farmSearch,setFarmSearch]=useState('');
   const [showAddFarm,setShowAddFarm]=useState(false);
   const [newFarm,setNewFarm]=useState({name:'',address:'',stands:'',notes:''});
@@ -1293,7 +1295,7 @@ function NewJobModal({onClose,onCreate,farmList,crewList,addFarm,addCrew}){
   const ROLES=['Shearer','Crutcher','Wool Handler','Wool Classer','Presser','Penner'];
   const tog=id=>setSelCrew(p=>p.includes(id)?p.filter(x=>x!==id):[...p,id]);
   const ok=farmId&&startDate&&days&&sheep&&selCrew.length>0;
-  const doCreate=()=>{if(!ok)return;onCreate({id:'j'+Date.now(),jobNumber:String(Math.floor(2104+Math.random()*50)).padStart(6,'0'),farmId,type,notes_job:notes,startDate,daysAllocated:parseInt(days),totalSheep:parseInt(sheep),evos,crutchingTrailer:false,transport,accommodation:accomm,status:'Active',crew:selCrew,rates:mkRates(),runs:{},shedTallies:{},baleTallies:{},baleBF:{},dayNotes:{}});};
+  const doCreate=()=>{if(!ok)return;onCreate({id:'j'+Date.now(),jobNumber:String(Math.floor(2104+Math.random()*50)).padStart(6,'0'),farmId,type,notes_job:notes,startDate,daysAllocated:parseInt(days),totalSheep:parseInt(sheep),evos,crutchingTrailer:false,transport,accommodation:accomm,status:'Active',crew:selCrew,jobPin:jobPin.trim()||null,rates:mkRates(),runs:{},shedTallies:{},baleTallies:{},baleBF:{},dayNotes:{}});};
   const doAddFarm=()=>{if(!newFarm.name||!newFarm.address)return;const f={id:'f'+Date.now(),name:newFarm.name,address:newFarm.address,stands:parseInt(newFarm.stands)||4,notes:newFarm.notes};addFarm(f);setFarmId(f.id);setShowAddFarm(false);setNewFarm({name:'',address:'',stands:'',notes:''});};
   const doAddCrew=()=>{if(!newCrew.name)return;const c={id:'cx'+Date.now(),name:newCrew.name,role:newCrew.role,phone:newCrew.phone,hasVehicle:newCrew.hasVehicle};addCrew(c);setSelCrew(p=>[...p,c.id]);setShowAddCrew(false);setNewCrew({name:'',role:'Shearer',phone:'',hasVehicle:false});};
   const filteredFarms=farmList.filter(f=>f.name.toLowerCase().includes(farmSearch.toLowerCase())||f.address.toLowerCase().includes(farmSearch.toLowerCase()));
@@ -1337,6 +1339,12 @@ function NewJobModal({onClose,onCreate,farmList,crewList,addFarm,addCrew}){
       e(FF,{label:'Transport'},e('div',{className:'tog-row'},...[['Yes',true],['No',false]].map(([l,v])=>e('button',{key:l,className:`tog-opt${transport===v?' on':''}`,onClick:()=>setTransport(v)},l)))),
       e(FF,{label:'Accommodation'},e('input',{type:'text',className:'fi',placeholder:'e.g. Shearers quarters on property',value:accomm,onChange:ev=>setAccomm(ev.target.value)})),
       e(FF,{label:'Notes'},e('textarea',{className:'fi',rows:3,placeholder:'e.g. Merino full CRT and wig.',value:notes,onChange:ev=>setNotes(ev.target.value)})),
+      e(FF,{label:'Job PIN (optional)'},
+        e('div',null,
+          e('input',{type:'number',className:'fi',placeholder:'Leave blank for no PIN — e.g. 4821',value:jobPin,onChange:ev=>setJobPin(ev.target.value.slice(0,6)),maxLength:6}),
+          e('div',{style:{fontSize:'11px',color:'var(--muted)',marginTop:5}},'🔒 If set, crew must enter this PIN to open the job. Share it with relevant crew only. Admin can always access.')
+        )
+      ),
 
       /* CREW — grouped by role + add new */
       e(FF,{label:`Select Crew (${selCrew.length} selected)`},
@@ -1406,7 +1414,7 @@ function App(){
   const [isOnline,setIsOnline]=useState(navigator.onLine);
   const [pendingCount,setPendingCount]=useState(0);
   const [loadedFromCache,setLoadedFromCache]=useState(false);
-  const [role,setRole]=useState('admin');
+  const [role,setRole]=useState('read_only');
   const [screen,setScreen]=useState('home');
   const [selJobId,setSelJobId]=useState(null);
   const [jobs,setJobs]=useState([]);
@@ -1471,8 +1479,16 @@ function App(){
   const gcl=id=>crewList.find(c=>c.id===id);
   const selJob=jobs.find(j=>j.id===selJobId);
   const setSelJob=fn=>setJobs(prev=>prev.map(j=>j.id===selJobId?fn(j):j));
-  const goJob=id=>{setSelJobId(id);setScreen('job');};
-  const goHome=()=>{setScreen('home');setSelJobId(null);setShowSMS(false);setPreviewId(null);};
+  const [jobPinPending,setJobPinPending]=useState(null); /* job id awaiting PIN */
+  const goJob=id=>{
+    const job=jobs.find(j=>j.id===id);
+    if(job?.jobPin&&role!=='admin'){
+      setJobPinPending(id);
+    }else{
+      setSelJobId(id);setScreen('job');
+    }
+  };
+  const goHome=()=>{setScreen('home');setSelJobId(null);setShowSMS(false);setPreviewId(null);setJobPinPending(null);};
   const doCreate=job=>{setJobs(p=>[job,...p]);setShowNew(false);setSelJobId(job.id);setScreen('job');};
 
   /* Loading screen */
@@ -1505,7 +1521,22 @@ function App(){
     screen==='job'&&selJob&&e(JobDetailScreen,{job:selJob,setJob:setSelJob,role,setRole,onBack:goHome,onSend:()=>setShowSMS(true),gfl,gcl}),
     showSMS&&selJob&&e(SMSModal,{job:selJob,onClose:()=>{setShowSMS(false);setPreviewId(null);},onPreview:id=>setPreviewId(id),gcl}),
     previewId&&selJob&&e(JobCardView,{job:selJob,crewId:previewId,onClose:()=>setPreviewId(null),gfl,gcl}),
-    showNew&&e(NewJobModal,{onClose:()=>setShowNew(false),onCreate:doCreate,farmList,crewList,addFarm,addCrew})
+    showNew&&e(NewJobModal,{onClose:()=>setShowNew(false),onCreate:doCreate,farmList,crewList,addFarm,addCrew}),
+    /* Job PIN gate */
+    jobPinPending&&e('div',{className:'pin-modal'},
+      e('div',{className:'pin-modal-box'},
+        e('div',{className:'pmb-title'},gfl(jobs.find(j=>j.id===jobPinPending)?.farmId)?.name||'Job'),
+        e('div',{className:'pmb-sub'},'This job is PIN protected'),
+        e(PinPad,{
+          label:'Job PIN',
+          subtitle:'Enter job PIN to open',
+          onSuccess:()=>{setSelJobId(jobPinPending);setScreen('job');setJobPinPending(null);},
+          onCancel:()=>setJobPinPending(null),
+          allowChange:false,
+          _overridePin:jobs.find(j=>j.id===jobPinPending)?.jobPin,
+        })
+      )
+    )
   );
 }
 ReactDOM.createRoot(document.getElementById('root')).render(e(App));
