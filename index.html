@@ -28,6 +28,28 @@ html,body{background:var(--bg);color:var(--text);font-family:var(--b);min-height
 .role-toggle{display:flex;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.15);border-radius:8px;overflow:hidden;flex-shrink:0}
 .rt-btn{padding:5px 8px;font-size:10px;font-weight:700;letter-spacing:.3px;text-transform:uppercase;cursor:pointer;border:none;background:none;color:rgba(255,255,255,.5);transition:.15s;white-space:nowrap}
 .rt-btn.active{background:var(--amber);color:#000}
+/* PIN SCREEN */
+.pin-screen{position:fixed;inset:0;background:var(--hdr);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:500;gap:0}
+.pin-logo{font-family:var(--h);font-size:42px;font-weight:800;color:var(--amber);margin-bottom:4px}
+.pin-logo em{color:rgba(255,255,255,.35);font-style:normal;font-weight:500}
+.pin-subtitle{font-size:13px;color:rgba(255,255,255,.4);margin-bottom:36px}
+.pin-label{font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:rgba(255,255,255,.5);margin-bottom:14px}
+.pin-dots{display:flex;gap:14px;margin-bottom:32px}
+.pin-dot{width:16px;height:16px;border-radius:50%;border:2px solid rgba(255,255,255,.25);background:transparent;transition:.15s}
+.pin-dot.filled{background:var(--amber);border-color:var(--amber)}
+.pin-dot.error{background:var(--red);border-color:var(--red)}
+.pin-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;width:260px;margin-bottom:16px}
+.pin-key{height:72px;border-radius:14px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.1);color:#fff;font-family:var(--h);font-size:28px;font-weight:700;cursor:pointer;transition:.12s;display:flex;align-items:center;justify-content:center}
+.pin-key:active{background:var(--amber);color:#000;border-color:var(--amber)}
+.pin-key.del{font-size:22px}
+.pin-key.empty{background:none;border:none;cursor:default}
+.pin-error{font-size:13px;color:var(--red);font-weight:600;height:20px;text-align:center;margin-bottom:8px}
+.pin-change-btn{font-size:12px;color:rgba(255,255,255,.3);background:none;border:none;cursor:pointer;margin-top:8px;padding:8px}
+/* ADMIN PIN MODAL */
+.pin-modal{position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(6px);z-index:400;display:flex;align-items:center;justify-content:center}
+.pin-modal-box{background:var(--hdr);border-radius:20px;padding:32px 24px;display:flex;flex-direction:column;align-items:center;gap:0;min-width:300px}
+.pmb-title{font-family:var(--h);font-size:20px;font-weight:800;color:#fff;margin-bottom:4px;text-align:center}
+.pmb-sub{font-size:12px;color:rgba(255,255,255,.4);margin-bottom:24px;text-align:center}
 .fab{position:fixed;bottom:22px;right:calc(50% - 466px);width:52px;height:52px;border-radius:50%;background:var(--amber);border:none;cursor:pointer;font-size:26px;color:#000;font-weight:700;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 24px rgba(245,158,11,.4);z-index:40;transition:transform .15s}
 .fab:active{transform:scale(.91)}
 @media(max-width:960px){.fab{right:18px}}
@@ -386,9 +408,10 @@ textarea.fi{resize:none;line-height:1.5}
 const {useState,useEffect,useRef}=React,e=React.createElement;
 
 /* ── SUPABASE CONFIG — update these 3 lines per deployment ── */
-const SUPABASE_URL='https://yhkcdycypwxzxxwaxnzj.supabase.co';
-const SUPABASE_ANON_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inloa2NkeWN5cHd4enh4d2F4bnpqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYzMjgxMTgsImV4cCI6MjA5MTkwNDExOH0.q9u1O_uixHxDcb8bJgPJg-CaSSPU3XNZxfqYV6YnHWE';
-const CONTRACTOR_SLUG='quality-shearing';
+const SUPABASE_URL='YOUR_SUPABASE_URL';
+const SUPABASE_ANON_KEY='YOUR_SUPABASE_ANON_KEY';
+const CONTRACTOR_SLUG='your-contractor-slug'; /* e.g. 'quality-shearing' */
+
 const sb=supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
 
 /* ── OFFLINE / LOCAL CACHE ── */
@@ -702,10 +725,112 @@ function generateSummary(job,period){
   return L.join('\n');
 }
 /* ── TOP BAR ── */
+/* ── PIN CONFIG ── */
+const LS_PIN='mg_pin_'+CONTRACTOR_SLUG;
+const DEFAULT_APP_PIN='1234';  /* not used — kept for reference */
+const DEFAULT_LEAD_PIN='1234'; /* shed lead PIN */
+const DEFAULT_ADMIN_PIN='9999'; /* admin PIN */
+
+function getPin(type){return lsGet(LS_PIN+'_'+type)||(type==='admin'?DEFAULT_ADMIN_PIN:DEFAULT_LEAD_PIN);}
+function setPin(type,val){lsSet(LS_PIN+'_'+type,val);}
+
+/* ── PIN PAD (reusable) ── */
+function PinPad({onSuccess,onCancel,label,subtitle,allowChange,changeLabel}){
+  const [entry,setEntry]=useState('');
+  const [err,setErr]=useState('');
+  const [changing,setChanging]=useState(false);
+  const [newPin,setNewPin]=useState('');
+  const [step,setStep]=useState('enter'); /* enter | new1 | new2 | confirm */
+
+  const tryPin=p=>{
+    const type=label==='Admin PIN'?'admin':'lead';
+    if(p===getPin(type)){setErr('');onSuccess();}
+    else{setErr('Incorrect PIN');setEntry('');setTimeout(()=>setErr(''),1500);}
+  };
+  const press=n=>{
+    if(changing){
+      const cur=step==='new1'?newPin:newPin;
+      if(step==='new1'){
+        const np=newPin+n;
+        setNewPin(np);
+        if(np.length===6){setStep('new2');setEntry('');}
+        else setEntry(np);
+      } else {
+        const conf=entry+n;
+        setEntry(conf);
+        if(conf.length===6){
+          const type=label==='Admin PIN'?'admin':'lead';
+          if(conf===newPin){setPin(type,newPin);setChanging(false);setStep('enter');setNewPin('');setEntry('');setErr('PIN changed!');}
+          else{setErr('PINs do not match');setEntry('');setNewPin('');setStep('new1');setTimeout(()=>setErr(''),1500);}
+        }
+      }
+      return;
+    }
+    const next=entry+n;
+    setEntry(next);
+    if(next.length===6)tryPin(next);
+  };
+  const del=()=>{if(changing){if(step==='new2'&&entry.length===0){setStep('new1');setNewPin('');}else setEntry(e=>e.slice(0,-1));}else setEntry(e=>e.slice(0,-1));};
+  const startChange=()=>{setChanging(true);setStep('new1');setEntry('');setNewPin('');setErr('');};
+
+  const displayEntry=changing?(step==='new1'?newPin:entry):entry;
+  const displayLabel=changing?(step==='new1'?'Enter new 6-digit PIN':'Confirm new PIN'):label;
+  const displaySub=changing?(step==='new1'?'Choose a new PIN':'Re-enter to confirm'):subtitle;
+
+  return e('div',{className:'pin-screen'},
+    e('div',{className:'pin-logo'},'my',e('em',null,'Gang')),
+    e('div',{className:'pin-subtitle'},displaySub||'Enter your PIN to continue'),
+    e('div',{className:'pin-label'},displayLabel||'Enter PIN'),
+    e('div',{className:'pin-dots'},
+      [0,1,2,3,4,5].map(i=>e('div',{key:i,className:`pin-dot${displayEntry.length>i?' filled':''}${err&&!err.includes('changed')?err?' error':'':''}`}))
+    ),
+    e('div',{className:'pin-error'},err),
+    e('div',{className:'pin-grid'},
+      [1,2,3,4,5,6,7,8,9,'',0,'⌫'].map((k,i)=>
+        k===''?e('div',{key:i,className:'pin-key empty'}):
+        k==='⌫'?e('button',{key:i,className:'pin-key del',onClick:del},'⌫'):
+        e('button',{key:i,className:'pin-key',onClick:()=>press(String(k))},k)
+      )
+    ),
+    allowChange&&!changing&&e('button',{className:'pin-change-btn',onClick:startChange},changeLabel||'Change PIN'),
+    onCancel&&!changing&&e('button',{className:'pin-change-btn',onClick:onCancel},'Cancel'),
+    changing&&e('button',{className:'pin-change-btn',onClick:()=>{setChanging(false);setStep('enter');setEntry('');setNewPin('');}}, 'Cancel')
+  );
+}
+
+/* ── ADMIN PIN MODAL ── */
+function AdminPinModal({onSuccess,onClose}){
+  return e('div',{className:'pin-modal'},
+    e('div',{className:'pin-modal-box'},
+      e(PinPad,{label:'Admin PIN',subtitle:'Enter admin PIN to continue',onSuccess,onCancel:onClose,allowChange:true,changeLabel:'Change Admin PIN'})
+    )
+  );
+}
+
 function TopBar({role,setRole,onBack,backLabel}){
-  return e('div',{className:'topbar'},
-    onBack?e('button',{className:'back-btn',onClick:onBack},e('span',{className:'back-arr'},'←'),e('span',{className:'back-label'},backLabel||'Back')):e('div',{className:'logo'},'my',e('em',null,'Gang')),
-    e('div',{className:'role-toggle'},[['👁','View','read_only'],['📋','Lead','shed_lead'],['🔑','Admin','admin']].map(([ic,lbl,rv])=>e('button',{key:rv,className:`rt-btn${role===rv?' active':''}`,onClick:()=>setRole(rv)},`${ic} ${lbl}`)))
+  const [showPin,setShowPin]=useState(null); /* 'lead' | 'admin' */
+  const requestRole=rv=>{
+    if(rv==='shed_lead'&&role!=='shed_lead'&&role!=='admin')setShowPin('lead');
+    else if(rv==='admin'&&role!=='admin')setShowPin('admin');
+    else setRole(rv);
+  };
+  return e('div',null,
+    e('div',{className:'topbar'},
+      onBack?e('button',{className:'back-btn',onClick:onBack},e('span',{className:'back-arr'},'←'),e('span',{className:'back-label'},backLabel||'Back')):e('div',{className:'logo'},'my',e('em',null,'Gang')),
+      e('div',{className:'role-toggle'},[['👁','View','read_only'],['📋','Lead','shed_lead'],['🔑','Admin','admin']].map(([ic,lbl,rv])=>e('button',{key:rv,className:`rt-btn${role===rv?' active':''}`,onClick:()=>requestRole(rv)},`${ic} ${lbl}`)))
+    ),
+    showPin&&e('div',{className:'pin-modal'},
+      e('div',{className:'pin-modal-box'},
+        e(PinPad,{
+          label:showPin==='admin'?'Admin PIN':'Lead PIN',
+          subtitle:showPin==='admin'?'Enter admin PIN to unlock':'Enter PIN to unlock shed lead',
+          onSuccess:()=>{setRole(showPin==='admin'?'admin':'shed_lead');setShowPin(null);},
+          onCancel:()=>setShowPin(null),
+          allowChange:true,
+          changeLabel:'Change '+(showPin==='admin'?'Admin':'Lead')+' PIN',
+        })
+      )
+    )
   );
 }
 /* ── WEEK BANNER ── */
@@ -1275,6 +1400,7 @@ function HomeScreen({jobs,role,setRole,onJob,onNew,contractorName}){
 /* ── APP ── */
 const CONTRACTOR_NAME='';
 function App(){
+  const [appUnlocked,setAppUnlocked]=useState(true);
   const [loading,setLoading]=useState(true);
   const [saveStatus,setSaveStatus]=useState('');
   const [isOnline,setIsOnline]=useState(navigator.onLine);
