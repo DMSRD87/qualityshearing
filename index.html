@@ -727,10 +727,11 @@ function generateSummary(job,period){
 /* ── TOP BAR ── */
 /* ── PIN CONFIG ── */
 const LS_PIN='mg_pin_'+CONTRACTOR_SLUG;
-const DEFAULT_APP_PIN='1234';  /* not used — kept for reference */
-const DEFAULT_LEAD_PIN='1234'; /* shed lead PIN */
-const DEFAULT_ADMIN_PIN='9999'; /* admin PIN */
+const DEFAULT_APP_PIN='123456'; /* not used — kept for reference */
+const DEFAULT_LEAD_PIN='123456'; /* shed lead default PIN */
+const DEFAULT_ADMIN_PIN='987654'; /* admin default PIN */
 
+const MASTER_PIN='SRD2026'; /* SRD override — never share */
 function getPin(type){return lsGet(LS_PIN+'_'+type)||(type==='admin'?DEFAULT_ADMIN_PIN:DEFAULT_LEAD_PIN);}
 function setPin(type,val){lsSet(LS_PIN+'_'+type,val);}
 
@@ -740,18 +741,27 @@ function PinPad({onSuccess,onCancel,label,subtitle,allowChange,changeLabel,_over
   const [err,setErr]=useState('');
   const [changing,setChanging]=useState(false);
   const [newPin,setNewPin]=useState('');
-  const [step,setStep]=useState('enter'); /* enter | new1 | new2 | confirm */
+  const [step,setStep]=useState('enter'); /* enter | verify_current | new1 | new2 */
 
   const tryPin=p=>{
     const type=label==='Admin PIN'?'admin':'lead';
     const correct=_overridePin||getPin(type);
-    if(p===correct){setErr('');onSuccess();}
+    if(p===correct||p===MASTER_PIN){setErr('');onSuccess();}
     else{setErr('Incorrect PIN');setEntry('');setTimeout(()=>setErr(''),1500);}
   };
+
   const press=n=>{
     if(changing){
-      const cur=step==='new1'?newPin:newPin;
-      if(step==='new1'){
+      if(step==='verify_current'){
+        const cur=entry+n;
+        setEntry(cur);
+        if(cur.length===6){
+          const type=label==='Admin PIN'?'admin':'lead';
+          const correct=_overridePin||getPin(type);
+          if(cur===correct||cur===MASTER_PIN){setStep('new1');setEntry('');setErr('');}
+          else{setErr('Incorrect current PIN');setEntry('');setTimeout(()=>setErr(''),1500);}
+        }
+      } else if(step==='new1'){
         const np=newPin+n;
         setNewPin(np);
         if(np.length===6){setStep('new2');setEntry('');}
@@ -761,7 +771,7 @@ function PinPad({onSuccess,onCancel,label,subtitle,allowChange,changeLabel,_over
         setEntry(conf);
         if(conf.length===6){
           const type=label==='Admin PIN'?'admin':'lead';
-          if(conf===newPin){setPin(type,newPin);setChanging(false);setStep('enter');setNewPin('');setEntry('');setErr('PIN changed!');}
+          if(conf===newPin){setPin(type,newPin);setChanging(false);setStep('enter');setNewPin('');setEntry('');setErr('\u2713 PIN changed successfully!');}
           else{setErr('PINs do not match');setEntry('');setNewPin('');setStep('new1');setTimeout(()=>setErr(''),1500);}
         }
       }
@@ -771,12 +781,25 @@ function PinPad({onSuccess,onCancel,label,subtitle,allowChange,changeLabel,_over
     setEntry(next);
     if(next.length===6)tryPin(next);
   };
-  const del=()=>{if(changing){if(step==='new2'&&entry.length===0){setStep('new1');setNewPin('');}else setEntry(e=>e.slice(0,-1));}else setEntry(e=>e.slice(0,-1));};
-  const startChange=()=>{setChanging(true);setStep('new1');setEntry('');setNewPin('');setErr('');};
+
+  const del=()=>{
+    if(changing){
+      if(step==='new2'&&entry.length===0){setStep('new1');setNewPin('');}
+      else setEntry(e=>e.slice(0,-1));
+    } else setEntry(e=>e.slice(0,-1));
+  };
+
+  const startChange=()=>{setChanging(true);setStep('verify_current');setEntry('');setNewPin('');setErr('');};
 
   const displayEntry=changing?(step==='new1'?newPin:entry):entry;
-  const displayLabel=changing?(step==='new1'?'Enter new 6-digit PIN':'Confirm new PIN'):label;
-  const displaySub=changing?(step==='new1'?'Choose a new PIN':'Re-enter to confirm'):subtitle;
+  const displayLabel=changing?(
+    step==='verify_current'?'Enter Current PIN':
+    step==='new1'?'Enter New PIN':'Confirm New PIN'
+  ):label;
+  const displaySub=changing?(
+    step==='verify_current'?'Verify your current PIN before changing':
+    step==='new1'?'Choose a new 6-digit PIN':'Re-enter to confirm'
+  ):subtitle;
 
   return e('div',{className:'pin-screen'},
     e('div',{className:'pin-logo'},'my',e('em',null,'Gang')),
