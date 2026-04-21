@@ -329,7 +329,7 @@ html,body{background:var(--bg);color:var(--text);font-family:var(--b);min-height
 .send-btn{width:100%;padding:14px;background:linear-gradient(135deg,var(--green),#15803d);color:#fff;border:none;border-radius:12px;font-size:15px;font-weight:700;cursor:pointer;font-family:var(--b);display:flex;align-items:center;justify-content:center;gap:8px;box-shadow:0 4px 16px rgba(22,163,74,.3);transition:.12s}
 .send-btn:active{opacity:.85}
 /* MODALS */
-.overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);backdrop-filter:blur(4px);z-index:200;display:flex;flex-direction:column;justify-content:flex-end;animation:fadeIn .18s ease}
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);backdrop-filter:blur(4px);z-index:200;display:flex;flex-direction:column;justify-content:flex-end;animation:fadeIn .18s ease;overscroll-behavior:contain}
 .overlay2{z-index:300}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
 .sheet{background:var(--card);border-top:1px solid var(--border);border-radius:20px 20px 0 0;max-height:90vh;display:flex;flex-direction:column;animation:slideUp .22s ease}
@@ -365,7 +365,7 @@ html,body{background:var(--bg);color:var(--text);font-family:var(--b);min-height
 .ti-name{font-weight:600;font-size:14px;color:#111}.ti-role{font-size:12px;color:#555}.ti-car{font-size:11px;color:#1a73e8;font-weight:700;margin-top:2px}
 .ff{padding:0 16px;margin-bottom:14px}
 .fl{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
-.fi{width:100%;padding:11px 12px;background:var(--card2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:var(--b);font-size:14px;outline:none;transition:.15s}
+.fi{width:100%;padding:11px 12px;background:var(--card2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:var(--b);font-size:16px;outline:none;transition:.15s}
 .fi:focus{border-color:var(--amber)}.fi::placeholder{color:var(--dim)}
 textarea.fi{resize:none;line-height:1.5}
 .tog-row{display:flex;background:var(--card2);border:1px solid var(--border);border-radius:8px;overflow:hidden}
@@ -492,7 +492,11 @@ async function dbSaveJob(job){
     throw e;
   }
 }
-async function dbSaveFarm(farm){
+async function dbDeleteJob(jobId){
+  const jobs=lsGet(LS_JOBS)||[];
+  lsSet(LS_JOBS,jobs.filter(j=>j.id!==jobId));
+  try{await sb.from('jobs').delete().eq('id',jobId).eq('contractor_slug',CONTRACTOR_SLUG);}catch(e){}
+}async function dbSaveFarm(farm){
   const farms=lsGet(LS_FARMS)||[];
   const updated=farms.find(f=>f.id===farm.id)?farms.map(f=>f.id===farm.id?farm:f):[farm,...farms];
   lsSet(LS_FARMS,updated);
@@ -500,6 +504,11 @@ async function dbSaveFarm(farm){
     await sb.from('farms').upsert({id:farm.id,contractor_slug:CONTRACTOR_SLUG,data:farm},{onConflict:'id'});
     dequeue('farm',farm.id);
   }catch(e){queueWrite('farm',farm.id,farm);throw e;}
+}
+async function dbDeleteFarm(farmId){
+  const farms=lsGet(LS_FARMS)||[];
+  lsSet(LS_FARMS,farms.filter(f=>f.id!==farmId));
+  try{await sb.from('farms').delete().eq('id',farmId).eq('contractor_slug',CONTRACTOR_SLUG);}catch(e){}
 }
 async function dbSaveCrew(member){
   const crew=lsGet(LS_CREW)||[];
@@ -510,8 +519,9 @@ async function dbSaveCrew(member){
     dequeue('crew',member.id);
   }catch(e){queueWrite('crew',member.id,member);throw e;}
 }
-const FARMS=[];
-const CREW=[];
+let FARMS=[];
+let CREW=[];
+function syncLookups(farms,crew){FARMS.length=0;FARMS.push(...(farms||[]));CREW.length=0;CREW.push(...(crew||[]));}
 const mkRun=(id,type,desc,counts,ro)=>({id,mobs:[{id:id+'_m1',type,desc,counts,...(ro!=null?{rateOverride:ro}:{})}]});
 const mkRates=(ov={})=>({shearingPerHead:4.80,crutchingPerHead:1.55,woolHandlerPerRun:80,classerPerRun:110,pennerPerRun:85,presserPerRun:85,presserPerBale:14.20,baleThreshold:13,crewOverrides:{},shearerLoadings:{},travelDays:{},travelRate:{},payDayOfWeek:4,payFrequency:'weekly',farmerShearingRate:6.50,farmerCrutchingRate:2.00,crewDetails:{},...ov});
 const INIT_JOBS=[];
@@ -520,7 +530,7 @@ const gc=id=>CREW.find(c=>c.id===id);
 const AVC=[{bg:'#78350f',fg:'#fbbf24'},{bg:'#14532d',fg:'#4ade80'},{bg:'#1e3a5f',fg:'#60a5fa'},{bg:'#7f1d1d',fg:'#f87171'},{bg:'#3b0764',fg:'#c084fc'},{bg:'#064e3b',fg:'#34d399'},{bg:'#7c2d12',fg:'#fb923c'},{bg:'#581c87',fg:'#e879f9'},{bg:'#0c4a6e',fg:'#38bdf8'},{bg:'#1a2e05',fg:'#a3e635'},{bg:'#431407',fg:'#fdba74'},{bg:'#1e1b4b',fg:'#818cf8'}];
 const avc=n=>AVC[n.charCodeAt(0)%AVC.length];
 const init=n=>n.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
-const sn=n=>{const p=n.split(' ');return p[0]+' '+p[p.length-1][0]+'.'};
+const sn=n=>{if(!n)return'Unknown';const p=n.trim().split(' ').filter(Boolean);if(p.length===1)return p[0];return p[0]+' '+p[p.length-1][0]+'.';};
 const DAY_NAMES=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 function Av({name,size=34}){const c=avc(name);return e('div',{className:'av',style:{width:size,height:size,background:c.bg,color:c.fg,fontSize:size*.38+'px'}},init(name));}
 function Bdg({status}){const m={Active:'b-active',Completed:'b-completed','Charged Out':'b-charged',Dispatched:'b-dispatched'};const d={Active:'● ',Dispatched:'◆ '};return e('span',{className:`badge ${m[status]||'b-active'}`},(d[status]||'')+status);}
@@ -726,14 +736,47 @@ function generateSummary(job,period){
 }
 /* ── TOP BAR ── */
 /* ── PIN CONFIG ── */
-const LS_PIN='mg_pin_'+CONTRACTOR_SLUG;
-const DEFAULT_APP_PIN='123456'; /* not used — kept for reference */
-const DEFAULT_LEAD_PIN='123456'; /* shed lead default PIN */
-const DEFAULT_ADMIN_PIN='987654'; /* admin default PIN */
-
+const DEFAULT_LEAD_PIN='123456';
+const DEFAULT_ADMIN_PIN='987654';
 const MASTER_PIN='SRD2026'; /* SRD override — never share */
-function getPin(type){return lsGet(LS_PIN+'_'+type)||(type==='admin'?DEFAULT_ADMIN_PIN:DEFAULT_LEAD_PIN);}
-function setPin(type,val){lsSet(LS_PIN+'_'+type,val);}
+
+/* SHA-256 hash — PINs never stored in plain text */
+async function hashPin(pin){
+  const buf=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(pin+CONTRACTOR_SLUG));
+  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+
+/* In-memory PIN cache loaded from Supabase */
+let _pinCache={lead:null,admin:null};
+let _pinLoaded=false;
+
+async function loadPins(){
+  if(_pinLoaded)return;
+  try{
+    const {data}=await sb.from('contractor_settings').select('lead_pin_hash,admin_pin_hash').eq('contractor_slug',CONTRACTOR_SLUG).single();
+    if(data){_pinCache.lead=data.lead_pin_hash;_pinCache.admin=data.admin_pin_hash;}
+  }catch(e){}
+  _pinLoaded=true;
+}
+
+async function checkPin(type,entered){
+  if(entered===MASTER_PIN)return true;
+  /* Plain text fallback for first login before any PIN has been set */
+  const def=type==='admin'?DEFAULT_ADMIN_PIN:DEFAULT_LEAD_PIN;
+  if(!_pinCache[type]){
+    return entered===def;
+  }
+  const hash=await hashPin(entered);
+  return hash===_pinCache[type];
+}
+
+async function savePin(type,newVal){
+  const hash=await hashPin(newVal);
+  _pinCache[type]=hash;
+  const update={contractor_slug:CONTRACTOR_SLUG,updated_at:new Date().toISOString()};
+  update[type==='admin'?'admin_pin_hash':'lead_pin_hash']=hash;
+  await sb.from('contractor_settings').upsert(update,{onConflict:'contractor_slug'});
+}
 
 /* ── PIN PAD (reusable) ── */
 function PinPad({onSuccess,onCancel,label,subtitle,allowChange,changeLabel,_overridePin}){
@@ -743,10 +786,11 @@ function PinPad({onSuccess,onCancel,label,subtitle,allowChange,changeLabel,_over
   const [newPin,setNewPin]=useState('');
   const [step,setStep]=useState('enter'); /* enter | verify_current | new1 | new2 */
 
-  const tryPin=p=>{
-    const type=label==='Admin PIN'?'admin':'lead';
-    const correct=_overridePin||getPin(type);
-    if(p===correct||p===MASTER_PIN){setErr('');onSuccess();}
+  const type=label==='Admin PIN'?'admin':'lead';
+
+  const tryPin=async p=>{
+    const ok=await checkPin(type,p);
+    if(ok){setErr('');onSuccess();}
     else{setErr('Incorrect PIN');setEntry('');setTimeout(()=>setErr(''),1500);}
   };
 
@@ -756,10 +800,10 @@ function PinPad({onSuccess,onCancel,label,subtitle,allowChange,changeLabel,_over
         const cur=entry+n;
         setEntry(cur);
         if(cur.length===6){
-          const type=label==='Admin PIN'?'admin':'lead';
-          const correct=_overridePin||getPin(type);
-          if(cur===correct||cur===MASTER_PIN){setStep('new1');setEntry('');setErr('');}
-          else{setErr('Incorrect current PIN');setEntry('');setTimeout(()=>setErr(''),1500);}
+          checkPin(type,cur).then(ok=>{
+            if(ok){setStep('new1');setEntry('');setErr('');}
+            else{setErr('Incorrect current PIN');setEntry('');setTimeout(()=>setErr(''),1500);}
+          });
         }
       } else if(step==='new1'){
         const np=newPin+n;
@@ -770,9 +814,11 @@ function PinPad({onSuccess,onCancel,label,subtitle,allowChange,changeLabel,_over
         const conf=entry+n;
         setEntry(conf);
         if(conf.length===6){
-          const type=label==='Admin PIN'?'admin':'lead';
-          if(conf===newPin){setPin(type,newPin);setChanging(false);setStep('enter');setNewPin('');setEntry('');setErr('\u2713 PIN changed successfully!');}
-          else{setErr('PINs do not match');setEntry('');setNewPin('');setStep('new1');setTimeout(()=>setErr(''),1500);}
+          if(conf===newPin){
+            savePin(type,newPin).then(()=>{
+              setChanging(false);setStep('enter');setNewPin('');setEntry('');setErr('✓ PIN changed — all devices updated!');
+            });
+          } else{setErr('PINs do not match');setEntry('');setNewPin('');setStep('new1');setTimeout(()=>setErr(''),1500);}
         }
       }
       return;
@@ -874,7 +920,7 @@ function JLC({job,onClick}){
   const farm=gf(job.farmId),p=calcProg(job);
   const cls=p.pct>=80?'fg':p.pct>=40?'fa':'fr';
   return e('div',{className:'jlc',onClick},
-    e('div',{className:'jlc-top'},e('div',null,e('div',{className:'jlc-name'},farm?farm.name:'Unknown',job.jobPin&&e('span',{style:{fontSize:'14px',marginLeft:6,opacity:.5}},'🔒')),e('div',{className:'jlc-num'},'#'+job.jobNumber)),e(Bdg,{status:job.status})),
+    e('div',{className:'jlc-top'},e('div',null,e('div',{className:'jlc-name'},job.jobName||(farm?farm.name:'Unknown'),job.jobPin&&e('span',{style:{fontSize:'14px',marginLeft:6,opacity:.5}},'🔒')),e('div',{className:'jlc-num'},'#'+job.jobNumber)),e(Bdg,{status:job.status})),
     e('div',{className:'jlc-meta'},e('span',{className:'pill'},job.type),e('span',{style:{fontSize:'12px',color:'var(--muted)'}},job.totalSheep.toLocaleString()+' sheep'),e('span',{style:{fontSize:'12px',color:'var(--muted)'}},job.crew.length+' crew')),
     job.status==='Active'&&p.daysWorked>0&&e('div',null,e('div',{className:'jlc-pr'},e('span',null,p.shorn.toLocaleString()+' / '+job.totalSheep.toLocaleString()+' — Day '+p.daysWorked+' of '+job.daysAllocated),e('span',{className:'pct-lbl'},Math.round(p.pct)+'%')),e('div',{className:'pbar'},e('div',{className:`pbar-f ${cls}`,style:{width:p.pct+'%'}}))),
     job.status==='Dispatched'&&e('div',{style:{fontSize:'12px',color:'var(--amber)',marginTop:'6px'}},'📱 Dispatched — starts '+fmtDateLong(job.startDate)),
@@ -1131,87 +1177,207 @@ function SummaryTab({job}){
   );
 }
 /* ── ADMIN TAB ── */
-function AdminTab({job,setJob}){
-  const rates=job.rates||{};
-  const setRate=(k,v)=>setJob(prev=>({...prev,rates:{...prev.rates,[k]:parseFloat(v)||0}}));
-  const setOv=(cid,v)=>setJob(prev=>({...prev,rates:{...prev.rates,crewOverrides:{...(prev.rates.crewOverrides||{}),[cid]:parseFloat(v)||0}}}));
-  const setLoad=(cid,v)=>setJob(prev=>({...prev,rates:{...prev.rates,shearerLoadings:{...(prev.rates.shearerLoadings||{}),[cid]:parseFloat(v)||0}}}));
-  const setTD=(cid,v)=>setJob(prev=>({...prev,rates:{...prev.rates,travelDays:{...(prev.rates.travelDays||{}),[cid]:parseInt(v)||0}}}));
-  const setTR=(cid,v)=>setJob(prev=>({...prev,rates:{...prev.rates,travelRate:{...(prev.rates.travelRate||{}),[cid]:parseFloat(v)||0}}}));
+function AdminTab({job,setJob,onEdit,onDeleteFarm,onDeleteJob}){
+  const [confirmDelete,setConfirmDelete]=useState(false);
+  const [confirmDeleteJob,setConfirmDeleteJob]=useState(false);
+  const [saved,setSaved]=useState(false);
+
+  /* Local draft — only commits to job on Save */
+  const [draft,setDraft]=useState(()=>({...mkRates(),...(job.rates||{})}));
+  const set=(k,v)=>setDraft(p=>({...p,[k]:v}));
+  const setOv=(id,v)=>setDraft(p=>({...p,crewOverrides:{...(p.crewOverrides||{}),[id]:v===''?undefined:parseFloat(v)||0}}));
+  const setLoad=(id,v)=>setDraft(p=>({...p,shearerLoadings:{...(p.shearerLoadings||{}),[id]:v===''?0:parseFloat(v)||0}}));
+  const setTD=(id,v)=>setDraft(p=>({...p,travelDays:{...(p.travelDays||{}),[id]:parseInt(v)||0}}));
+  const setTR=(id,v)=>setDraft(p=>({...p,travelRate:{...(p.travelRate||{}),[id]:parseFloat(v)||0}}));
+  const setDet=(id,k,v)=>setDraft(p=>({...p,crewDetails:{...(p.crewDetails||{}),[id]:{...(p.crewDetails||{})[id],[k]:v}}}));
+
+  const doSave=()=>{
+    setJob(prev=>({...prev,rates:draft}));
+    setSaved(true);setTimeout(()=>setSaved(false),2000);
+  };
+
   const shearers=job.crew.filter(id=>gc(id)?.role==='Shearer');
-  const shedStaff=job.crew.filter(id=>gc(id)?.role!=='Shearer');
-  const RCell=({lbl,k,hi,prefix})=>e('div',{className:`rate-cell${hi?' amber-bg':''}`},e('div',{className:`rate-lbl${hi?' hi':''}`},lbl),e('div',{className:'rate-inp-row'},prefix&&e('span',{className:'rate-prefix'},prefix),e('input',{type:'number',className:`rate-inp${hi?' hi':''}`,value:rates[k]||'',step:'0.05',onChange:ev=>setRate(k,ev.target.value)})));
+  const crutchers=job.crew.filter(id=>gc(id)?.role==='Crutcher');
+  const loadingCrew=[...shearers,...crutchers]; /* shearers + crutchers get $/head loadings */
+  const shedStaff=job.crew.filter(id=>gc(id)&&gc(id).role!=='Shearer'&&gc(id).role!=='Crutcher');
+  const DAY_FULL_=['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+
+  const RInp=({k,placeholder,step,prefix,suffix,hi})=>e('div',{className:'rate-inp-row'},
+    prefix&&e('span',{className:'rate-prefix'},prefix),
+    e('input',{type:'number',className:`rate-inp${hi?' hi':''}`,value:draft[k]??'',placeholder,step:step||'0.05',
+      onChange:ev=>set(k,ev.target.value===''?0:parseFloat(ev.target.value)||0)}),
+    suffix&&e('span',{style:{fontSize:11,color:'var(--muted)',marginLeft:4}},suffix)
+  );
+  const RCell=({lbl,k,hi,prefix,suffix})=>e('div',{className:`rate-cell${hi?' amber-bg':''}`},
+    e('div',{className:`rate-lbl${hi?' hi':''}`},lbl),
+    e(RInp,{k,prefix,suffix,hi,step:'0.05'})
+  );
+
   return e('div',{className:'admin-wrap'},
-    e('div',{className:'admin-section'},e('div',{className:'admin-sec-hdr'},e('div',{className:'admin-sec-title'},'Shearer Base Rates')),e('div',{className:'rate-grid'},e(RCell,{lbl:'Shearing $/head',k:'shearingPerHead',prefix:'$'}),e(RCell,{lbl:'Crutching $/head',k:'crutchingPerHead',prefix:'$'}))),
-    e('div',{className:'admin-section'},e('div',{className:'admin-sec-hdr'},e('div',{className:'admin-sec-title'},'Shed Staff Rates'),e('div',{className:'admin-sec-sub'},'Per run. Presser switches to per-bale at threshold.')),e('div',{className:'rate-grid'},e(RCell,{lbl:'Wool Handler',k:'woolHandlerPerRun',prefix:'$'}),e(RCell,{lbl:'Classer',k:'classerPerRun',prefix:'$'}),e(RCell,{lbl:'Penner',k:'pennerPerRun',prefix:'$'}),e(RCell,{lbl:'Presser (per run)',k:'presserPerRun',prefix:'$'}),e(RCell,{lbl:'Presser $/bale',k:'presserPerBale',prefix:'$',hi:true}),e(RCell,{lbl:'Bale threshold/day',k:'baleThreshold',hi:true}))),
-    shedStaff.length>0&&e('div',{className:'admin-section'},e('div',{className:'admin-sec-hdr'},e('div',{className:'admin-sec-title'},'Per Person Rate Overrides'),e('div',{className:'admin-sec-sub'},'Override default $/run for individuals')),shedStaff.map(id=>{const c=gc(id);if(!c)return null;const cur=(rates.crewOverrides||{})[id]||'';const defR=c.role==='Wool Classer'?rates.classerPerRun:c.role==='Penner'?rates.pennerPerRun:c.role==='Presser'?rates.presserPerRun:rates.woolHandlerPerRun;return e('div',{key:id,className:'loading-row'},e('div',{className:'lr-l'},e(Av,{name:c.name,size:32}),e('div',null,e('div',{className:'lr-name'},c.name),e('div',{className:'lr-role'},c.role+' — default $'+defR+'/run'))),e('div',{className:'lr-r'},e('span',{className:'lr-prefix'},'$'),e('input',{type:'number',className:'lr-inp',value:cur,placeholder:defR,step:'1',onChange:ev=>setOv(id,ev.target.value)}),e('span',{className:'lr-unit'},'/run')));})),
-    shearers.length>0&&e('div',{className:'admin-section'},e('div',{className:'admin-sec-hdr'},e('div',{className:'admin-sec-title'},'Shearer Rate Loadings'),e('div',{className:'admin-sec-sub'},'Added on top of base rate per head — entire job')),shearers.map(id=>{const c=gc(id);if(!c)return null;const cur=(rates.shearerLoadings||{})[id]||0;return e('div',{key:id,className:'loading-row'},e('div',{className:'lr-l'},e(Av,{name:c.name,size:32}),e('div',null,e('div',{className:'lr-name'},c.name),e('div',{className:'lr-role'},'Shearer'))),e('div',{className:'lr-r'},e('span',{className:'lr-prefix'},'+$'),e('input',{type:'number',className:'lr-inp',value:cur||'',placeholder:'0',step:'0.05',onChange:ev=>setLoad(id,ev.target.value)}),e('span',{className:'lr-unit'},'/head')));})),
-    e('div',{className:'admin-section'},e('div',{className:'admin-sec-hdr'},e('div',{className:'admin-sec-title'},'Travel'),e('div',{className:'admin-sec-sub'},'Days × daily rate per person (used in pay summary)')),
-      job.crew.map(id=>{const c=gc(id);if(!c)return null;const days=(rates.travelDays||{})[id]||'';const rate=(rates.travelRate||{})[id]||'';return e('div',{key:id,className:'loading-row'},e('div',{className:'lr-l'},e(Av,{name:c.name,size:32}),e('div',null,e('div',{className:'lr-name'},c.name),e('div',{className:'lr-role'},c.role))),e('div',{className:'lr-r',style:{gap:8}},e('span',{style:{display:'flex',alignItems:'center',gap:3}},e('input',{type:'number',className:'tr-inp',value:days,placeholder:'0',min:0,onChange:ev=>setTD(id,ev.target.value)}),e('span',{className:'tr-unit'},'days')),e('span',{style:{display:'flex',alignItems:'center',gap:3}},e('span',{className:'lr-prefix'},'$'),e('input',{type:'number',className:'tr-inp',style:{width:52},value:rate,placeholder:'40',step:'5',onChange:ev=>setTR(id,ev.target.value)}),e('span',{className:'tr-unit'},'/day'))));})
-    ),
+    /* JOB DETAILS */
     e('div',{className:'admin-section'},
-      e('div',{className:'admin-sec-hdr'},e('div',{className:'admin-sec-title'},'Crew Details'),e('div',{className:'admin-sec-sub'},'Phone, vehicle, tax withholding & role for each crew member')),
+      e('div',{className:'admin-sec-hdr'},e('div',{className:'admin-sec-title'},'Job Details')),
+      e('button',{className:'btn-p',onClick:onEdit,style:{width:'100%',marginBottom:8}},'✏️ Edit Job Details'),
+      !confirmDeleteJob&&e('button',{onClick:()=>setConfirmDeleteJob(true),style:{width:'100%',padding:'12px',background:'rgba(239,68,68,.1)',border:'1px solid rgba(239,68,68,.3)',borderRadius:8,color:'#ef4444',fontWeight:700,fontSize:14,cursor:'pointer'}},'🗑️ Delete This Job'),
+      confirmDeleteJob&&e('div',{style:{background:'rgba(239,68,68,.06)',border:'1px solid rgba(239,68,68,.2)',borderRadius:10,padding:16,marginTop:4}},
+        e('div',{style:{fontWeight:700,fontSize:14,marginBottom:6,color:'#ef4444'}},'Delete this job?'),
+        e('div',{style:{fontSize:13,color:'var(--muted)',marginBottom:14}},'All tallies, runs and pay data for this job will be permanently deleted.'),
+        e('div',{style:{display:'flex',gap:10}},
+          e('button',{className:'btn-g',style:{flex:1},onClick:()=>setConfirmDeleteJob(false)},'Cancel'),
+          e('button',{style:{flex:1,padding:'10px',background:'#ef4444',border:'none',borderRadius:8,color:'#fff',fontWeight:700,fontSize:14,cursor:'pointer'},onClick:onDeleteJob},'Yes, Delete Job')
+        )
+      )
+    ),
+
+    /* SHEARER BASE RATES */
+    e('div',{className:'admin-section'},
+      e('div',{className:'admin-sec-hdr'},e('div',{className:'admin-sec-title'},'Shearer Base Rates')),
+      e('div',{className:'rate-grid'},e(RCell,{lbl:'Shearing $/head',k:'shearingPerHead',prefix:'$'}),e(RCell,{lbl:'Crutching $/head',k:'crutchingPerHead',prefix:'$'}))
+    ),
+
+    /* SHED STAFF RATES */
+    e('div',{className:'admin-section'},
+      e('div',{className:'admin-sec-hdr'},e('div',{className:'admin-sec-title'},'Shed Staff Rates'),e('div',{className:'admin-sec-sub'},'Per run. Presser switches to per-bale at threshold.')),
+      e('div',{className:'rate-grid'},
+        e(RCell,{lbl:'Wool Handler',k:'woolHandlerPerRun',prefix:'$'}),
+        e(RCell,{lbl:'Classer',k:'classerPerRun',prefix:'$'}),
+        e(RCell,{lbl:'Penner',k:'pennerPerRun',prefix:'$'}),
+        e(RCell,{lbl:'Presser (per run)',k:'presserPerRun',prefix:'$'}),
+        e(RCell,{lbl:'Presser $/bale',k:'presserPerBale',prefix:'$',hi:true}),
+        e(RCell,{lbl:'Bale threshold/day',k:'baleThreshold',hi:true})
+      )
+    ),
+
+    /* PER PERSON OVERRIDES */
+    shedStaff.length>0&&e('div',{className:'admin-section'},
+      e('div',{className:'admin-sec-hdr'},e('div',{className:'admin-sec-title'},'Per Person Rate Overrides'),e('div',{className:'admin-sec-sub'},'Override default $/run for individuals')),
+      shedStaff.map(id=>{
+        const c=gc(id);if(!c)return null;
+        const cur=(draft.crewOverrides||{})[id]??'';
+        const defR=c.role==='Wool Classer'?draft.classerPerRun:c.role==='Penner'?draft.pennerPerRun:c.role==='Presser'?draft.presserPerRun:draft.woolHandlerPerRun;
+        return e('div',{key:id,className:'loading-row'},
+          e('div',{className:'lr-l'},e(Av,{name:c.name,size:32}),e('div',null,e('div',{className:'lr-name'},c.name),e('div',{className:'lr-role'},c.role+' — default $'+defR+'/run'))),
+          e('div',{className:'lr-r'},e('span',{className:'lr-prefix'},'$'),e('input',{type:'number',className:'lr-inp',value:cur,placeholder:defR,step:'1',onChange:ev=>setOv(id,ev.target.value)}),e('span',{className:'lr-unit'},'/run'))
+        );
+      })
+    ),
+
+    /* RATE LOADINGS — shearers + crutchers, $/head */
+    loadingCrew.length>0&&e('div',{className:'admin-section'},
+      e('div',{className:'admin-sec-hdr'},e('div',{className:'admin-sec-title'},'Rate Loadings'),e('div',{className:'admin-sec-sub'},'Added on top of base rate $/head — entire job')),
+      loadingCrew.map(id=>{
+        const c=gc(id);if(!c)return null;
+        const cur=(draft.shearerLoadings||{})[id]??'';
+        return e('div',{key:id,className:'loading-row'},
+          e('div',{className:'lr-l'},e(Av,{name:c.name,size:32}),e('div',null,e('div',{className:'lr-name'},c.name),e('div',{className:'lr-role'},c.role))),
+          e('div',{className:'lr-r'},e('span',{className:'lr-prefix'},'+$'),e('input',{type:'number',className:'lr-inp',value:cur,placeholder:'0',step:'0.05',onChange:ev=>setLoad(id,ev.target.value)}),e('span',{className:'lr-unit'},'/head'))
+        );
+      })
+    ),
+
+    /* TRAVEL */
+    e('div',{className:'admin-section'},
+      e('div',{className:'admin-sec-hdr'},e('div',{className:'admin-sec-title'},'Travel'),e('div',{className:'admin-sec-sub'},'Days × daily rate per person')),
       job.crew.map(id=>{
         const c=gc(id);if(!c)return null;
-        const det=(rates.crewDetails||{})[id]||{};
-        const setDet=(k,v)=>setJob(prev=>({...prev,rates:{...prev.rates,crewDetails:{...(prev.rates.crewDetails||{}),[id]:{...(prev.rates.crewDetails||{})[id],[k]:v}}}}));
-        const phone=det.phone!=null?det.phone:(c.phone||'');
-        const hasCar=det.hasVehicle!=null?det.hasVehicle:c.hasVehicle;
-        const taxRate=det.taxRate!=null?det.taxRate:'';
-        const role=det.role||c.role;
-        const ROLES=['Shearer','Crutcher','Wool Handler','Wool Classer','Presser','Penner'];
-        return e('div',{key:id,className:'crew-detail-row'},
-          e('div',{className:'cd-top'},
-            e(Av,{name:c.name,size:36}),
-            e('div',{className:'cd-name'},c.name),
-            e('button',{className:`cd-car-btn${hasCar?' on':''}`,onClick:()=>setDet('hasVehicle',!hasCar)},hasCar?'🚗 Has car':'🚗 No car')
-          ),
-          e('div',{className:'cd-fields'},
-            e('div',{className:'cd-field'},e('div',{className:'cd-lbl'},'Mobile'),e('input',{type:'tel',className:'cd-inp',placeholder:'04XX XXX XXX',value:phone,onChange:ev=>setDet('phone',ev.target.value)})),
-            e('div',{className:'cd-field'},e('div',{className:'cd-lbl'},'Role'),e('select',{className:'cd-role-sel',value:role,onChange:ev=>setDet('role',ev.target.value)},ROLES.map(r=>e('option',{key:r,value:r},r)))),
-            e('div',{className:'cd-field'},
-              e('div',{className:'cd-lbl'},'Tax Withholding %'),
-              e('input',{type:'number',className:'cd-inp',placeholder:'e.g. 19',value:taxRate,min:0,max:47,step:1,onChange:ev=>setDet('taxRate',ev.target.value)}),
-              taxRate&&e('div',{className:'tax-note'},'Net ≈ '+(100-parseFloat(taxRate||0)).toFixed(0)+'% of gross')
+        const days=(draft.travelDays||{})[id]??'';
+        const rate=(draft.travelRate||{})[id]??'';
+        return e('div',{key:id,className:'loading-row'},
+          e('div',{className:'lr-l'},e(Av,{name:c.name,size:32}),e('div',null,e('div',{className:'lr-name'},c.name),e('div',{className:'lr-role'},c.role))),
+          e('div',{className:'lr-r',style:{gap:8}},
+            e('span',{style:{display:'flex',alignItems:'center',gap:3}},
+              e('input',{type:'number',className:'tr-inp',value:days,placeholder:'0',min:0,onChange:ev=>setTD(id,ev.target.value)}),
+              e('span',{className:'tr-unit'},'days')
             ),
-            e('div',{className:'cd-field'},e('div',{className:'cd-lbl'},'Tax Note'),e('div',{style:{fontSize:'11px',color:'var(--dim)',paddingTop:4,lineHeight:1.5}},'Applied to pay summary as deduction. Gross pay always shown separately.'))
+            e('span',{style:{display:'flex',alignItems:'center',gap:3}},
+              e('span',{className:'lr-prefix'},'$'),
+              e('input',{type:'number',className:'tr-inp',style:{width:52},value:rate,placeholder:'40',step:'5',onChange:ev=>setTR(id,ev.target.value)}),
+              e('span',{className:'tr-unit'},'/day')
+            )
           )
         );
       })
     ),
+
+    /* CREW DETAILS */
     e('div',{className:'admin-section'},
-      e('div',{className:'admin-sec-hdr'},e('div',{className:'admin-sec-title'},'Pay Settings'),e('div',{className:'admin-sec-sub'},'Crew pay cycle — controls how Summary tab filters pay periods')),
+      e('div',{className:'admin-sec-hdr'},e('div',{className:'admin-sec-title'},'Crew Details'),e('div',{className:'admin-sec-sub'},'Phone, vehicle, tax withholding & role')),
+      job.crew.map(id=>{
+        const c=gc(id);if(!c)return null;
+        const det=(draft.crewDetails||{})[id]||{};
+        const phone=det.phone!=null?det.phone:(c.phone||'');
+        const hasCar=det.hasVehicle!=null?det.hasVehicle:c.hasVehicle;
+        const taxRate=det.taxRate??'';
+        const role=det.role||c.role;
+        const ROLES=['Shearer','Crutcher','Wool Handler','Wool Classer','Presser','Penner'];
+        return e('div',{key:id,className:'crew-detail-row'},
+          e('div',{className:'cd-top'},e(Av,{name:c.name,size:36}),e('div',{className:'cd-name'},c.name),e('button',{className:`cd-car-btn${hasCar?' on':''}`,onClick:()=>setDet(id,'hasVehicle',!hasCar)},hasCar?'🚗 Has car':'🚗 No car')),
+          e('div',{className:'cd-fields'},
+            e('div',{className:'cd-field'},e('div',{className:'cd-lbl'},'Mobile'),e('input',{type:'tel',className:'cd-inp',placeholder:'04XX XXX XXX',value:phone,onChange:ev=>setDet(id,'phone',ev.target.value)})),
+            e('div',{className:'cd-field'},e('div',{className:'cd-lbl'},'Role'),e('select',{className:'cd-role-sel',value:role,onChange:ev=>setDet(id,'role',ev.target.value)},ROLES.map(r=>e('option',{key:r,value:r},r)))),
+            e('div',{className:'cd-field'},
+              e('div',{className:'cd-lbl'},'Tax Withholding %'),
+              e('input',{type:'number',className:'cd-inp',placeholder:'e.g. 19',value:taxRate,min:0,max:47,step:1,onChange:ev=>setDet(id,'taxRate',ev.target.value)}),
+              taxRate&&e('div',{className:'tax-note'},'Net ≈ '+(100-parseFloat(taxRate||0)).toFixed(0)+'% of gross')
+            )
+          )
+        );
+      })
+    ),
+
+    /* PAY SETTINGS */
+    e('div',{className:'admin-section'},
+      e('div',{className:'admin-sec-hdr'},e('div',{className:'admin-sec-title'},'Pay Settings'),e('div',{className:'admin-sec-sub'},'Controls how Summary tab filters pay periods')),
       e('div',{style:{padding:'14px'}},
         e('div',{className:'rate-lbl',style:{marginBottom:8}},'Pay Frequency'),
         e('div',{className:'freq-btns'},
           [['weekly','Weekly'],['fortnightly','Fortnightly'],['shed','End of Shed']].map(([v,l])=>
-            e('button',{key:v,className:`freq-btn${(rates.payFrequency||'weekly')===v?' on':''}`,onClick:()=>setJob(prev=>({...prev,rates:{...prev.rates,payFrequency:v}}))},l)
+            e('button',{key:v,className:`freq-btn${(draft.payFrequency||'weekly')===v?' on':''}`,onClick:()=>setDraft(p=>({...p,payFrequency:v}))},l)
           )
         ),
-        (rates.payFrequency||'weekly')!=='shed'&&e('div',null,
-          e('div',{className:'rate-lbl',style:{marginBottom:8,marginTop:14}},'Pay Day — wages processed on this day for the prior '+(rates.payFrequency==='fortnightly'?'14':'7')+' days'),
-          e('select',{className:'pay-day-sel',value:rates.payDayOfWeek!=null?rates.payDayOfWeek:4,onChange:ev=>setJob(prev=>({...prev,rates:{...prev.rates,payDayOfWeek:parseInt(ev.target.value)}}))},
-            DAY_FULL.map((day,i)=>e('option',{key:i,value:i},day))
-          ),
-          e('div',{style:{fontSize:'12px',color:'var(--muted)',marginTop:8}},
-            'Period: '+DAY_FULL[rates.payDayOfWeek!=null?rates.payDayOfWeek:4]+' \u2192 '+DAY_FULL[((rates.payDayOfWeek!=null?rates.payDayOfWeek:4)+(rates.payFrequency==='fortnightly'?13:6))%7]+' ('+( rates.payFrequency==='fortnightly'?'14':'7')+' days)'
+        (draft.payFrequency||'weekly')!=='shed'&&e('div',null,
+          e('div',{className:'rate-lbl',style:{marginBottom:8,marginTop:14}},'Pay Day'),
+          e('select',{className:'pay-day-sel',value:draft.payDayOfWeek??4,onChange:ev=>setDraft(p=>({...p,payDayOfWeek:parseInt(ev.target.value)}))},
+            DAY_FULL_.map((day,i)=>e('option',{key:i,value:i},day))
           )
         ),
-        (rates.payFrequency==='shed')&&e('div',{style:{fontSize:'12px',color:'var(--muted)',marginTop:10,padding:'8px 12px',background:'var(--card2)',borderRadius:8}},
-          '📋 Crew paid in full at job completion. Summary shows all tallies for the entire job as one pay run.'
+        (draft.payFrequency==='shed')&&e('div',{style:{fontSize:'12px',color:'var(--muted)',marginTop:10,padding:'8px 12px',background:'var(--card2)',borderRadius:8}},
+          '📋 Crew paid in full at job completion.'
         )
       )
     ),
+
+    /* FARMER CHARGE-OUT RATES */
     e('div',{className:'admin-section'},
-      e('div',{className:'admin-sec-hdr'},e('div',{className:'admin-sec-title'},'Farmer Charge-out Rates'),e('div',{className:'admin-sec-sub'},'What the contractor charges the farmer — used in Farmer Invoice (separate from crew pay rates)')),
+      e('div',{className:'admin-sec-hdr'},e('div',{className:'admin-sec-title'},'Farmer Charge-out Rates'),e('div',{className:'admin-sec-sub'},'What the contractor charges the farmer — separate from crew pay rates')),
       e('div',{className:'rate-grid'},
-        e('div',{className:'rate-cell'},e('div',{className:'rate-lbl'},'Shearing $/head'),e('div',{className:'rate-inp-row'},e('span',{className:'rate-prefix'},'$'),e('input',{type:'number',className:'rate-inp',value:rates.farmerShearingRate||'',placeholder:'6.50',step:'0.05',onChange:ev=>setRate('farmerShearingRate',ev.target.value)}))),
-        e('div',{className:'rate-cell'},e('div',{className:'rate-lbl'},'Crutching $/head'),e('div',{className:'rate-inp-row'},e('span',{className:'rate-prefix'},'$'),e('input',{type:'number',className:'rate-inp',value:rates.farmerCrutchingRate||'',placeholder:'2.00',step:'0.05',onChange:ev=>setRate('farmerCrutchingRate',ev.target.value)})))
+        e(RCell,{lbl:'Shearing $/head',k:'farmerShearingRate',prefix:'$'}),
+        e(RCell,{lbl:'Crutching $/head',k:'farmerCrutchingRate',prefix:'$'})
+      )
+    ),
+
+    /* SAVE BUTTON */
+    e('div',{className:'admin-section'},
+      e('button',{className:'btn-p',onClick:doSave,style:{width:'100%',fontSize:16,padding:'14px'}},saved?'✓ Saved!':'💾 Save Rate Changes')
+    ),
+
+    /* DANGER ZONE */
+    e('div',{className:'admin-section'},
+      e('div',{className:'admin-sec-hdr'},e('div',{className:'admin-sec-title',style:{color:'#ef4444'}},'Danger Zone')),
+      !confirmDelete&&e('button',{onClick:()=>setConfirmDelete(true),style:{width:'100%',padding:'12px',background:'rgba(239,68,68,.1)',border:'1px solid rgba(239,68,68,.3)',borderRadius:8,color:'#ef4444',fontWeight:700,fontSize:14,cursor:'pointer'}},'🗑️ Delete Farm from List'),
+      confirmDelete&&e('div',{style:{background:'rgba(239,68,68,.06)',border:'1px solid rgba(239,68,68,.2)',borderRadius:10,padding:16}},
+        e('div',{style:{fontWeight:700,fontSize:14,marginBottom:6,color:'#ef4444'}},'Delete this farm?'),
+        e('div',{style:{fontSize:13,color:'var(--muted)',marginBottom:14}},'Removes the farm from your farm list. Existing jobs using it are unaffected.'),
+        e('div',{style:{display:'flex',gap:10}},
+          e('button',{className:'btn-g',style:{flex:1},onClick:()=>setConfirmDelete(false)},'Cancel'),
+          e('button',{style:{flex:1,padding:'10px',background:'#ef4444',border:'none',borderRadius:8,color:'#fff',fontWeight:700,fontSize:14,cursor:'pointer'},onClick:onDeleteFarm},'Yes, Delete')
+        )
       )
     ),
     e('div',{style:{height:16}})
   );
 }
+
 /* ── PROGRESS TAB ── */
 function ProgressTab({job}){
   const p=calcProg(job);
@@ -1225,14 +1391,40 @@ function ProgressTab({job}){
   );
 }
 /* ── OVERVIEW TAB ── */
-function OverviewTab({job,role,onSend,canSend}){
+/* ── EDIT FARM MODAL ── */
+function EditFarmModal({farm,onSave,onClose}){
+  const rName=useRef(),rAddr=useRef(),rStands=useRef(),rNotes=useRef();
+  const doSave=()=>{
+    const name=rName.current?.value?.trim();
+    const addr=rAddr.current?.value?.trim();
+    if(!name||!addr)return;
+    onSave({...farm,name,address:addr,stands:parseInt(rStands.current?.value)||farm.stands||4,notes:rNotes.current?.value||''});
+  };
+  return e('div',{className:'overlay'},e('div',{className:'sheet'},
+    e('div',{className:'sheet-handle'}),
+    e('div',{className:'sheet-title'},'Edit Farm Details'),
+    e('div',{className:'sheet-scroll'},
+      e(FF,{label:'Farm Name'},e('input',{type:'text',className:'fi',defaultValue:farm.name,ref:rName})),
+      e(FF,{label:'Address'},e('input',{type:'text',className:'fi',defaultValue:farm.address,ref:rAddr})),
+      e(FF,{label:'Stands'},e('input',{type:'number',className:'fi',defaultValue:farm.stands||4,min:1,ref:rStands,inputMode:'numeric'})),
+      e(FF,{label:'Notes (optional)'},e('input',{type:'text',className:'fi',defaultValue:farm.notes||'',placeholder:'e.g. Gate code 1234',ref:rNotes}))
+    ),
+    e('div',{className:'sheet-footer'},
+      e('button',{className:'btn-g',onClick:onClose},'Cancel'),
+      e('button',{className:'btn-p',onClick:doSave},'Save Farm')
+    )
+  ));
+}
+
+
+function OverviewTab({job,role,onSend,canSend,onEditFarm}){
   const farm=gf(job.farmId);
   const IC=({l,v,full})=>e('div',{className:'ic'+(full?' full-ic':'')},e('div',{className:'ic-l'},l),e('div',{className:'ic-v'},v));
   return e('div',null,
     e('div',{style:{height:12}}),
-    e('div',{className:'info-grid'},e(IC,{l:'Job Type',v:job.type}),e(IC,{l:'Total Sheep',v:job.totalSheep.toLocaleString()}),e(IC,{l:'Start Date',v:fmtDateLong(job.startDate)}),e(IC,{l:'Days Allocated',v:job.daysAllocated+' days'}),e(IC,{l:'EVOs',v:job.evos}),e(IC,{l:'Transport',v:job.transport?'✓ Available':'BYO'}),e(IC,{l:'Crutching Trailer',v:job.crutchingTrailer?'✓ Provided':'Not provided'}),e(IC,{l:'Accommodation',v:job.accommodation,full:true})),
+    e('div',{className:'info-grid'},e(IC,{l:'Job Type',v:job.type}),e(IC,{l:'Total Sheep',v:job.totalSheep.toLocaleString()}),e(IC,{l:'Start Date',v:fmtDateLong(job.startDate)}),e(IC,{l:'Days Allocated',v:job.daysAllocated+' days'}),e(IC,{l:'EVOs',v:job.evos||'—'}),e(IC,{l:'Transport',v:job.transport?'✓ Yes':'No'}),e(IC,{l:'Crutching Trailer',v:job.crutchingTrailer?'✓ Provided':'Not provided'}),e(IC,{l:'Meals',v:job.meals||'Not Supplied'}),e(IC,{l:'Accommodation',v:job.accommodation||'—',full:true})),
     job.notes_job&&e('div',{style:{padding:'0 16px',marginBottom:10}},e('div',{className:'ic'},e('div',{className:'ic-l'},'Notes'),e('div',{className:'ic-v',style:{fontSize:'13px',color:'var(--muted)',fontWeight:400}},job.notes_job))),
-    farm&&e('div',{style:{padding:'0 16px',marginBottom:10}},e('div',{className:'ic'},e('div',{className:'ic-l'},'Farm Address'),e('div',{className:'ic-v'},farm.address),farm.notes&&e('div',{style:{fontSize:'12px',color:'var(--dim)',marginTop:4}},farm.notes),e('a',{href:'https://maps.google.com/?q='+encodeURIComponent(farm.address),target:'_blank',className:'map-link'},'📍 Open in Maps'))),
+    farm&&e('div',{style:{padding:'0 16px',marginBottom:10}},e('div',{className:'ic'},e('div',{className:'ic-l'},'Farm Address'),e('div',{className:'ic-v'},farm.address),farm.notes&&e('div',{style:{fontSize:'12px',color:'var(--dim)',marginTop:4}},farm.notes),e('a',{href:'https://maps.google.com/?q='+encodeURIComponent(farm.address),target:'_blank',className:'map-link'},'📍 Open in Maps')),role==='admin'&&onEditFarm&&e('button',{className:'map-link',style:{marginTop:6,display:'block',color:'var(--amber)',cursor:'pointer',background:'none',border:'none',padding:0,fontSize:13},onClick:onEditFarm},'✏️ Edit farm details')),
     e('div',{className:'crew-hdr'},e('span',null,'Crew — '+job.crew.length)),
     job.crew.map(id=>{const c=gc(id);if(!c)return null;return e('div',{key:id,className:'crew-row'},e('div',{className:'cr-l'},e(Av,{name:c.name}),e('div',null,e('div',{className:'cr-name'},c.name,c.hasVehicle&&e('span',{className:'car-tag'},'🚗')),e('div',{className:'cr-role'},c.role))),role==='admin'&&e('div',{style:{fontFamily:'var(--m)',fontSize:'11px',color:'var(--dim)'}},c.phone));}),
     /* SEND JOB CARDS — overview tab only (Edit 6) */
@@ -1241,9 +1433,17 @@ function OverviewTab({job,role,onSend,canSend}){
   );
 }
 /* ── JOB DETAIL ── */
-function JobDetailScreen({job,setJob,role,setRole,onBack,onSend}){
+function JobDetailScreen({job,setJob,role,setRole,onBack,onSend,onEdit,onDeleteJob}){
   const [tab,setTab]=useState('tallies');
+  const [showEditFarm,setShowEditFarm]=useState(false);
   const farm=gf(job.farmId);
+  const handleSaveFarm=f=>{
+    const idx=FARMS.findIndex(x=>x.id===f.id);
+    if(idx>=0)FARMS.splice(idx,1,f); else FARMS.push(f);
+    sb.from('farms').upsert({id:f.id,contractor_slug:CONTRACTOR_SLUG,data:f}).catch(()=>{});
+    setJob(prev=>({...prev,_farmUpdated:Date.now()}));
+    setShowEditFarm(false);
+  };
   const dates=jobDates(job),todayStr=localToday();
   const defDate=dates.includes(todayStr)?todayStr:dates[dates.length-1];
   const [viewDate,setViewDate]=useState(defDate);
@@ -1253,10 +1453,10 @@ function JobDetailScreen({job,setJob,role,setRole,onBack,onSend}){
   if(role==='admin'){tabs.push(['summary','Summary']);tabs.push(['admin','Admin']);}
   const canSend=(role==='admin'||role==='shed_lead')&&job.status!=='Completed'&&job.status!=='Charged Out';
   return e('div',null,
-    e(TopBar,{role,setRole,onBack,backLabel:farm?farm.name:'Jobs'}),
+    e(TopBar,{role,setRole,onBack,backLabel:job.jobName||(farm?farm.name:'Jobs')}),
     e('div',{className:'screen'},
       e('div',{className:'jd-hero'},
-        e('div',{className:'jd-farm'},farm?farm.name:'Unknown Farm'),
+        e('div',{className:'jd-farm'},job.jobName||(farm?farm.name:'Unknown Farm')),
         e('div',{className:'jd-sub'},
           role==='admin'
             ?e('button',{className:'status-btn',onClick:cycleStatus,title:'Tap to change status'},e(Bdg,{status:job.status}),e('span',{className:'status-hint'},'tap to change'))
@@ -1268,9 +1468,10 @@ function JobDetailScreen({job,setJob,role,setRole,onBack,onSend}){
       e('div',{className:'tabs'},tabs.map(([k,l])=>e('button',{key:k,className:`tab-btn${tab===k?' on':''}`,onClick:()=>setTab(k)},l))),
       tab==='tallies'&&e(TallyTab,{job,setJob,role,viewDate,setViewDate}),
       tab==='progress'&&e(ProgressTab,{job}),
-      tab==='overview'&&e(OverviewTab,{job,role,onSend,canSend}),
+      tab==='overview'&&e(OverviewTab,{job,role,onSend,canSend,onEditFarm:role==='admin'?()=>setShowEditFarm(true):null}),
       tab==='summary'&&role==='admin'&&e(SummaryTab,{job}),
-      tab==='admin'&&role==='admin'&&e(AdminTab,{job,setJob}),
+      tab==='admin'&&role==='admin'&&e(AdminTab,{job,setJob,onEdit,onDeleteFarm:()=>{const farm=gf(job.farmId);if(!farm)return;dbDeleteFarm(farm.id);setFarmList(p=>{const n=p.filter(f=>f.id!==farm.id);syncLookups(n,CREW);return n;});},onDeleteJob}),
+      showEditFarm&&farm&&e(EditFarmModal,{farm,onSave:handleSaveFarm,onClose:()=>setShowEditFarm(false)})
     )
   );
 }
@@ -1285,7 +1486,7 @@ function JobCardView({job,crewId,onClose}){
       crew&&e('div',{className:'jcw-greet'},'Hi '+crew.name.split(' ')[0]+','),
       e('div',{className:'jcw-alloc'},'You have been allocated to the job —\n'+(farm?farm.name:'Farm')+' (#'+job.jobNumber+')'),
       e('div',{className:'jcw-title'},'Job Details'),
-      ...[['Job Number',job.jobNumber],['Job Name',farm?farm.name:''],['Job Type',job.type],['Start Date',fmtDate(job.startDate)],['End Date',endD],['Farm Address',farm?farm.address:'',true],['Total Sheep',job.totalSheep.toLocaleString()],['EVOs',job.evos],['Crutching Trailer',job.crutchingTrailer?'Provided':'No crutching trailer'],['Transport',job.transport?'Available':'BYO'],['Accommodation',job.accommodation]].map(([lbl,val,isAddr])=>
+      ...[['Job Number',job.jobNumber],['Job Name',farm?farm.name:''],['Job Type',job.type],['Start Date',fmtDate(job.startDate)],['End Date',endD],['Farm Address',farm?farm.address:'',true],['Total Sheep',job.totalSheep.toLocaleString()],['EVOs',job.evos],['Crutching Trailer',job.crutchingTrailer?'Provided':'Not provided'],['Meals',job.meals||'Not Supplied'],['Transport',job.transport?'Available':'No'],['Accommodation',job.accommodation]].map(([lbl,val,isAddr])=>
         e('div',{key:lbl,className:'jcw-f'},e('div',{className:'jcw-fl'},lbl),isAddr?e('div',null,e('div',{className:'jcw-fv'},val),e('a',{href:'https://maps.google.com/?q='+encodeURIComponent(val),target:'_blank',className:'map-btn'},'📍 Open in Maps')):e('div',{className:'jcw-fv'},val))
       ),
       job.notes_job&&e('div',{className:'jcw-f'},e('div',{className:'jcw-fl'},'Further Details'),e('div',{className:'jcw-fv',style:{fontSize:'14px',color:'#444'}},job.notes_job)),
@@ -1411,69 +1612,172 @@ function SMSModal({job,onClose,onPreview,farmList,crewList}){
   ));
 }
 /* ── NEW JOB ── */
-function NewJobModal({onClose,onCreate,farmList,crewList,addFarm,addCrew}){
-  const [type,setType]=useState('Shearing'),[farmId,setFarmId]=useState(''),[startDate,setStartDate]=useState(localToday()),[days,setDays]=useState(''),[sheep,setSheep]=useState(''),[evos,setEvos]=useState('BYO'),[transport,setTransport]=useState(true),[accomm,setAccomm]=useState(''),[notes,setNotes]=useState(''),[selCrew,setSelCrew]=useState([]);
-  const [jobPin,setJobPin]=useState('');
-  const [farmSearch,setFarmSearch]=useState('');
-  const [showAddFarm,setShowAddFarm]=useState(false);
-  const [newFarm,setNewFarm]=useState({name:'',address:'',stands:'',notes:''});
-  const [showAddCrew,setShowAddCrew]=useState(false);
-  const [newCrew,setNewCrew]=useState({name:'',role:'Shearer',phone:'',hasVehicle:false});
-  const ROLES=['Shearer','Crutcher','Wool Handler','Wool Classer','Presser','Penner'];
-  const tog=id=>setSelCrew(p=>p.includes(id)?p.filter(x=>x!==id):[...p,id]);
-  const ok=farmId&&startDate&&days&&sheep&&selCrew.length>0;
-  const doCreate=()=>{if(!ok)return;onCreate({id:'j'+Date.now(),jobNumber:String(Math.floor(2104+Math.random()*50)).padStart(6,'0'),farmId,type,notes_job:notes,startDate,daysAllocated:parseInt(days),totalSheep:parseInt(sheep),evos,crutchingTrailer:false,transport,accommodation:accomm,status:'Active',crew:selCrew,jobPin:jobPin.trim()||null,rates:mkRates(),runs:{},shedTallies:{},baleTallies:{},baleBF:{},dayNotes:{}});};
-  const doAddFarm=()=>{if(!newFarm.name||!newFarm.address)return;const f={id:'f'+Date.now(),name:newFarm.name,address:newFarm.address,stands:parseInt(newFarm.stands)||4,notes:newFarm.notes};addFarm(f);setFarmId(f.id);setShowAddFarm(false);setNewFarm({name:'',address:'',stands:'',notes:''});};
-  const doAddCrew=()=>{if(!newCrew.name)return;const c={id:'cx'+Date.now(),name:newCrew.name,role:newCrew.role,phone:newCrew.phone,hasVehicle:newCrew.hasVehicle};addCrew(c);setSelCrew(p=>[...p,c.id]);setShowAddCrew(false);setNewCrew({name:'',role:'Shearer',phone:'',hasVehicle:false});};
-  const filteredFarms=farmList.filter(f=>f.name.toLowerCase().includes(farmSearch.toLowerCase())||f.address.toLowerCase().includes(farmSearch.toLowerCase()));
-  /* Group crew by role */
-  const ROLE_ORDER=['Shearer','Crutcher','Wool Handler','Wool Classer','Presser','Penner'];
-  const crewByRole=ROLE_ORDER.reduce((acc,r)=>{const members=crewList.filter(c=>c.role===r);if(members.length)acc.push({role:r,members});return acc;},[]);
-  const FF=({label,children})=>e('div',{className:'ff'},e('div',{className:'fl'},label),children);
-  const IField=({lbl,children})=>e('div',null,e('div',{className:'if-lbl'},lbl),children);
-  return e('div',{className:'overlay'},e('div',{className:'sheet'},
-    e('div',{className:'sheet-handle'}),e('div',{className:'sheet-title'},'New Job'),
-    e('div',{className:'sheet-scroll'},
-      e(FF,{label:'Job Type'},e('div',{className:'tog-row'},...['Shearing','Crutching'].map(t=>e('button',{key:t,className:`tog-opt${type===t?' on':''}`,onClick:()=>setType(t)},t)))),
+const FF=({label,children})=>e('div',{className:'ff'},e('div',{className:'fl'},label),children);
+const IField=({lbl,children})=>e('div',null,e('div',{className:'if-lbl'},lbl),children);
 
-      /* FARM — search + list + add new */
+/* Stable sub-forms — defined outside NewJobModal so they never remount on parent re-render */
+function AddFarmForm({onAdd,onCancel}){
+  const [name,setName]=useState('');
+  const [addr,setAddr]=useState('');
+  const [stands,setStands]=useState('4');
+  const [notes,setNotes]=useState('');
+  const ok=name.trim()&&addr.trim();
+  const doAdd=()=>{
+    if(!ok)return;
+    const f={id:'f'+Date.now(),name:name.trim(),address:addr.trim(),stands:parseInt(stands)||4,notes};
+    onAdd(f);
+  };
+  return e('div',{className:'inline-form'},
+    e('div',{className:'inline-form-title'},'New Farm'),
+    e('div',{className:'inline-form-grid'},
+      e('div',{className:'inline-form-full'},e(IField,{lbl:'Farm Name'},
+        e('input',{type:'text',className:'if-inp',placeholder:'e.g. Smith Station',value:name,onChange:ev=>setName(ev.target.value),autoFocus:true}))),
+      e('div',{className:'inline-form-full'},e(IField,{lbl:'Address'},
+        e('input',{type:'text',className:'if-inp',placeholder:'e.g. 12 Station Rd, Naracoorte SA 5271',value:addr,onChange:ev=>setAddr(ev.target.value)}))),
+      e('div',null,e(IField,{lbl:'Stands'},
+        e('input',{type:'number',className:'if-inp',placeholder:'4',min:1,value:stands,onChange:ev=>setStands(ev.target.value)}))),
+      e('div',null,e(IField,{lbl:'Notes (optional)'},
+        e('input',{type:'text',className:'if-inp',placeholder:'e.g. Gate code 1234',value:notes,onChange:ev=>setNotes(ev.target.value)})))
+    ),
+    e('div',{className:'if-btns'},
+      e('button',{className:'if-cancel',onClick:onCancel},'Cancel'),
+      e('button',{className:'if-save',disabled:!ok,onClick:doAdd},'Add Farm')
+    )
+  );
+}
+
+function AddCrewForm({onAdd,onCancel}){
+  const ROLES=['Shearer','Crutcher','Wool Handler','Wool Classer','Presser','Penner'];
+  const [name,setName]=useState('');
+  const [role,setRole]=useState('Shearer');
+  const [phone,setPhone]=useState('');
+  const [hasVehicle,setHasVehicle]=useState(false);
+  const doAdd=()=>{
+    if(!name.trim())return;
+    onAdd({id:'cx'+Date.now(),name:name.trim(),role,phone,hasVehicle});
+  };
+  return e('div',{className:'inline-form'},
+    e('div',{className:'inline-form-title'},'New Crew Member'),
+    e('div',{className:'inline-form-grid'},
+      e('div',{className:'inline-form-full'},e(IField,{lbl:'Full Name'},
+        e('input',{type:'text',className:'if-inp',placeholder:'e.g. Johnno Smith',value:name,onChange:ev=>setName(ev.target.value),autoFocus:true}))),
+      e('div',null,e(IField,{lbl:'Role'},
+        e('select',{className:'if-sel',value:role,onChange:ev=>setRole(ev.target.value)},
+          ROLES.map(r=>e('option',{key:r,value:r},r))))),
+      e('div',null,e(IField,{lbl:'Mobile'},
+        e('input',{type:'tel',className:'if-inp',placeholder:'04XX XXX XXX',value:phone,onChange:ev=>setPhone(ev.target.value)}))),
+      e('div',{className:'inline-form-full'},
+        e('label',{style:{display:'flex',alignItems:'center',gap:8,fontSize:'13px',fontWeight:600,cursor:'pointer'}},
+          e('input',{type:'checkbox',checked:hasVehicle,onChange:ev=>setHasVehicle(ev.target.checked)}),
+          '🚗 Has own vehicle'
+        )
+      )
+    ),
+    e('div',{className:'if-btns'},
+      e('button',{className:'if-cancel',onClick:onCancel},'Cancel'),
+      e('button',{className:'if-save',disabled:!name.trim(),onClick:doAdd},'Add & Select')
+    )
+  );
+}
+
+function NewJobModal({onClose,onCreate,farmList,crewList,addFarm,addCrew}){
+  /* Only UI-driving state — NO controlled text inputs */
+  const [type,setType]=useState('Shearing');
+  const [farmId,setFarmId]=useState('');
+  const [evos,setEvos]=useState('Supplied at shed');
+  const [transport,setTransport]=useState(false);
+  const [meals,setMeals]=useState('Not Supplied');
+  const [crutchingTrailer,setCrutchingTrailer]=useState(false);
+  const [selCrew,setSelCrew]=useState([]);
+  const [showAddFarm,setShowAddFarm]=useState(false);
+  const [showAddCrew,setShowAddCrew]=useState(false);
+  const [submitErr,setSubmitErr]=useState('');
+  const [farmQuery,setFarmQuery]=useState('');
+
+  /* Refs for all text/number inputs — browser manages value, zero re-renders on type */
+  const rJobName=useRef(),rStartDate=useRef(),rDays=useRef(),rSheep=useRef();
+  const rAccomm=useRef(),rNotes=useRef(),rJobPin=useRef();
+
+  const tog=id=>setSelCrew(p=>p.includes(id)?p.filter(x=>x!==id):[...p,id]);
+
+  const handleFarmSearch=ev=>setFarmQuery(ev.target.value.toLowerCase());
+
+  const ROLE_ORDER=['Shearer','Crutcher','Wool Handler','Wool Classer','Presser','Penner'];
+  const crewByRole=ROLE_ORDER.reduce((acc,r)=>{
+    const members=crewList.filter(c=>c.role===r);
+    if(members.length)acc.push({role:r,members});
+    return acc;
+  },[]);
+
+  const doCreate=()=>{
+    const days=rDays.current?.value?.trim();
+    const sheep=rSheep.current?.value?.trim();
+    const startDate=rStartDate.current?.value||localToday();
+    if(!farmId||!days||!sheep||selCrew.length===0){
+      setSubmitErr('Please select a farm, fill in days & sheep, and select at least one crew member.');
+      return;
+    }
+    onCreate({
+      id:'j'+Date.now(),
+      jobNumber:String(Math.floor(2104+Math.random()*50)).padStart(6,'0'),
+      farmId,type,
+      notes_job:rNotes.current?.value||'',
+      startDate,
+      daysAllocated:parseInt(days),
+      totalSheep:parseInt(sheep),
+      evos,crutchingTrailer,transport,meals,
+      accommodation:rAccomm.current?.value||'',
+      status:'Active',crew:selCrew,
+      jobPin:rJobPin.current?.value?.trim()||null,
+      jobName:rJobName.current?.value?.trim()||'',
+      rates:mkRates(),runs:{},shedTallies:{},baleTallies:{},baleBF:{},dayNotes:{}
+    });
+  };
+
+  const handleAddFarm=f=>{addFarm(f);setFarmId(f.id);setShowAddFarm(false);};
+  const handleAddCrew=c=>{addCrew(c);setSelCrew(p=>[...p,c.id]);setShowAddCrew(false);};
+
+  return e('div',{style:{minHeight:'100%',display:'flex',flexDirection:'column',background:'var(--bg)'}},
+    e('div',{style:{background:'var(--hdr)',padding:'16px',display:'flex',alignItems:'center',gap:12,position:'sticky',top:0,zIndex:10}},
+      e('button',{onClick:onClose,style:{background:'none',border:'none',color:'rgba(255,255,255,.7)',fontSize:16,cursor:'pointer',padding:'4px 8px'}},'← Back'),
+      e('div',{style:{fontFamily:'var(--h)',fontSize:22,fontWeight:800,color:'#fff'}}, 'New Job')
+    ),
+    e('div',{style:{flex:1,padding:'0 0 120px 0'}},
+      e(FF,{label:'Job Name'},
+        e('div',null,
+          e('input',{type:'text',className:'fi',placeholder:'e.g. Smith Station, Gillap, Mueller...',ref:rJobName}),
+          e('div',{style:{fontSize:'11px',color:'var(--muted)',marginTop:5}},'Overrides farm name as the job title. Leave blank to use farm name.')
+        )
+      ),
+      e(FF,{label:'Job Type'},
+        e('div',{className:'tog-row'},...['Shearing','Crutching'].map(t=>
+          e('button',{key:t,className:`tog-opt${type===t?' on':''}`,onClick:()=>setType(t)},t)
+        ))
+      ),
       e(FF,{label:'Select Farm'},
         e('div',null,
-          e('input',{type:'text',className:'farm-search',placeholder:'🔍 Search farms...',value:farmSearch,onChange:ev=>setFarmSearch(ev.target.value)}),
+          e('input',{type:'text',className:'farm-search',placeholder:'🔍 Search farms...',onInput:handleFarmSearch}),
           e('div',{className:'farm-list',style:{borderRadius:'0 0 8px 8px'}},
-            filteredFarms.length>0
-              ?filteredFarms.map(f=>e('div',{key:f.id,className:`farm-opt${farmId===f.id?' sel':''}`,onClick:()=>setFarmId(f.id)},e('div',{className:'fo-name'},f.name),e('div',{className:'fo-addr'},f.address)))
-              :e('div',{style:{padding:'12px',color:'var(--dim)',fontSize:'13px',textAlign:'center'}},'No farms match — add one below')
-          ),
+            ...(farmQuery?farmList.filter(f=>f.name.toLowerCase().includes(farmQuery)||f.address.toLowerCase().includes(farmQuery)):farmList).length>0
+              ?(farmQuery?farmList.filter(f=>f.name.toLowerCase().includes(farmQuery)||f.address.toLowerCase().includes(farmQuery)):farmList).map(f=>e('div',{key:f.id,className:`farm-opt${farmId===f.id?' sel':''}`,onClick:()=>setFarmId(f.id)},e('div',{className:'fo-name'},f.name),e('div',{className:'fo-addr'},f.address)))
+              :[e('div',{key:'nf',style:{padding:'12px',color:'var(--dim)',fontSize:'13px',textAlign:'center'}},'No farms match — add one below')]),
           !showAddFarm&&e('button',{className:'add-inline-btn',onClick:()=>setShowAddFarm(true)},'+ Add New Farm'),
-          showAddFarm&&e('div',{className:'inline-form'},
-            e('div',{className:'inline-form-title'},'New Farm'),
-            e('div',{className:'inline-form-grid'},
-              e('div',{className:'inline-form-full'},e(IField,{lbl:'Farm Name'},e('input',{type:'text',className:'if-inp',placeholder:'e.g. Smith Station',value:newFarm.name,onChange:ev=>setNewFarm(p=>({...p,name:ev.target.value}))}))),
-              e('div',{className:'inline-form-full'},e(IField,{lbl:'Address'},e('input',{type:'text',className:'if-inp',placeholder:'e.g. 12 Station Rd, Naracoorte SA 5271',value:newFarm.address,onChange:ev=>setNewFarm(p=>({...p,address:ev.target.value}))}))),
-              e('div',null,e(IField,{lbl:'Stands'},e('input',{type:'number',className:'if-inp',placeholder:'4',min:1,value:newFarm.stands,onChange:ev=>setNewFarm(p=>({...p,stands:ev.target.value}))}))),
-              e('div',null,e(IField,{lbl:'Notes (optional)'},e('input',{type:'text',className:'if-inp',placeholder:'e.g. Gate code 1234',value:newFarm.notes,onChange:ev=>setNewFarm(p=>({...p,notes:ev.target.value}))})))
-            ),
-            e('div',{className:'if-btns'},e('button',{className:'if-cancel',onClick:()=>setShowAddFarm(false)},'Cancel'),e('button',{className:'if-save',disabled:!newFarm.name||!newFarm.address,onClick:doAddFarm},'Add Farm'))
-          )
+          showAddFarm&&e(AddFarmForm,{key:'add-farm',onAdd:handleAddFarm,onCancel:()=>setShowAddFarm(false)})
         )
       ),
-
-      e(FF,{label:'Start Date'},e('input',{type:'date',className:'fi',value:startDate,onChange:ev=>setStartDate(ev.target.value)})),
-      e(FF,{label:'Days Allocated'},e('input',{type:'number',className:'fi',placeholder:'e.g. 5',value:days,onChange:ev=>setDays(ev.target.value),min:1})),
-      e(FF,{label:'Total Sheep'},e('input',{type:'number',className:'fi',placeholder:'e.g. 3000',value:sheep,onChange:ev=>setSheep(ev.target.value),min:1})),
+      e(FF,{label:'Start Date'},e('input',{type:'date',className:'fi',defaultValue:localToday(),ref:rStartDate})),
+      e(FF,{label:'Days Allocated'},e('input',{type:'number',className:'fi',placeholder:'e.g. 5',min:1,ref:rDays,inputMode:'numeric'})),
+      e(FF,{label:'Total Sheep'},e('input',{type:'number',className:'fi',placeholder:'e.g. 3000',min:1,ref:rSheep,inputMode:'numeric'})),
       e(FF,{label:'EVOs'},e('div',{className:'tog-row'},...['BYO','Supplied at shed'].map(o=>e('button',{key:o,className:`tog-opt${evos===o?' on':''}`,onClick:()=>setEvos(o)},o)))),
       e(FF,{label:'Transport'},e('div',{className:'tog-row'},...[['Yes',true],['No',false]].map(([l,v])=>e('button',{key:l,className:`tog-opt${transport===v?' on':''}`,onClick:()=>setTransport(v)},l)))),
-      e(FF,{label:'Accommodation'},e('input',{type:'text',className:'fi',placeholder:'e.g. Shearers quarters on property',value:accomm,onChange:ev=>setAccomm(ev.target.value)})),
-      e(FF,{label:'Notes'},e('textarea',{className:'fi',rows:3,placeholder:'e.g. Merino full CRT and wig.',value:notes,onChange:ev=>setNotes(ev.target.value)})),
+      e(FF,{label:'Accommodation'},e('input',{type:'text',className:'fi',placeholder:'e.g. Shearers quarters on property',ref:rAccomm})),
+      e(FF,{label:'Notes'},e('textarea',{className:'fi',rows:3,placeholder:'e.g. Merino full CRT and wig.',ref:rNotes})),
       e(FF,{label:'Job PIN (optional)'},
         e('div',null,
-          e('input',{type:'number',className:'fi',placeholder:'Leave blank for no PIN — e.g. 4821',value:jobPin,onChange:ev=>setJobPin(ev.target.value.slice(0,6)),maxLength:6}),
-          e('div',{style:{fontSize:'11px',color:'var(--muted)',marginTop:5}},'🔒 If set, crew must enter this PIN to open the job. Share it with relevant crew only. Admin can always access.')
+          e('input',{type:'number',className:'fi',placeholder:'Leave blank for no PIN — e.g. 4821',ref:rJobPin,maxLength:6,inputMode:'numeric'}),
+          e('div',{style:{fontSize:'11px',color:'var(--muted)',marginTop:5}},'🔒 If set, crew must enter this PIN to open the job.')
         )
       ),
-
-      /* CREW — grouped by role + add new */
       e(FF,{label:`Select Crew (${selCrew.length} selected)`},
         e('div',null,
           crewByRole.map(({role:r,members})=>e('div',{key:r},
@@ -1485,29 +1789,156 @@ function NewJobModal({onClose,onCreate,farmList,crewList,addFarm,addCrew}){
             )
           )),
           !showAddCrew&&e('button',{className:'add-inline-btn',onClick:()=>setShowAddCrew(true)},'+ Add New Crew Member'),
-          showAddCrew&&e('div',{className:'inline-form'},
-            e('div',{className:'inline-form-title'},'New Crew Member'),
-            e('div',{className:'inline-form-grid'},
-              e('div',{className:'inline-form-full'},e(IField,{lbl:'Full Name'},e('input',{type:'text',className:'if-inp',placeholder:'e.g. Johnno Smith',value:newCrew.name,onChange:ev=>setNewCrew(p=>({...p,name:ev.target.value}))}))),
-              e('div',null,e(IField,{lbl:'Role'},e('select',{className:'if-sel',value:newCrew.role,onChange:ev=>setNewCrew(p=>({...p,role:ev.target.value}))},ROLES.map(r=>e('option',{key:r,value:r},r))))),
-              e('div',null,e(IField,{lbl:'Mobile'},e('input',{type:'tel',className:'if-inp',placeholder:'04XX XXX XXX',value:newCrew.phone,onChange:ev=>setNewCrew(p=>({...p,phone:ev.target.value}))}))),
-              e('div',{className:'inline-form-full'},
-                e('label',{style:{display:'flex',alignItems:'center',gap:8,fontSize:'13px',fontWeight:600,cursor:'pointer'}},
-                  e('input',{type:'checkbox',checked:newCrew.hasVehicle,onChange:ev=>setNewCrew(p=>({...p,hasVehicle:ev.target.checked}))}),
-                  '🚗 Has own vehicle'
-                )
-              )
-            ),
-            e('div',{className:'if-btns'},e('button',{className:'if-cancel',onClick:()=>setShowAddCrew(false)},'Cancel'),e('button',{className:'if-save',disabled:!newCrew.name,onClick:doAddCrew},'Add & Select'))
-          )
+          showAddCrew&&e(AddCrewForm,{key:'add-crew',onAdd:handleAddCrew,onCancel:()=>setShowAddCrew(false)})
         )
-      )
+      ),
+      submitErr&&e('div',{style:{padding:'0 16px 12px',fontSize:'13px',color:'var(--red)',fontWeight:600}},submitErr)
     ),
-    e('div',{className:'sheet-footer'},e('button',{className:'btn-g',onClick:onClose},'Cancel'),e('button',{className:'btn-p',disabled:!ok,style:{opacity:ok?1:.4},onClick:doCreate},ok?'Create Job':'Fill required fields'))
-  ));
+    e('div',{style:{position:'fixed',bottom:0,left:0,right:0,background:'var(--card)',borderTop:'1px solid var(--border)',padding:'12px 16px',display:'flex',gap:10,zIndex:10}},
+      e('button',{className:'btn-g',onClick:onClose,style:{flex:1}},'Cancel'),
+      e('button',{className:'btn-p',onClick:doCreate,style:{flex:2}},'Create Job')
+    )
+  );
 }
+/* ── EDIT JOB SCREEN ── */
+function EditJobScreen({job,onSave,onClose,farmList,addFarm,crewList,addCrew}){
+  const [farmId,setFarmId]=useState(job.farmId||'');
+  const [type,setType]=useState(job.type||'Shearing');
+  const [evos,setEvos]=useState(job.evos||'Supplied at shed');
+  const [transport,setTransport]=useState(job.transport===true);
+  const [meals,setMeals]=useState(job.meals||'Not Supplied');
+  const [crutchingTrailer,setCrutchingTrailer]=useState(job.crutchingTrailer===true);
+  const [farmQuery,setFarmQuery]=useState('');
+  const [showAddFarm,setShowAddFarm]=useState(false);
+  const [showAddCrew,setShowAddCrew]=useState(false);
+  const [selCrew,setSelCrew]=useState(job.crew||[]);
+  const [submitErr,setSubmitErr]=useState('');
+
+  const rJobName=useRef(),rStartDate=useRef(),rDays=useRef(),rSheep=useRef();
+  const rAccomm=useRef(),rNotes=useRef(),rJobPin=useRef();
+
+  const handleFarmSearch=ev=>setFarmQuery(ev.target.value.toLowerCase());
+  const handleAddFarm=f=>{addFarm(f);setFarmId(f.id);setShowAddFarm(false);};
+
+  const doSave=()=>{
+    const days=rDays.current?.value?.trim();
+    const sheep=rSheep.current?.value?.trim();
+    const startDate=rStartDate.current?.value||job.startDate;
+    if(!farmId||!days||!sheep){setSubmitErr('Farm, days and sheep are required.');return;}
+    onSave({
+      ...job,
+      farmId,type,
+      notes_job:rNotes.current?.value||job.notes_job||'',
+      startDate,
+      daysAllocated:parseInt(days),
+      totalSheep:parseInt(sheep),
+      evos,transport,crutchingTrailer,meals,
+      accommodation:rAccomm.current?.value!==undefined?rAccomm.current.value:job.accommodation||'',
+      jobPin:rJobPin.current?.value?.trim()||null,
+      jobName:rJobName.current?.value?.trim()||'',
+      crew:selCrew,
+    });
+  };
+
+  const tog=id=>setSelCrew(p=>p.includes(id)?p.filter(x=>x!==id):[...p,id]);
+  const handleAddCrew=c=>{addCrew(c);setSelCrew(p=>[...p,c.id]);setShowAddCrew(false);};
+  const ROLE_ORDER=['Shearer','Crutcher','Wool Handler','Wool Classer','Presser','Penner'];
+  const crewByRole=ROLE_ORDER.reduce((acc,r)=>{const members=(crewList||[]).filter(c=>c.role===r);if(members.length)acc.push({role:r,members});return acc;},[]);
+
+  const vf=farmQuery?farmList.filter(f=>f.name.toLowerCase().includes(farmQuery)||f.address.toLowerCase().includes(farmQuery)):farmList;
+
+  return e('div',{style:{minHeight:'100%',display:'flex',flexDirection:'column',background:'var(--bg)'}},
+    e('div',{style:{background:'var(--hdr)',padding:'16px',display:'flex',alignItems:'center',gap:12,position:'sticky',top:0,zIndex:10}},
+      e('button',{onClick:onClose,style:{background:'none',border:'none',color:'rgba(255,255,255,.7)',fontSize:16,cursor:'pointer',padding:'4px 8px'}},'← Back'),
+      e('div',{style:{fontFamily:'var(--h)',fontSize:22,fontWeight:800,color:'#fff'}},'Edit Job')
+    ),
+    e('div',{style:{flex:1,padding:'0 0 120px 0'}},
+      e(FF,{label:'Job Name'},
+        e('div',null,
+          e('input',{type:'text',className:'fi',defaultValue:job.jobName||'',placeholder:'e.g. Smith Station, Gillap, Mueller...',ref:rJobName}),
+          e('div',{style:{fontSize:'11px',color:'var(--muted)',marginTop:5}},'Overrides farm name as the job title. Leave blank to use farm name.')
+        )
+      ),
+      e(FF,{label:'Job Type'},
+        e('div',{className:'tog-row'},...['Shearing','Crutching'].map(t=>
+          e('button',{key:t,className:`tog-opt${type===t?' on':''}`,onClick:()=>setType(t)},t)
+        ))
+      ),
+      e(FF,{label:'Select Farm'},
+        e('div',null,
+          e('input',{type:'text',className:'farm-search',placeholder:'🔍 Search farms...',onInput:handleFarmSearch}),
+          e('div',{className:'farm-list',style:{borderRadius:'0 0 8px 8px'}},
+            vf.length>0
+              ?vf.map(f=>e('div',{key:f.id,className:`farm-opt${farmId===f.id?' sel':''}`,onClick:()=>setFarmId(f.id)},
+                  e('div',{className:'fo-name'},f.name),e('div',{className:'fo-addr'},f.address)))
+              :e('div',{style:{padding:'12px',color:'var(--dim)',fontSize:'13px',textAlign:'center'}},'No farms match')
+          ),
+          !showAddFarm&&e('button',{className:'add-inline-btn',onClick:()=>setShowAddFarm(true)},'+ Add New Farm'),
+          showAddFarm&&e(AddFarmForm,{key:'add-farm',onAdd:handleAddFarm,onCancel:()=>setShowAddFarm(false)})
+        )
+      ),
+      e(FF,{label:'Start Date'},
+        e('input',{type:'date',className:'fi',defaultValue:job.startDate,ref:rStartDate})),
+      e(FF,{label:'Days Allocated'},
+        e('input',{type:'number',className:'fi',defaultValue:job.daysAllocated,min:1,ref:rDays,inputMode:'numeric'})),
+      e(FF,{label:'Total Sheep'},
+        e('input',{type:'number',className:'fi',defaultValue:job.totalSheep,min:1,ref:rSheep,inputMode:'numeric'})),
+      e(FF,{label:'EVOs'},
+        e('div',{className:'tog-row'},...['BYO','Supplied at shed'].map(o=>
+          e('button',{key:o,className:`tog-opt${evos===o?' on':''}`,onClick:()=>setEvos(o)},o)
+        ))
+      ),
+      e(FF,{label:'Transport'},
+        e('div',{className:'tog-row'},...[['Yes',true],['No',false]].map(([l,v])=>
+          e('button',{key:l,className:`tog-opt${transport===v?' on':''}`,onClick:()=>setTransport(v)},l)
+        ))
+      ),
+      e(FF,{label:'Crutching Trailer'},
+        e('div',{className:'tog-row'},...[['Provided',true],['Not Provided',false]].map(([l,v])=>
+          e('button',{key:l,className:`tog-opt${crutchingTrailer===v?' on':''}`,onClick:()=>setCrutchingTrailer(v)},l)
+        ))
+      ),
+      e(FF,{label:'Meals'},
+        e('div',{className:'tog-row'},...['Not Supplied','Provided'].map(o=>
+          e('button',{key:o,className:`tog-opt${meals===o?' on':''}`,onClick:()=>setMeals(o)},o)
+        ))
+      ),
+      e(FF,{label:'Accommodation'},
+        e('input',{type:'text',className:'fi',defaultValue:job.accommodation||'',placeholder:'e.g. Shearers quarters on property',ref:rAccomm})),
+      e(FF,{label:'Notes'},
+        e('textarea',{className:'fi',rows:3,defaultValue:job.notes_job||'',placeholder:'e.g. Merino full CRT and wig.',ref:rNotes})),
+      e(FF,{label:'Job PIN (optional)'},
+        e('div',null,
+          e('input',{type:'number',className:'fi',defaultValue:job.jobPin||'',placeholder:'Leave blank for no PIN',ref:rJobPin,inputMode:'numeric'}),
+          e('div',{style:{fontSize:'11px',color:'var(--muted)',marginTop:5}},'🔒 If set, crew must enter this PIN to open the job.')
+        )
+      ),
+      e(FF,{label:`Crew (${selCrew.length} selected)`},
+        e('div',null,
+          crewByRole.map(({role:r,members})=>e('div',{key:r},
+            e('div',{className:'crew-group-lbl'},r+'s'),
+            e('div',{className:'chip-wrap'},
+              members.map(c=>e('div',{key:c.id,className:`chip${selCrew.includes(c.id)?' sel':''}`,onClick:()=>tog(c.id)},
+                c.name.split(' ')[0]+(c.hasVehicle?' 🚗':'')
+              ))
+            )
+          )),
+          !showAddCrew&&e('button',{className:'add-inline-btn',onClick:()=>setShowAddCrew(true)},'+ Add New Crew Member'),
+          showAddCrew&&e(AddCrewForm,{key:'add-crew',onAdd:handleAddCrew,onCancel:()=>setShowAddCrew(false)})
+        )
+      ),
+      submitErr&&e('div',{style:{padding:'0 16px 12px',fontSize:'13px',color:'var(--red)',fontWeight:600}},submitErr)
+    ),
+    e('div',{style:{position:'fixed',bottom:0,left:0,right:0,background:'var(--card)',borderTop:'1px solid var(--border)',padding:'12px 16px',display:'flex',gap:10,zIndex:10}},
+      e('button',{className:'btn-g',onClick:onClose,style:{flex:1}},'Cancel'),
+      e('button',{className:'btn-p',onClick:doSave,style:{flex:2}},'Save Changes')
+    )
+  );
+}
+
+
 /* ── HOME ── */
-function HomeScreen({jobs,role,setRole,onJob,onNew,contractorName}){
+function HomeScreen({jobs,role,setRole,onJob,onNew,onDatabase,contractorName}){
   const active=jobs.filter(j=>j.status==='Active'),done=jobs.filter(j=>j.status==='Completed'||j.status==='Charged Out'),disp=jobs.filter(j=>j.status==='Dispatched');
   const Sec=({title,items})=>items.length===0?null:e('div',null,e('div',{className:'slbl'},title),items.map(j=>e(JLC,{key:j.id,job:j,onClick:()=>onJob(j.id)})));
   const isEmpty=jobs.length===0;
@@ -1529,9 +1960,122 @@ function HomeScreen({jobs,role,setRole,onJob,onNew,contractorName}){
       e(Sec,{title:'Dispatched',items:disp}),
       e(Sec,{title:'Completed',items:done})
     ),
+    e('div',{style:{position:'fixed',bottom:24,right:20,display:'flex',flexDirection:'column',gap:10,alignItems:'flex-end'}},
+    role==='admin'&&e('button',{onClick:onDatabase,style:{background:'var(--navy)',border:'1px solid rgba(255,255,255,.2)',borderRadius:24,padding:'10px 18px',color:'rgba(255,255,255,.8)',fontWeight:700,fontSize:13,cursor:'pointer',boxShadow:'0 4px 14px rgba(0,0,0,.3)'}},'📂 My Database'),
     (role==='admin'||role==='shed_lead')&&e('button',{className:'fab',onClick:onNew},'+')
+  )
   );
 }
+/* ── DATABASE SCREEN ── */
+function DatabaseScreen({farmList,crewList,addFarm,addCrew,onClose,setFarmList,setCrewList}){
+  const [tab,setTab]=useState('farms');
+  const [showAddFarm,setShowAddFarm]=useState(false);
+  const [showAddCrew,setShowAddCrew]=useState(false);
+  const [editFarm,setEditFarm]=useState(null);
+  const [confirmDeleteFarm,setConfirmDeleteFarm]=useState(null);
+  const [confirmDeleteCrew,setConfirmDeleteCrew]=useState(null);
+
+  const handleSaveFarm=f=>{
+    const idx=FARMS.findIndex(x=>x.id===f.id);
+    if(idx>=0)FARMS.splice(idx,1,f);else FARMS.push(f);
+    setFarmList(p=>{const n=p.find(x=>x.id===f.id)?p.map(x=>x.id===f.id?f:x):[...p,f];syncLookups(n,CREW);return n;});
+    sb.from('farms').upsert({id:f.id,contractor_slug:CONTRACTOR_SLUG,data:f}).catch(()=>{});
+    setEditFarm(null);setShowAddFarm(false);
+  };
+  const handleDeleteFarm=id=>{
+    setFarmList(p=>{const n=p.filter(f=>f.id!==id);syncLookups(n,CREW);return n;});
+    dbDeleteFarm(id);setConfirmDeleteFarm(null);
+  };
+  const handleDeleteCrew=id=>{
+    setCrewList(p=>{const n=p.filter(c=>c.id!==id);syncLookups(FARMS,n);return n;});
+    sb.from('crew_members').delete().eq('id',id).eq('contractor_slug',CONTRACTOR_SLUG).catch(()=>{});
+    setConfirmDeleteCrew(null);
+  };
+
+  const ROLE_ORDER=['Shearer','Crutcher','Wool Handler','Wool Classer','Presser','Penner'];
+  const crewByRole=ROLE_ORDER.reduce((acc,r)=>{const members=crewList.filter(c=>c.role===r);if(members.length)acc.push({role:r,members});return acc;},[]);
+
+  return e('div',{style:{position:'fixed',inset:0,background:'var(--bg)',zIndex:200,display:'flex',flexDirection:'column'}},
+    e('div',{style:{background:'var(--hdr)',padding:'16px',display:'flex',alignItems:'center',gap:12,position:'sticky',top:0,zIndex:10}},
+      e('button',{onClick:onClose,style:{background:'none',border:'none',color:'rgba(255,255,255,.7)',fontSize:16,cursor:'pointer',padding:'4px 8px'}},'← Back'),
+      e('div',{style:{fontFamily:'var(--h)',fontSize:22,fontWeight:800,color:'#fff'}},'My Database')
+    ),
+    e('div',{style:{display:'flex',borderBottom:'2px solid var(--border)',background:'var(--card)'}},
+      ['farms','crew'].map(t=>e('button',{key:t,onClick:()=>setTab(t),style:{flex:1,padding:'12px',background:'none',border:'none',fontWeight:700,fontSize:14,cursor:'pointer',borderBottom:tab===t?'2px solid var(--amber)':'2px solid transparent',marginBottom:-2,color:tab===t?'var(--amber)':'var(--muted)'}},t==='farms'?'🏠 Farms':'👥 Crew'))
+    ),
+    e('div',{style:{flex:1,overflowY:'auto',padding:'16px'}},
+
+      /* FARMS TAB */
+      tab==='farms'&&e('div',null,
+        e('button',{className:'btn-p',style:{width:'100%',marginBottom:16},onClick:()=>{setEditFarm(null);setShowAddFarm(true);}},'+ Add New Farm'),
+        showAddFarm&&e('div',{style:{background:'var(--card)',borderRadius:12,padding:16,marginBottom:16,border:'1px solid var(--border)'}},
+          e('div',{style:{fontFamily:'var(--h)',fontSize:18,fontWeight:800,marginBottom:12}},'New Farm'),
+          e(AddFarmForm,{key:'new-farm',onAdd:f=>{addFarm(f);setShowAddFarm(false);},onCancel:()=>setShowAddFarm(false)})
+        ),
+        editFarm&&e('div',{style:{background:'var(--card)',borderRadius:12,padding:16,marginBottom:16,border:'1px solid var(--amber)'}},
+          e('div',{style:{fontFamily:'var(--h)',fontSize:18,fontWeight:800,marginBottom:12}},'Edit Farm'),
+          e(EditFarmModal,{farm:editFarm,onSave:handleSaveFarm,onClose:()=>setEditFarm(null)})
+        ),
+        farmList.length===0&&e('div',{style:{textAlign:'center',padding:'40px 0',color:'var(--muted)'}},
+          e('div',{style:{fontSize:40,marginBottom:8}},'🏠'),
+          e('div',{style:{fontWeight:700,marginBottom:4}},'No farms yet'),
+          e('div',{style:{fontSize:13}},'Add farms to use them when creating jobs')
+        ),
+        farmList.map(f=>e('div',{key:f.id,style:{background:'var(--card)',borderRadius:12,padding:16,marginBottom:10,border:'1px solid var(--border)'}},
+          e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}},
+            e('div',null,
+              e('div',{style:{fontFamily:'var(--h)',fontSize:18,fontWeight:800}},f.name),
+              e('div',{style:{fontSize:13,color:'var(--muted)',marginTop:2}},f.address),
+              f.notes&&e('div',{style:{fontSize:12,color:'var(--dim)',marginTop:2}},f.notes)
+            ),
+            e('div',{style:{display:'flex',gap:8}},
+              e('button',{onClick:()=>setEditFarm(f),style:{background:'rgba(245,158,11,.15)',border:'1px solid rgba(245,158,11,.3)',borderRadius:7,padding:'6px 10px',color:'var(--amber)',fontWeight:700,fontSize:12,cursor:'pointer'}},'✏️ Edit'),
+              confirmDeleteFarm===f.id
+                ?e('div',{style:{display:'flex',gap:6,alignItems:'center'}},
+                    e('span',{style:{fontSize:12,color:'#ef4444',fontWeight:600}},'Sure?'),
+                    e('button',{onClick:()=>handleDeleteFarm(f.id),style:{background:'#ef4444',border:'none',borderRadius:6,padding:'5px 8px',color:'#fff',fontWeight:700,fontSize:11,cursor:'pointer'}},'Yes'),
+                    e('button',{onClick:()=>setConfirmDeleteFarm(null),style:{background:'var(--card2)',border:'1px solid var(--border)',borderRadius:6,padding:'5px 8px',color:'var(--text)',fontWeight:700,fontSize:11,cursor:'pointer'}},'No')
+                  )
+                :e('button',{onClick:()=>setConfirmDeleteFarm(f.id),style:{background:'rgba(239,68,68,.1)',border:'1px solid rgba(239,68,68,.3)',borderRadius:7,padding:'6px 10px',color:'#ef4444',fontWeight:700,fontSize:12,cursor:'pointer'}},'🗑️')
+            )
+          )
+        ))
+      ),
+
+      /* CREW TAB */
+      tab==='crew'&&e('div',null,
+        e('button',{className:'btn-p',style:{width:'100%',marginBottom:16},onClick:()=>setShowAddCrew(true)},'+ Add New Crew Member'),
+        showAddCrew&&e('div',{style:{background:'var(--card)',borderRadius:12,padding:16,marginBottom:16,border:'1px solid var(--border)'}},
+          e('div',{style:{fontFamily:'var(--h)',fontSize:18,fontWeight:800,marginBottom:12}},'New Crew Member'),
+          e(AddCrewForm,{key:'new-crew',onAdd:c=>{addCrew(c);setShowAddCrew(false);},onCancel:()=>setShowAddCrew(false)})
+        ),
+        crewList.length===0&&e('div',{style:{textAlign:'center',padding:'40px 0',color:'var(--muted)'}},
+          e('div',{style:{fontSize:40,marginBottom:8}},'👥'),
+          e('div',{style:{fontWeight:700,marginBottom:4}},'No crew yet'),
+          e('div',{style:{fontSize:13}},'Add crew members to use them when creating jobs')
+        ),
+        crewByRole.map(({role:r,members})=>e('div',{key:r,style:{marginBottom:16}},
+          e('div',{style:{fontFamily:'var(--h)',fontSize:13,fontWeight:700,letterSpacing:1,textTransform:'uppercase',color:'var(--muted)',marginBottom:8}},r+'s'),
+          members.map(c=>e('div',{key:c.id,style:{background:'var(--card)',borderRadius:12,padding:14,marginBottom:8,border:'1px solid var(--border)',display:'flex',justifyContent:'space-between',alignItems:'center'}},
+            e('div',null,
+              e('div',{style:{fontWeight:700,fontSize:15}},c.name),
+              e('div',{style:{fontSize:12,color:'var(--muted)',marginTop:2}},c.role+(c.phone?' · '+c.phone:'')+(c.hasVehicle?' · 🚗':''))
+            ),
+            confirmDeleteCrew===c.id
+              ?e('div',{style:{display:'flex',gap:6,alignItems:'center'}},
+                  e('span',{style:{fontSize:12,color:'#ef4444',fontWeight:600}},'Sure?'),
+                  e('button',{onClick:()=>handleDeleteCrew(c.id),style:{background:'#ef4444',border:'none',borderRadius:6,padding:'5px 8px',color:'#fff',fontWeight:700,fontSize:11,cursor:'pointer'}},'Yes'),
+                  e('button',{onClick:()=>setConfirmDeleteCrew(null),style:{background:'var(--card2)',border:'1px solid var(--border)',borderRadius:6,padding:'5px 8px',color:'var(--text)',fontWeight:700,fontSize:11,cursor:'pointer'}},'No')
+                )
+              :e('button',{onClick:()=>setConfirmDeleteCrew(c.id),style:{background:'rgba(239,68,68,.1)',border:'1px solid rgba(239,68,68,.3)',borderRadius:7,padding:'6px 10px',color:'#ef4444',fontWeight:700,fontSize:12,cursor:'pointer'}},'🗑️')
+          ))
+        ))
+      )
+    )
+  );
+}
+
+
 /* ── APP ── */
 const CONTRACTOR_NAME='Quality Shearing';
 function App(){
@@ -1549,19 +2093,25 @@ function App(){
   const [crewList,setCrewList]=useState([]);
   const [showSMS,setShowSMS]=useState(false);
   const [showNew,setShowNew]=useState(false);
+  const [showDatabase,setShowDatabase]=useState(false);
+  const [showEdit,setShowEdit]=useState(false);
   const [previewId,setPreviewId]=useState(null);
   const saveTimer=useRef(null);
   const isLoaded=useRef(false);
 
   /* Load on mount */
   useEffect(()=>{
+    loadPins(); /* load PIN hashes from Supabase on mount */
     dbLoad().then(({jobs:j,farms:f,crew:c,fromCache})=>{
+      syncLookups(f,c);
       setJobs(j);setFarmList(f);setCrewList(c);
       setLoadedFromCache(fromCache);
       setLoading(false);isLoaded.current=true;
       setPendingCount((lsGet(LS_QUEUE)||[]).length);
     }).catch(()=>{setLoading(false);isLoaded.current=true;});
   },[]);
+
+  useEffect(()=>{syncLookups(farmList,crewList);},[farmList,crewList]);
 
   /* Online/offline detection + auto-sync queue */
   useEffect(()=>{
@@ -1600,8 +2150,8 @@ function App(){
     },1500);
   },[jobs,isOnline]);
 
-  const addFarm=async f=>{setFarmList(p=>[...p,f]);await dbSaveFarm(f).catch(()=>{});};
-  const addCrew=async c=>{setCrewList(p=>[...p,c]);await dbSaveCrew(c).catch(()=>{});};
+  const addFarm=async f=>{setFarmList(p=>{const n=[...p,f];syncLookups(n,CREW);return n;});await dbSaveFarm(f).catch(()=>{});};
+  const addCrew=async c=>{setCrewList(p=>{const n=[...p,c];syncLookups(FARMS,n);return n;});await dbSaveCrew(c).catch(()=>{});};
   const gfl=id=>farmList.find(f=>f.id===id);
   const gcl=id=>crewList.find(c=>c.id===id);
   const selJob=jobs.find(j=>j.id===selJobId);
@@ -1616,7 +2166,13 @@ function App(){
     }
   };
   const goHome=()=>{setScreen('home');setSelJobId(null);setShowSMS(false);setPreviewId(null);setJobPinPending(null);};
-  const doCreate=job=>{setJobs(p=>[job,...p]);setShowNew(false);setSelJobId(job.id);setScreen('job');};
+  const doCreate=async job=>{
+    setJobs(p=>[job,...p]);
+    setShowNew(false);
+    setSelJobId(job.id);
+    setScreen('job');
+    await dbSaveJob(job).catch(()=>{});
+  };
 
   /* Loading screen */
   if(loading)return e('div',{style:{height:'100dvh',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:16,background:'var(--hdr)'}},
@@ -1644,11 +2200,13 @@ function App(){
 
   return e('div',{style:{paddingTop:!isOnline?20:0}},
     e(StatusBar),
-    screen==='home'&&e(HomeScreen,{jobs,role,setRole,onJob:goJob,onNew:()=>setShowNew(true),contractorName:CONTRACTOR_NAME}),
-    screen==='job'&&selJob&&e(JobDetailScreen,{job:selJob,setJob:setSelJob,role,setRole,onBack:goHome,onSend:()=>setShowSMS(true),gfl,gcl}),
+    screen==='home'&&e(HomeScreen,{jobs,role,setRole,onJob:goJob,onNew:()=>setShowNew(true),onDatabase:()=>setShowDatabase(true),contractorName:CONTRACTOR_NAME}),
+    screen==='job'&&selJob&&e(JobDetailScreen,{job:selJob,setJob:setSelJob,role,setRole,onBack:goHome,onSend:()=>setShowSMS(true),gfl,gcl,onEdit:()=>setShowEdit(true),onDeleteJob:async()=>{await dbDeleteJob(selJob.id);setJobs(p=>p.filter(j=>j.id!==selJob.id));goHome();}}),
     showSMS&&selJob&&e(SMSModal,{job:selJob,onClose:()=>{setShowSMS(false);setPreviewId(null);},onPreview:id=>setPreviewId(id),farmList,crewList}),
     previewId&&selJob&&e(JobCardView,{job:selJob,crewId:previewId,onClose:()=>setPreviewId(null),gfl,gcl}),
-    showNew&&e(NewJobModal,{onClose:()=>setShowNew(false),onCreate:doCreate,farmList,crewList,addFarm,addCrew}),
+    showDatabase&&e(DatabaseScreen,{farmList,crewList,addFarm,addCrew,setFarmList,setCrewList,onClose:()=>setShowDatabase(false)}),
+    showNew&&e('div',{style:{position:'fixed',inset:0,background:'var(--bg)',zIndex:200,overflowY:'auto',WebkitOverflowScrolling:'touch'}},e(NewJobModal,{onClose:()=>setShowNew(false),onCreate:doCreate,farmList,crewList,addFarm,addCrew})),
+    showEdit&&selJob&&e('div',{style:{position:'fixed',inset:0,background:'var(--bg)',zIndex:200,overflowY:'auto',WebkitOverflowScrolling:'touch'}},e(EditJobScreen,{job:selJob,onClose:()=>setShowEdit(false),onSave:async updated=>{setJobs(p=>p.map(j=>j.id===updated.id?updated:j));await dbSaveJob(updated).catch(()=>{});setShowEdit(false);},farmList,addFarm,crewList,addCrew})),
     /* Job PIN gate */
     jobPinPending&&e('div',{className:'pin-modal'},
       e('div',{className:'pin-modal-box'},
