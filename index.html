@@ -2660,18 +2660,22 @@ function App(){
     return()=>{window.removeEventListener('online',goOnline);window.removeEventListener('offline',goOffline);};
   },[]);
 
-  /* Auto-save jobs debounced 1.5s */
+  /* Auto-save jobs debounced 1.5s — always saves to local cache, queues if offline */
   useEffect(()=>{
     if(!isLoaded.current)return;
     clearTimeout(saveTimer.current);
-    if(!isOnline){setSaveStatus('offline');setPendingCount((lsGet(LS_QUEUE)||[]).length);return;}
-    setSaveStatus('saving');
+    setSaveStatus(isOnline?'saving':'offline');
     saveTimer.current=setTimeout(async()=>{
       try{
         await Promise.all(jobs.map(job=>dbSaveJob(job)));
-        setSaveStatus('saved');
-        setPendingCount(0);
-        setTimeout(()=>setSaveStatus(''),2000);
+        if(isOnline){
+          setSaveStatus('saved');
+          setPendingCount(0);
+          setTimeout(()=>setSaveStatus(''),2000);
+        } else {
+          setSaveStatus('offline');
+          setPendingCount((lsGet(LS_QUEUE)||[]).length);
+        }
       }catch(err){
         setSaveStatus('offline');
         setPendingCount((lsGet(LS_QUEUE)||[]).length);
