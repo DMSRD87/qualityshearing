@@ -855,8 +855,8 @@ function generateSummary(job,period){
   const shedIds=job.crew.filter(id=>gc(id)&&gc(id).role!=='Shearer'&&gc(id).role!=='Crutcher');
   const dash='\u2500'.repeat(52);
   const inP=date=>!period||(date>=period.start&&date<=period.end);
-  const shornBy={};shIds.forEach(id=>{shornBy[id]={sh:0,shEarn:0,cr:0,crEarn:0};});
-  Object.entries(job.runs||{}).forEach(([date,dayRuns])=>{if(!inP(date))return;dayRuns.forEach(run=>{mobsOf(run).forEach(mob=>{const br=mob.rateOverride!=null?mob.rateOverride:(mob.type==='Shearing'?rates.shearingPerHead:rates.crutchingPerHead)||0;shIds.forEach(id=>{const cnt=mob.counts[id]||0;if(!cnt)return;const load=(rates.shearerLoadings||{})[id]||0;if(mob.type==='Shearing'){shornBy[id].sh+=cnt;shornBy[id].shEarn+=cnt*(br+load);}else{shornBy[id].cr+=cnt;shornBy[id].crEarn+=cnt*(br+load);}});});});});
+  const shornBy={};shIds.forEach(id=>{shornBy[id]={sh:0,shEarn:0,cr:0,crEarn:0,mobs:[]};});
+  Object.entries(job.runs||{}).forEach(([date,dayRuns])=>{if(!inP(date))return;dayRuns.forEach(run=>{mobsOf(run).forEach(mob=>{const hasOverride=mob.rateOverride!=null;const br=hasOverride?mob.rateOverride:(mob.type==='Shearing'?rates.shearingPerHead:rates.crutchingPerHead)||0;shIds.forEach(id=>{const cnt=mob.counts[id]||0;if(!cnt)return;const load=(rates.shearerLoadings||{})[id]||0;const loadType=(rates.loadingType||{})[id]||'individual';const effRate=loadType==='team'?br:(br+load);const earn=cnt*effRate;if(mob.type==='Shearing'){shornBy[id].sh+=cnt;shornBy[id].shEarn+=earn;}else{shornBy[id].cr+=cnt;shornBy[id].crEarn+=earn;}/* merge into same mob bucket if same type/desc/rate */const key=mob.type+'|'+(mob.desc||'')+'|'+effRate.toFixed(4)+'|'+(hasOverride?'O':'B');let bucket=shornBy[id].mobs.find(m=>m.key===key);if(!bucket){bucket={key,type:mob.type,desc:mob.desc||'',rate:effRate,hasOverride,count:0,earn:0};shornBy[id].mobs.push(bucket);}bucket.count+=cnt;bucket.earn+=earn;});});});});
   const tr=rates.travelRate||{};
   const travelDayCount=id=>Object.values((job.travelTallies||{})[id]||{}).reduce((a,b)=>a+(b?1:0),0);
   const trvl=id=>travelDayCount(id)*(tr[id]||0);
@@ -878,14 +878,31 @@ function generateSummary(job,period){
       let t=0;Object.values(job.runs||{}).forEach(rs=>rs.forEach(run=>mobsOf(run).forEach(mob=>{t+=mob.counts[sid]||0;})));return s+t;
     },0):0;
     const teamLoadEarn=loadType==='team'&&baseLoad>0?baseLoad*teamTotal:0;
-    const shR=(rates.shearingPerHead||4.80)+((rates.shearerLoadings||{})[id]||0);
-    const crR=rates.crutchingPerHead||1.55;
     const travel=trvl(id);const gross=s.shEarn+s.crEarn+travel+(loadType==='team'?teamLoadEarn:0);
     const taxAmt=taxPct>0?gross*(taxPct/100):0;
     totalShEarn+=s.shEarn+s.crEarn;totalTravel+=travel;
     L.push('');L.push(c.name+' \u2014 '+(det.role||c.role));
-    if(s.sh>0)L.push('  Sheep shorn: '+s.sh.toLocaleString()+' head @ $'+shR.toFixed(2)+' = $'+s.shEarn.toFixed(2));
-    if(s.cr>0)L.push('  Crutched: '+s.cr.toLocaleString()+' head @ $'+crR.toFixed(2)+' = $'+s.crEarn.toFixed(2));
+    /* Split mobs by type. If a type has >1 mob OR any override, show detailed breakdown; else simple one-liner. */
+    const shMobs=s.mobs.filter(m=>m.type==='Shearing');
+    const crMobs=s.mobs.filter(m=>m.type==='Crutching');
+    const writeMobs=(label,mobs,totalEarn)=>{
+      if(mobs.length===0)return;
+      const needDetail=mobs.length>1||mobs.some(m=>m.hasOverride||m.desc);
+      if(!needDetail){
+        const m=mobs[0];
+        L.push('  '+label+': '+m.count.toLocaleString()+' head @ $'+m.rate.toFixed(2)+' = $'+m.earn.toFixed(2));
+      }else{
+        L.push('  '+label+':');
+        mobs.forEach(m=>{
+          const tag=m.desc||(m.hasOverride?'override':'base rate');
+          L.push('    '+m.count.toLocaleString()+' head \u2014 '+tag+' @ $'+m.rate.toFixed(2)+' = $'+m.earn.toFixed(2));
+        });
+        if(mobs.length>1)L.push('    Subtotal: $'+totalEarn.toFixed(2));
+      }
+    };
+    writeMobs('Sheep shorn',shMobs,s.shEarn);
+    writeMobs('Crutched',crMobs,s.crEarn);
+    if(loadType==='team'&&teamLoadEarn>0)L.push('  Team loading: '+teamTotal.toLocaleString()+' head x $'+baseLoad.toFixed(2)+'/head = $'+teamLoadEarn.toFixed(2));
     const tDays=travelDayCount(id);if(tDays)L.push('  Travel: '+tDays+' days x $'+(tr[id]||0).toFixed(2)+'/day = $'+travel.toFixed(2));
     L.push('  GROSS TOTAL: $'+gross.toFixed(2));
     if(taxPct>0){L.push('  Tax withheld ('+taxPct+'%): -$'+taxAmt.toFixed(2));L.push('  NET PAY: $'+(gross-taxAmt).toFixed(2));}
