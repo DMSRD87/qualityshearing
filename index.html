@@ -671,7 +671,25 @@ function addDays(d,n){const [y,mo,dy]=d.split('-').map(Number);const dt=new Date
 function fmtDate(d){const [y,mo,dy]=d.split('-').map(Number);return new Date(y,mo-1,dy).toLocaleDateString('en-AU',{day:'2-digit',month:'2-digit',year:'numeric'});}
 function fmtDateLong(d){const [y,mo,dy]=d.split('-').map(Number);return new Date(y,mo-1,dy).toLocaleDateString('en-AU',{weekday:'short',day:'numeric',month:'short'});}
 function localToday(){const n=new Date();return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-${String(n.getDate()).padStart(2,'0')}`;}
-function jobDates(j){const ds=[];for(let i=0;i<j.daysAllocated;i++)ds.push(addDays(j.startDate,i));return ds;}
+function jobDates(j){
+  const ds=[];
+  /* Legacy jobs (no includeWeekends field) default to true for backward compatibility.
+     If includeWeekends===false, skip Sat (dow=6) and Sun (dow=0) when iterating. */
+  const includeWeekends=j.includeWeekends!==false;
+  if(includeWeekends){
+    for(let i=0;i<j.daysAllocated;i++)ds.push(addDays(j.startDate,i));
+  } else {
+    let i=0,added=0;
+    while(added<j.daysAllocated&&i<j.daysAllocated*3){ /* safety cap */
+      const d=addDays(j.startDate,i);
+      const [y,mo,dy]=d.split('-').map(Number);
+      const dow=new Date(y,mo-1,dy).getDay();
+      if(dow!==0&&dow!==6){ds.push(d);added++;}
+      i++;
+    }
+  }
+  return ds;
+}
 /* Monday-start week helpers */
 function mondayOfWeek(dStr){const [y,mo,dy]=dStr.split('-').map(Number);const dt=new Date(y,mo-1,dy);const dow=dt.getDay();const diff=dow===0?-6:1-dow;dt.setDate(dt.getDate()+diff);return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;}
 function weekDatesFromMonday(mondayStr){const out=[];for(let i=0;i<7;i++)out.push(addDays(mondayStr,i));return out;}
@@ -1133,6 +1151,13 @@ function TallyTab({job,setJob,role,viewDate,setViewDate}){
   const dates=jobDates(job);
   const dayRuns=(job.runs||{})[viewDate]||[];
   const shearers=job.crew.filter(id=>gc(id)&&(gc(id).role==='Shearer'||gc(id).role==='Crutcher'));
+  /* STAND ORDER — persisted per-job. New shearers added later appear at end of the order. */
+  const savedOrder=Array.isArray(job.shearerOrder)?job.shearerOrder:[];
+  const orderedFromSaved=savedOrder.filter(id=>shearers.includes(id));
+  const unorderedNew=shearers.filter(id=>!orderedFromSaved.includes(id));
+  const orderedShearers=[...orderedFromSaved,...unorderedNew];
+  const [reorderMode,setReorderMode]=useState(false);
+  const [confirmDelRun,setConfirmDelRun]=useState(null); /* run id awaiting delete confirmation */
   const shedStaff=job.crew.filter(id=>{const c=gc(id);return c&&(c.role==='Wool Handler'||c.role==='Wool Classer'||c.role==='Penner');});
   const pressers=job.crew.filter(id=>gc(id)?.role==='Presser');
   const rates=job.rates||{};
@@ -1145,7 +1170,14 @@ function TallyTab({job,setJob,role,viewDate,setViewDate}){
   const dtLbl=DAY_NAMES[vdt.getDay()].toUpperCase()+' '+String(vdt.getDate()).padStart(2,'0')+'/'+String(vdt.getMonth()+1).padStart(2,'0');
   const setRuns=fn=>setJob(prev=>({...prev,runs:{...prev.runs,[viewDate]:fn((prev.runs||{})[viewDate]||[])}}));
   const addRun=()=>setRuns(r=>[...r,{id:'r'+Date.now(),mobs:[{id:'m'+Date.now(),type:'Shearing',desc:'',counts:{}}]}]);
-  const delRun=rid=>setRuns(r=>r.filter(x=>x.id!==rid));
+  const delRun=rid=>{setRuns(r=>r.filter(x=>x.id!==rid));setConfirmDelRun(null);};
+  const moveShearer=(idx,dir)=>{
+    const target=idx+dir;
+    if(target<0||target>=orderedShearers.length)return;
+    const next=[...orderedShearers];
+    [next[idx],next[target]]=[next[target],next[idx]];
+    setJob(prev=>({...prev,shearerOrder:next}));
+  };
   const addMob=(rid,type)=>setRuns(r=>r.map(run=>run.id===rid?{...run,mobs:[...mobsOf(run),{id:'m'+Date.now(),type,desc:'',counts:{}}]}:run));
   const delMob=(rid,mid)=>setRuns(r=>r.map(run=>run.id===rid?{...run,mobs:mobsOf(run).filter(m=>m.id!==mid)}:run));
   const setMobDesc=(rid,mid,v)=>setRuns(r=>r.map(run=>run.id===rid?{...run,mobs:mobsOf(run).map(m=>m.id===mid?{...m,desc:v}:m)}:run));
@@ -1183,14 +1215,31 @@ function TallyTab({job,setJob,role,viewDate,setViewDate}){
       e('div',{className:'dt-cell'},e('div',{className:'dt-lbl'},'Shed Totals'),e('div',{className:'dt-sub'},e('span',{style:{fontWeight:600}},'Shorn: '),e('span',{style:{fontFamily:'var(--m)',fontSize:'16px',fontWeight:700,color:'var(--muted)'}},jobTotal.toLocaleString())))
     ),
     !canEdit&&e('div',{className:'read-hint'},'👁 View only — shed lead or admin can edit tallies'),
+    canEdit&&orderedShearers.length>=2&&e('div',{style:{padding:'10px 16px 0',display:'flex',gap:8,alignItems:'center'}},
+      reorderMode
+        ?e('div',{style:{display:'flex',gap:8,alignItems:'center',flex:1}},
+            e('div',{style:{flex:1,fontSize:12,color:'var(--amber)',fontWeight:700,padding:'9px 12px',background:'var(--amberD)',borderRadius:8,border:'1px solid var(--amberB)'}},'↔ Tap ◀ ▶ above a shearer to move. Tallies stay with each shearer.'),
+            e('button',{onClick:()=>setReorderMode(false),style:{padding:'9px 14px',background:'var(--amber)',border:'none',borderRadius:8,color:'#000',fontWeight:800,fontSize:13,cursor:'pointer',whiteSpace:'nowrap'}},'✓ Done')
+          )
+        :e('button',{onClick:()=>setReorderMode(true),style:{padding:'7px 12px',background:'var(--card)',border:'1px solid var(--border)',borderRadius:7,color:'var(--muted)',fontWeight:700,fontSize:12,cursor:'pointer'}},'↔ Reorder Stands')
+    ),
     /* RUN CARDS */
     dayRuns.map((run,ri)=>{
       const rt=runTot(run);
+      const isConfirmingDel=confirmDelRun===run.id;
       return e('div',{key:run.id,className:'run-card'},
-        e('div',{className:'run-hdr'},
-          e('div',{className:'run-hdr-l'},e('div',{className:'run-num'},ri+1),e('div',null,e('div',{className:'run-title'},'Run '+(ri+1)))),
-          e('div',{className:'run-hdr-r'},e('div',null,e('div',{className:'run-total-lbl'},'Run total'),e('div',{className:'run-total-val'},rt>0?rt:'—')),canEdit&&e('button',{className:'run-del',onClick:()=>delRun(run.id)},'×'))
-        ),
+        isConfirmingDel
+          ?e('div',{className:'run-hdr',style:{background:'#7f1d1d'}},
+              e('div',{style:{flex:1,fontSize:13,color:'#fff',fontWeight:600,lineHeight:1.3}},'Delete Run '+(ri+1)+' and all its tallies?'),
+              e('div',{style:{display:'flex',gap:6}},
+                e('button',{onClick:()=>setConfirmDelRun(null),style:{padding:'6px 10px',background:'rgba(255,255,255,.15)',border:'1px solid rgba(255,255,255,.25)',borderRadius:6,color:'#fff',fontSize:12,fontWeight:700,cursor:'pointer'}},'Cancel'),
+                e('button',{onClick:()=>delRun(run.id),style:{padding:'6px 10px',background:'#fff',border:'none',borderRadius:6,color:'#7f1d1d',fontSize:12,fontWeight:800,cursor:'pointer'}},'Yes, delete')
+              )
+            )
+          :e('div',{className:'run-hdr'},
+              e('div',{className:'run-hdr-l'},e('div',{className:'run-num'},ri+1),e('div',null,e('div',{className:'run-title'},'Run '+(ri+1)))),
+              e('div',{className:'run-hdr-r'},e('div',null,e('div',{className:'run-total-lbl'},'Run total'),e('div',{className:'run-total-val'},rt>0?rt:'—')),canEdit&&e('button',{className:'run-del',onClick:()=>setConfirmDelRun(run.id),title:'Delete run'},'×'))
+            ),
         mobsOf(run).map(mob=>{
           const mt=mobRunTot(mob);
           const effRate=mob.rateOverride!=null?mob.rateOverride:(mob.type==='Shearing'?rates.shearingPerHead:rates.crutchingPerHead)||0;
@@ -1207,7 +1256,17 @@ function TallyTab({job,setJob,role,viewDate,setViewDate}){
             ),
             e('div',{className:'sh-grid'},
               e('div',{className:'sh-grid-inner'},
-                shearers.map(id=>{const c=gc(id);if(!c)return null;return e('div',{key:id,className:'sh-col'},e('div',{className:'sh-col-name'},sn(c.name)),e('input',{type:'number',className:'sh-col-inp',placeholder:'—',value:mob.counts[id]||'',disabled:!canEdit,inputMode:'numeric',onChange:ev=>setMobCnt(run.id,mob.id,id,ev.target.value),onFocus:ev=>ev.target.select()}));}),
+                orderedShearers.map((id,idx)=>{const c=gc(id);if(!c)return null;return e('div',{key:id,className:'sh-col'},
+                  reorderMode&&canEdit&&e('div',{style:{display:'flex',gap:3,marginBottom:4,justifyContent:'center'}},
+                    e('button',{onClick:()=>moveShearer(idx,-1),disabled:idx===0,style:{width:24,height:24,borderRadius:5,border:'1px solid var(--border)',background:idx===0?'var(--card2)':'var(--amberD)',color:idx===0?'var(--dim)':'var(--amber)',fontWeight:800,cursor:idx===0?'default':'pointer',fontSize:14,lineHeight:1}},'◀'),
+                    e('button',{onClick:()=>moveShearer(idx,1),disabled:idx===orderedShearers.length-1,style:{width:24,height:24,borderRadius:5,border:'1px solid var(--border)',background:idx===orderedShearers.length-1?'var(--card2)':'var(--amberD)',color:idx===orderedShearers.length-1?'var(--dim)':'var(--amber)',fontWeight:800,cursor:idx===orderedShearers.length-1?'default':'pointer',fontSize:14,lineHeight:1}},'▶')
+                  ),
+                  e('div',{className:'sh-col-name'},
+                    reorderMode&&e('span',{style:{fontFamily:'var(--m)',fontSize:9,fontWeight:800,color:'var(--amber)',marginRight:3}},(idx+1)+'.'),
+                    sn(c.name)
+                  ),
+                  e('input',{type:'number',className:'sh-col-inp',placeholder:'—',value:mob.counts[id]||'',disabled:!canEdit||reorderMode,inputMode:'numeric',onChange:ev=>setMobCnt(run.id,mob.id,id,ev.target.value),onFocus:ev=>ev.target.select()})
+                );}),
                 e('div',{className:'sh-col-tot'},e('div',{className:'sh-col-tot-lbl'},'Mob\nTotal'),e('div',{className:'sh-col-tot-val'},mt>0?mt:'—'))
               )
             )
@@ -1235,7 +1294,7 @@ function TallyTab({job,setJob,role,viewDate,setViewDate}){
     shearers.length>0&&e('div',{className:'sh-totals'},
       e('div',{className:'sht-hdr'},'\u2014 BF / Day / To Date'),
       e('div',{className:'sht-col-hdr-row'},e('div',{className:'sht-nc'},''),e('div',{className:'sht-ch sh'},'SH BF'),e('div',{className:'sht-ch sh'},'SH Day'),e('div',{className:'sht-ch sh'},'SH Tot'),hasCrutch&&e('div',{className:'sht-ch cr'},'CR BF'),hasCrutch&&e('div',{className:'sht-ch cr'},'CR Day'),hasCrutch&&e('div',{className:'sht-ch cr'},'CR Tot')),
-      shearers.map(id=>{const c=gc(id);if(!c)return null;const s=stats[id]||{shBF:0,shDay:0,crBF:0,crDay:0};const V=(val,cls)=>e('div',{className:`sht-v${cls?' '+cls:''}`},val>0?val:'—');return e('div',{key:id,className:'sht-row'},e('div',{className:'sht-name'},sn(c.name)),V(s.shBF),V(s.shDay,'today'),V(s.shBF+s.shDay,'tot'),hasCrutch&&V(s.crBF),hasCrutch&&V(s.crDay,'today'),hasCrutch&&V(s.crBF+s.crDay,'tot'));})
+      orderedShearers.map(id=>{const c=gc(id);if(!c)return null;const s=stats[id]||{shBF:0,shDay:0,crBF:0,crDay:0};const V=(val,cls)=>e('div',{className:`sht-v${cls?' '+cls:''}`},val>0?val:'—');return e('div',{key:id,className:'sht-row'},e('div',{className:'sht-name'},sn(c.name)),V(s.shBF),V(s.shDay,'today'),V(s.shBF+s.shDay,'tot'),hasCrutch&&V(s.crBF),hasCrutch&&V(s.crDay,'today'),hasCrutch&&V(s.crBF+s.crDay,'tot'));})
     ),
     /* SHED STAFF */
     (shedStaff.length>0||pressers.length>0)&&e('div',{className:'shed-section'},
@@ -1913,7 +1972,8 @@ function JobDetailScreen({job,setJob,role,setRole,onBack,onSend,onBroadcast,onEd
 /* ── JOB CARD ── */
 function JobCardView({job,crewId,onClose}){
   const farm=gf(job.farmId),crew=gc(crewId),team=job.crew.map(gc).filter(Boolean);
-  const endD=fmtDate(addDays(job.startDate,job.daysAllocated-1));
+  const jds=jobDates(job);
+  const endD=fmtDate(jds.length?jds[jds.length-1]:job.startDate);
   return e('div',{className:'overlay overlay2'},e('div',{className:'jc-white'},
     e('div',{className:'sheet-handle',style:{background:'#ddd'}}),
     e('div',{className:'jcw-hdr'},e('div',{className:'jcw-logo'},'myGang'),e('div',{className:'jcw-sub'},CONTRACTOR_NAME||'Shearing Contractor'),e('button',{className:'jcw-x',onClick:onClose},'×')),
@@ -2021,7 +2081,8 @@ function buildJobCardSMS(job,crewId,farmList,crewList,appUrl){
   const farm=gfl(job.farmId);
   const crew=gcl(crewId);
   if(!crew)return null;
-  const endDate=addDays(job.startDate,job.daysAllocated-1);
+  const jds=jobDates(job);
+  const endDate=jds.length?jds[jds.length-1]:job.startDate;
   const teamNames=job.crew.map(id=>gcl(id)).filter(Boolean).map(c=>c.name+' ('+c.role+')').join(', ');
   const jobName=job.jobName||(farm?farm.name:'Farm');
   return [
@@ -2041,7 +2102,8 @@ function buildJobCardSMS(job,crewId,farmList,crewList,appUrl){
 function buildFarmerSMS(job,farmerName,farmerPhone,farmList,appUrl){
   const farm=farmList.find(f=>f.id===job.farmId);
   const jobName=job.jobName||(farm?farm.name:'Farm');
-  const endDate=addDays(job.startDate,job.daysAllocated-1);
+  const jds=jobDates(job);
+  const endDate=jds.length?jds[jds.length-1]:job.startDate;
   return [
     'Hi '+farmerName+'! '+CONTRACTOR_NAME+' has you scheduled for shearing.',
     '',
@@ -2287,6 +2349,7 @@ function NewJobModal({onClose,onCreate,farmList,crewList,addFarm,addCrew}){
   const [transport,setTransport]=useState(false);
   const [meals,setMeals]=useState('Not Supplied');
   const [crutchingTrailer,setCrutchingTrailer]=useState(false);
+  const [includeWeekends,setIncludeWeekends]=useState(true);
   const [selCrew,setSelCrew]=useState([]);
   const [showAddFarm,setShowAddFarm]=useState(false);
   const [showAddCrew,setShowAddCrew]=useState(false);
@@ -2329,6 +2392,7 @@ function NewJobModal({onClose,onCreate,farmList,crewList,addFarm,addCrew}){
       notes_job:rNotes.current?.value||'',
       startDate,
       daysAllocated:parseInt(days),
+      includeWeekends,
       totalSheep:parseInt(sheep),
       evos,crutchingTrailer,transport,meals,
       accommodation:rAccomm.current?.value||'',
@@ -2371,7 +2435,18 @@ function NewJobModal({onClose,onCreate,farmList,crewList,addFarm,addCrew}){
         )
       ),
       e(FF,{label:'Start Date'},e('input',{type:'date',className:'fi',defaultValue:localToday(),ref:rStartDate})),
-      e(FF,{label:'Days Allocated'},e('input',{type:'number',className:'fi',placeholder:'e.g. 5',min:1,ref:rDays,inputMode:'numeric'})),
+      e(FF,{label:'Days Allocated'},
+        e('div',null,
+          e('input',{type:'number',className:'fi',placeholder:'e.g. 5',min:1,ref:rDays,inputMode:'numeric'}),
+          e('label',{style:{display:'flex',alignItems:'center',gap:8,marginTop:10,fontSize:13,cursor:'pointer',color:'var(--text)',fontWeight:500}},
+            e('input',{type:'checkbox',checked:includeWeekends,onChange:ev=>setIncludeWeekends(ev.target.checked),style:{width:17,height:17,cursor:'pointer',accentColor:'#f59e0b'}}),
+            e('span',null,'Include Sat/Sun')
+          ),
+          e('div',{style:{fontSize:11,color:'var(--muted)',marginTop:4,marginLeft:25,lineHeight:1.4}},
+            includeWeekends?'Counts every day — 10 days = 10 calendar days.':'Mon–Fri only — 10 days = 2 working weeks. Use if weekends won\'t be worked.'
+          )
+        )
+      ),
       e(FF,{label:'Total Sheep'},e('input',{type:'number',className:'fi',placeholder:'e.g. 3000',min:1,ref:rSheep,inputMode:'numeric'})),
       e(FF,{label:'EVOs'},e('div',{className:'tog-row'},...['BYO','Supplied at shed'].map(o=>e('button',{key:o,className:`tog-opt${evos===o?' on':''}`,onClick:()=>setEvos(o)},o)))),
       e(FF,{label:'Transport'},e('div',{className:'tog-row'},...[['Yes',true],['No',false]].map(([l,v])=>e('button',{key:l,className:`tog-opt${transport===v?' on':''}`,onClick:()=>setTransport(v)},l)))),
@@ -2416,6 +2491,7 @@ function EditJobScreen({job,onSave,onClose,farmList,addFarm,crewList,addCrew}){
   const [transport,setTransport]=useState(job.transport===true);
   const [meals,setMeals]=useState(job.meals||'Not Supplied');
   const [crutchingTrailer,setCrutchingTrailer]=useState(job.crutchingTrailer===true);
+  const [includeWeekends,setIncludeWeekends]=useState(job.includeWeekends!==false);
   const [farmQuery,setFarmQuery]=useState('');
   const [showAddFarm,setShowAddFarm]=useState(false);
   const [showAddCrew,setShowAddCrew]=useState(false);
@@ -2439,6 +2515,7 @@ function EditJobScreen({job,onSave,onClose,farmList,addFarm,crewList,addCrew}){
       notes_job:rNotes.current?.value||job.notes_job||'',
       startDate,
       daysAllocated:parseInt(days),
+      includeWeekends,
       totalSheep:parseInt(sheep),
       evos,transport,crutchingTrailer,meals,
       accommodation:rAccomm.current?.value!==undefined?rAccomm.current.value:job.accommodation||'',
@@ -2488,7 +2565,17 @@ function EditJobScreen({job,onSave,onClose,farmList,addFarm,crewList,addCrew}){
       e(FF,{label:'Start Date'},
         e('input',{type:'date',className:'fi',defaultValue:job.startDate,ref:rStartDate})),
       e(FF,{label:'Days Allocated'},
-        e('input',{type:'number',className:'fi',defaultValue:job.daysAllocated,min:1,ref:rDays,inputMode:'numeric'})),
+        e('div',null,
+          e('input',{type:'number',className:'fi',defaultValue:job.daysAllocated,min:1,ref:rDays,inputMode:'numeric'}),
+          e('label',{style:{display:'flex',alignItems:'center',gap:8,marginTop:10,fontSize:13,cursor:'pointer',color:'var(--text)',fontWeight:500}},
+            e('input',{type:'checkbox',checked:includeWeekends,onChange:ev=>setIncludeWeekends(ev.target.checked),style:{width:17,height:17,cursor:'pointer',accentColor:'#f59e0b'}}),
+            e('span',null,'Include Sat/Sun')
+          ),
+          e('div',{style:{fontSize:11,color:'var(--muted)',marginTop:4,marginLeft:25,lineHeight:1.4}},
+            includeWeekends?'Counts every day — 10 days = 10 calendar days.':'Mon–Fri only — 10 days = 2 working weeks. Use if weekends won\'t be worked.'
+          )
+        )
+      ),
       e(FF,{label:'Total Sheep'},
         e('input',{type:'number',className:'fi',defaultValue:job.totalSheep,min:1,ref:rSheep,inputMode:'numeric'})),
       e(FF,{label:'EVOs'},
@@ -2674,12 +2761,55 @@ function HomeScreen({jobs,role,setRole,onJob,onNew,onDatabase,onSchedule,contrac
     )
   );
 }
+/* ── EDIT CREW FORM (reused in database) ── */
+function EditCrewForm({member,onSave,onClose}){
+  const [name,setName]=useState(member.name||'');
+  const [role,setRole]=useState(member.role||'Shearer');
+  const [phone,setPhone]=useState(member.phone||'');
+  const [hasVehicle,setHasVehicle]=useState(!!member.hasVehicle);
+  const ROLES=['Shearer','Crutcher','Wool Handler','Wool Classer','Presser','Penner'];
+  const doSave=()=>{
+    if(!name.trim())return;
+    onSave({...member,name:name.trim(),role,phone:phone.trim(),hasVehicle});
+  };
+  return e('div',null,
+    e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:10}},
+      e('div',{style:{gridColumn:'span 2'}},
+        e('div',{style:{fontSize:10,fontWeight:700,color:'var(--dim)',textTransform:'uppercase',letterSpacing:.4,marginBottom:4}},'Full Name'),
+        e('input',{type:'text',className:'if-inp',value:name,onChange:ev=>setName(ev.target.value),autoFocus:true})
+      ),
+      e('div',null,
+        e('div',{style:{fontSize:10,fontWeight:700,color:'var(--dim)',textTransform:'uppercase',letterSpacing:.4,marginBottom:4}},'Role'),
+        e('select',{className:'if-sel',value:role,onChange:ev=>setRole(ev.target.value)},
+          ROLES.map(r=>e('option',{key:r,value:r},r)))
+      ),
+      e('div',null,
+        e('div',{style:{fontSize:10,fontWeight:700,color:'var(--dim)',textTransform:'uppercase',letterSpacing:.4,marginBottom:4}},'Mobile'),
+        e('input',{type:'tel',className:'if-inp',value:phone,onChange:ev=>setPhone(ev.target.value),placeholder:'04XX XXX XXX'})
+      ),
+      e('div',{style:{gridColumn:'span 2'}},
+        e('label',{style:{display:'flex',alignItems:'center',gap:8,fontSize:13,fontWeight:600,cursor:'pointer'}},
+          e('input',{type:'checkbox',checked:hasVehicle,onChange:ev=>setHasVehicle(ev.target.checked)}),
+          '🚗 Has own vehicle'
+        )
+      )
+    ),
+    e('div',{style:{fontSize:11,color:'var(--muted)',marginBottom:10,lineHeight:1.4,padding:'8px 10px',background:'var(--card2)',borderRadius:7}},
+      '💡 Editing here updates this crew member for all future jobs. Per-job rate overrides live in each job\'s Admin tab.'
+    ),
+    e('div',{style:{display:'flex',gap:8}},
+      e('button',{onClick:onClose,style:{padding:'9px 14px',background:'none',border:'1px solid var(--border)',borderRadius:7,fontSize:13,cursor:'pointer',color:'var(--muted)',fontWeight:600}},'Cancel'),
+      e('button',{onClick:doSave,disabled:!name.trim(),style:{flex:1,padding:'9px',background:'var(--amber)',border:'none',borderRadius:7,fontSize:13,fontWeight:700,color:'#000',cursor:'pointer'}},'Save Changes')
+    )
+  );
+}
 /* ── DATABASE SCREEN ── */
 function DatabaseScreen({farmList,crewList,addFarm,addCrew,onClose,setFarmList,setCrewList}){
   const [tab,setTab]=useState('farms');
   const [showAddFarm,setShowAddFarm]=useState(false);
   const [showAddCrew,setShowAddCrew]=useState(false);
   const [editFarm,setEditFarm]=useState(null);
+  const [editCrew,setEditCrew]=useState(null);
   const [confirmDeleteFarm,setConfirmDeleteFarm]=useState(null);
   const [confirmDeleteCrew,setConfirmDeleteCrew]=useState(null);
 
@@ -2689,6 +2819,13 @@ function DatabaseScreen({farmList,crewList,addFarm,addCrew,onClose,setFarmList,s
     setFarmList(p=>{const n=p.find(x=>x.id===f.id)?p.map(x=>x.id===f.id?f:x):[...p,f];syncLookups(n,CREW);return n;});
     sb.from('farms').upsert({id:f.id,contractor_slug:CONTRACTOR_SLUG,data:f}).catch(()=>{});
     setEditFarm(null);setShowAddFarm(false);
+  };
+  const handleSaveCrew=c=>{
+    const idx=CREW.findIndex(x=>x.id===c.id);
+    if(idx>=0)CREW.splice(idx,1,c);else CREW.push(c);
+    setCrewList(p=>{const n=p.find(x=>x.id===c.id)?p.map(x=>x.id===c.id?c:x):[...p,c];syncLookups(FARMS,n);return n;});
+    dbSaveCrew(c).catch(()=>{});
+    setEditCrew(null);
   };
   const handleDeleteFarm=id=>{
     setFarmList(p=>{const n=p.filter(f=>f.id!==id);syncLookups(n,CREW);return n;});
@@ -2764,18 +2901,28 @@ function DatabaseScreen({farmList,crewList,addFarm,addCrew,onClose,setFarmList,s
         ),
         crewByRole.map(({role:r,members})=>e('div',{key:r,style:{marginBottom:16}},
           e('div',{style:{fontFamily:'var(--h)',fontSize:13,fontWeight:700,letterSpacing:1,textTransform:'uppercase',color:'var(--muted)',marginBottom:8}},r+'s'),
-          members.map(c=>e('div',{key:c.id,style:{background:'var(--card)',borderRadius:12,padding:14,marginBottom:8,border:'1px solid var(--border)',display:'flex',justifyContent:'space-between',alignItems:'center'}},
-            e('div',null,
-              e('div',{style:{fontWeight:700,fontSize:15}},c.name),
-              e('div',{style:{fontSize:12,color:'var(--muted)',marginTop:2}},c.role+(c.phone?' · '+c.phone:'')+(c.hasVehicle?' · 🚗':''))
-            ),
-            confirmDeleteCrew===c.id
-              ?e('div',{style:{display:'flex',gap:6,alignItems:'center'}},
-                  e('span',{style:{fontSize:12,color:'#ef4444',fontWeight:600}},'Sure?'),
-                  e('button',{onClick:()=>handleDeleteCrew(c.id),style:{background:'#ef4444',border:'none',borderRadius:6,padding:'5px 8px',color:'#fff',fontWeight:700,fontSize:11,cursor:'pointer'}},'Yes'),
-                  e('button',{onClick:()=>setConfirmDeleteCrew(null),style:{background:'var(--card2)',border:'1px solid var(--border)',borderRadius:6,padding:'5px 8px',color:'var(--text)',fontWeight:700,fontSize:11,cursor:'pointer'}},'No')
+          members.map(c=>e('div',{key:c.id},
+            editCrew===c.id
+              ?e('div',{style:{background:'var(--card)',borderRadius:12,padding:14,marginBottom:8,border:'1.5px solid var(--amber)'}},
+                e('div',{style:{fontFamily:'var(--h)',fontSize:15,fontWeight:800,marginBottom:10,color:'var(--amber)'}},'✏️ Edit '+c.name),
+                e(EditCrewForm,{member:c,onSave:handleSaveCrew,onClose:()=>setEditCrew(null)})
+              )
+              :e('div',{style:{background:'var(--card)',borderRadius:12,padding:14,marginBottom:8,border:'1px solid var(--border)',display:'flex',justifyContent:'space-between',alignItems:'center'}},
+                e('div',null,
+                  e('div',{style:{fontWeight:700,fontSize:15}},c.name),
+                  e('div',{style:{fontSize:12,color:'var(--muted)',marginTop:2}},c.role+(c.phone?' · '+c.phone:'')+(c.hasVehicle?' · 🚗':''))
+                ),
+                e('div',{style:{display:'flex',gap:8}},
+                  e('button',{onClick:()=>{setEditCrew(c.id);setConfirmDeleteCrew(null);},style:{background:'rgba(245,158,11,.15)',border:'1px solid rgba(245,158,11,.3)',borderRadius:7,padding:'6px 10px',color:'var(--amber)',fontWeight:700,fontSize:12,cursor:'pointer'}},'✏️ Edit'),
+                  confirmDeleteCrew===c.id
+                    ?e('div',{style:{display:'flex',gap:6,alignItems:'center'}},
+                        e('span',{style:{fontSize:12,color:'#ef4444',fontWeight:600}},'Sure?'),
+                        e('button',{onClick:()=>handleDeleteCrew(c.id),style:{background:'#ef4444',border:'none',borderRadius:6,padding:'5px 8px',color:'#fff',fontWeight:700,fontSize:11,cursor:'pointer'}},'Yes'),
+                        e('button',{onClick:()=>setConfirmDeleteCrew(null),style:{background:'var(--card2)',border:'1px solid var(--border)',borderRadius:6,padding:'5px 8px',color:'var(--text)',fontWeight:700,fontSize:11,cursor:'pointer'}},'No')
+                      )
+                    :e('button',{onClick:()=>{setConfirmDeleteCrew(c.id);setEditCrew(null);},style:{background:'rgba(239,68,68,.1)',border:'1px solid rgba(239,68,68,.3)',borderRadius:7,padding:'6px 10px',color:'#ef4444',fontWeight:700,fontSize:12,cursor:'pointer'}},'🗑️')
                 )
-              :e('button',{onClick:()=>setConfirmDeleteCrew(c.id),style:{background:'rgba(239,68,68,.1)',border:'1px solid rgba(239,68,68,.3)',borderRadius:7,padding:'6px 10px',color:'#ef4444',fontWeight:700,fontSize:12,cursor:'pointer'}},'🗑️')
+              )
           ))
         ))
       )
@@ -2819,7 +2966,9 @@ function ScheduleScreen({jobs,role,setRole,onBack,onJob,onNew,onNewDraft}){
   const rangeEnd=view==='week'?weekDays[6]:monthCells[monthCells.length-1].date;
   const jobsInRange=jobs.filter(j=>{
     if(!j.startDate||!j.daysAllocated)return false;
-    const end=addDays(j.startDate,j.daysAllocated-1);
+    /* Use actual jobDates so includeWeekends=false jobs get the real end */
+    const jds=jobDates(j);
+    const end=jds.length?jds[jds.length-1]:j.startDate;
     /* overlap test */
     return !(end<rangeStart||j.startDate>rangeEnd);
   });
@@ -2975,30 +3124,28 @@ function ScheduleScreen({jobs,role,setRole,onBack,onJob,onNew,onNewDraft}){
           monthCells.map(({date,inMonth})=>{
             const [,,cd]=date.split('-').map(Number);
             const dayEntries=jobsByDate[date]||[];
-            /* In month view, prefer showing starting jobs first, continuation jobs if no starts */
+            /* Starts first, then continuations — show up to 3, "+N more" for overflow */
             const starts=dayEntries.filter(x=>x.isStart);
             const continuations=dayEntries.filter(x=>!x.isStart);
+            const combined=[...starts,...continuations];
+            const MAX_VISIBLE=3;
+            const visible=combined.slice(0,MAX_VISIBLE);
+            const hiddenCount=combined.length-visible.length;
             const isToday=date===today;
             return e('div',{key:date,className:`month-cell${!inMonth?' out-month':''}${isToday?' today':''}`,onClick:()=>onMonthCellClick(date)},
               e('div',{className:'month-cell-num'},
                 e('span',null,cd),
                 isToday&&e('span',{className:'month-cell-today-dot'})
               ),
-              starts.slice(0,3).map(({job})=>{
+              visible.map(({job,isStart})=>{
                 const farm=gf(job.farmId);
                 const nm=job.jobName||(farm?farm.name:'?');
-                return e('div',{key:job.id,className:`month-chip ${statusClass(job.status)}`,
+                return e('div',{key:job.id+(isStart?'_s':'_c'),className:`month-chip ${statusClass(job.status)}`,
+                  style:!isStart?{opacity:.55,fontStyle:'italic'}:{},
                   onClick:ev=>{ev.stopPropagation();onTileClick(job);}
-                },nm);
+                },(isStart?'':'→ ')+nm);
               }),
-              starts.length>3&&e('div',{className:'month-more'},'+'+(starts.length-3)+' more'),
-              starts.length===0&&continuations.length>0&&continuations.slice(0,2).map(({job})=>{
-                const farm=gf(job.farmId);
-                const nm=job.jobName||(farm?farm.name:'?');
-                return e('div',{key:job.id+'_c',className:`month-chip ${statusClass(job.status)}`,style:{opacity:.55,fontStyle:'italic'},
-                  onClick:ev=>{ev.stopPropagation();onTileClick(job);}
-                },'→ '+nm);
-              })
+              hiddenCount>0&&e('div',{className:'month-more'},'+'+hiddenCount+' more')
             );
           })
         )
