@@ -1,42 +1,32 @@
 /**
- * myGang SMS send endpoint — batch-aware with AU number normalisation.
+ * myGang SMS send endpoint — batch-aware, AU-normalised, dual env-var support.
  *
- * Accepts payload shape:  { messages: [ {to, body}, ... ] }
- * Returns:                { sent, failed, results: [...] }
+ * Payload (either shape is accepted):
+ *   { messages: [ {to, body}, ... ] }        ← current app
+ *   { to, body }                             ← legacy single-message
  *
- * Env vars required on Vercel:
- *   TWILIO_SID      (Account SID — starts with AC...)
- *   TWILIO_TOKEN    (Auth token)
- *   TWILIO_FROM     (Sender number in E.164 format, e.g. +61XXXXXXXXXX)
+ * Response:
+ *   { sent, failed, results: [ {to, ok, sid?, error?, code?}, ... ] }
+ *
+ * Env vars (either naming scheme works):
+ *   NEW:  TWILIO_SID        / TWILIO_TOKEN       / TWILIO_FROM
+ *   OLD:  TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN / TWILIO_PHONE_NUMBER
  */
 
 /**
- * Normalise any AU mobile input to E.164 (+61XXXXXXXXX).
- * Accepts: +61 4XX XXX XXX, 61 4XX..., 04XX XXX XXX, 4XX XXX XXX.
- * Whitespace, dashes and parens are stripped before the rules apply.
+ * Normalise AU mobile to E.164 (+61XXXXXXXXX).
+ * Accepts "+61 4XX XXX XXX", "61 4XX...", "04XX XXX XXX", "4XX XXX XXX".
  */
 function normaliseAU(raw) {
   if (!raw) return null;
   const cleaned = String(raw).replace(/[^\d+]/g, '');
   if (!cleaned) return null;
 
-  // Already E.164 and AU-shaped
   if (cleaned.startsWith('+61') && cleaned.length === 12) return cleaned;
-
-  // "61..." without plus
   if (cleaned.startsWith('61') && cleaned.length === 11) return '+' + cleaned;
+  if (cleaned.startsWith('04') && cleaned.length === 10) return '+61' + cleaned.slice(1);
+  if (cleaned.startsWith('4') && cleaned.length === 9) return '+61' + cleaned;
 
-  // "04XXXXXXXX" (10 digits)
-  if (cleaned.startsWith('04') && cleaned.length === 10) {
-    return '+61' + cleaned.slice(1);
-  }
-
-  // "4XXXXXXXX" (9 digits) — bare mobile
-  if (cleaned.startsWith('4') && cleaned.length === 9) {
-    return '+61' + cleaned;
-  }
-
-  // Anything else: let Twilio reject it with a clear error
   return null;
 }
 
@@ -46,33 +36,58 @@ module.exports = async (req, res) => {
     return;
   }
 
-  const sid = process.env.TWILIO_SID;
-  const token = process.env.TWILIO_TOKEN;
-  const from = process.env.TWILIO_FROM;
+  // Resolve credentials — try new names first, fall back to old names.
+  const sid = process.env.TWILIO_SID || process.env.TWILIO_ACCOUNT_SID;
+  const token = process.env.TWILIO_TOKEN || process.env.TWILIO_AUTH_TOKEN;
+  const from = process.env.TWILIO_FROM || process.env.TWILIO_PHONE_NUMBER;
 
   if (!sid || !token || !from) {
+    const missing = [];
+    if (!sid) missing.push('TWILIO_SID (or TWILIO_ACCOUNT_SID)');
+    if (!token) missing.push('TWILIO_TOKEN (or TWILIO_AUTH_TOKEN)');
+    if (!from) missing.push('TWILIO_FROM (or TWILIO_PHONE_NUMBER)');
     res.status(500).json({
       error: 'Server not configured',
-      detail: 'Missing TWILIO_SID, TWILIO_TOKEN or TWILIO_FROM env vars',
+      detail: 'Missing env vars: ' + missing.join(', '),
+      hint: 'Set these on the Vercel project (Settings - Environment Variables) and redeploy.',
     });
     return;
   }
 
-  // Accept EITHER the new batch format OR the legacy single-message format,
-  // so older deployments that still send {to, body} keep working.
+  // Basic sanity on values so typos surface as clear errors, not Twilio 401s.
+  if (!sid.startsWith('AC')) {
+    res.status(500).json({
+      error: 'Invalid TWILIO_SID',
+      detail: 'Account SID must start with "AC". Got: ' + sid.slice(0, 4) + '...',
+    });
+    return;
+  }
+  if (!from.startsWith('+')) {
+    res.status(500).json({
+      error: 'Invalid TWILIO_FROM',
+      detail: 'Sender number must be in E.164 format (starting with +). Got: ' + from.slice(0, 4) + '...',
+    });
+    return;
+  }
+
+  // Parse payload — accept batch or legacy single-message shape.
   let messages = [];
   try {
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
-    if (Array.isArray(body?.messages)) {
+    if (Array.isArray(body && body.messages)) {
       messages = body.messages;
-    } else if (body?.to && body?.body) {
+    } else if (body && body.to && body.body) {
       messages = [{ to: body.to, body: body.body }];
     } else {
-      res.status(400).json({ error: 'Invalid payload — expected {messages: [...]} or {to, body}' });
+      res.status(400).json({
+        error: 'Invalid payload',
+        detail: 'Expected {messages: [...]} or {to, body}',
+        received: Object.keys(body || {}),
+      });
       return;
     }
   } catch (e) {
-    res.status(400).json({ error: 'Invalid JSON body', detail: String(e) });
+    res.status(400).json({ error: 'Invalid JSON body', detail: String(e.message || e) });
     return;
   }
 
@@ -82,17 +97,17 @@ module.exports = async (req, res) => {
   }
 
   const auth = 'Basic ' + Buffer.from(sid + ':' + token).toString('base64');
-  const url = `https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`;
+  const url = 'https://api.twilio.com/2010-04-01/Accounts/' + sid + '/Messages.json';
 
   const results = [];
   let sent = 0;
   let failed = 0;
 
   for (const m of messages) {
-    const toNorm = normaliseAU(m.to);
+    const toNorm = normaliseAU(m && m.to);
     if (!toNorm) {
       failed++;
-      results.push({ to: m.to, ok: false, error: 'Invalid AU mobile: ' + m.to });
+      results.push({ to: m && m.to, ok: false, error: 'Invalid AU mobile: ' + (m && m.to) });
       continue;
     }
     if (!m.body || !String(m.body).trim()) {
@@ -115,7 +130,7 @@ module.exports = async (req, res) => {
         },
         body: form.toString(),
       });
-      const data = await twilioRes.json().catch(() => ({}));
+      const data = await twilioRes.json().catch(function () { return {}; });
       if (twilioRes.ok) {
         sent++;
         results.push({ to: toNorm, ok: true, sid: data.sid });
@@ -126,13 +141,19 @@ module.exports = async (req, res) => {
           ok: false,
           error: data.message || ('Twilio returned ' + twilioRes.status),
           code: data.code,
+          twilioStatus: twilioRes.status,
         });
       }
     } catch (err) {
       failed++;
-      results.push({ to: toNorm, ok: false, error: 'Network/Twilio error: ' + String(err) });
+      results.push({
+        to: toNorm,
+        ok: false,
+        error: 'Network/Twilio error: ' + String((err && err.message) || err),
+      });
     }
   }
 
+  // Always 200 when we processed — individual failures are in results.
   res.status(200).json({ sent, failed, results });
 };
