@@ -13,7 +13,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=DM+Sans:wght@400;500;600&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
 <style>
-:root{--bg:#f2f4f8;--card:#ffffff;--card2:#eceef5;--border:#dde0ea;--border2:#e8eaf2;--amber:#f59e0b;--amberD:rgba(245,158,11,.13);--amberB:rgba(245,158,11,.3);--green:#16a34a;--greenD:rgba(22,163,74,.12);--red:#dc2626;--blue:#1a73e8;--blueD:rgba(26,115,232,.1);--purple:#7c3aed;--purpleD:rgba(124,58,237,.1);--text:#1a1e2e;--muted:#64748b;--dim:#94a3b8;--h:'Barlow Condensed',sans-serif;--b:'DM Sans',sans-serif;--m:'JetBrains Mono',monospace;--r:12px;--hdr:#1e2a3a}
+:root{--bg:#f2f4f8;--card:#ffffff;--card2:#eceef5;--border:#dde0ea;--border2:#e8eaf2;--amber:#f59e0b;--amberD:rgba(245,158,11,.13);--amberB:rgba(245,158,11,.3);--green:#16a34a;--greenD:rgba(22,163,74,.12);--red:#dc2626;--redD:rgba(220,38,38,.1);--redB:rgba(220,38,38,.35);--blue:#1a73e8;--blueD:rgba(26,115,232,.1);--purple:#7c3aed;--purpleD:rgba(124,58,237,.1);--text:#1a1e2e;--muted:#64748b;--dim:#94a3b8;--h:'Barlow Condensed',sans-serif;--b:'DM Sans',sans-serif;--m:'JetBrains Mono',monospace;--r:12px;--hdr:#1e2a3a}
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 html,body{background:var(--bg);color:var(--text);font-family:var(--b);min-height:100dvh;font-size:15px;overscroll-behavior:none}
 #root{max-width:960px;margin:0 auto;min-height:100dvh;position:relative}
@@ -28,6 +28,9 @@ html,body{background:var(--bg);color:var(--text);font-family:var(--b);min-height
 .role-toggle{display:flex;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.15);border-radius:8px;overflow:hidden;flex-shrink:0}
 .rt-btn{padding:5px 8px;font-size:10px;font-weight:700;letter-spacing:.3px;text-transform:uppercase;cursor:pointer;border:none;background:none;color:rgba(255,255,255,.5);transition:.15s;white-space:nowrap}
 .rt-btn.active{background:var(--amber);color:#000}
+.sched-btn{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.15);border-radius:8px;padding:6px 10px;color:rgba(255,255,255,.85);font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:5px;white-space:nowrap;flex-shrink:0;transition:.12s}
+.sched-btn:active{background:rgba(255,255,255,.22)}
+.sched-btn-ic{font-size:15px;line-height:1}
 /* PIN SCREEN */
 .pin-screen{position:fixed;inset:0;background:var(--hdr);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:500;gap:0}
 .pin-logo{font-family:var(--h);font-size:42px;font-weight:800;color:var(--amber);margin-bottom:4px}
@@ -70,7 +73,7 @@ html,body{background:var(--bg);color:var(--text);font-family:var(--b);min-height
 .jlc-name{font-family:var(--h);font-size:22px;font-weight:700;line-height:1.1;flex:1}
 .jlc-num{font-family:var(--m);font-size:11px;color:var(--dim);margin-top:2px}
 .badge{display:inline-flex;align-items:center;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:700;white-space:nowrap;flex-shrink:0}
-.b-active{background:#dcfce7;color:#16a34a}.b-completed{background:var(--blueD);color:var(--blue)}.b-charged{background:var(--purpleD);color:var(--purple)}.b-dispatched{background:var(--amberD);color:var(--amber)}
+.b-active{background:#dcfce7;color:#16a34a}.b-completed{background:var(--blueD);color:var(--blue)}.b-charged{background:var(--purpleD);color:var(--purple)}.b-dispatched{background:var(--amberD);color:var(--amber)}.b-draft{background:var(--redD);color:var(--red);border:1px dashed var(--redB)}
 .jlc-meta{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:8px;align-items:center}
 .pill{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;background:var(--card2);color:var(--muted);border:1px solid var(--border)}
 .jlc-pr{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-bottom:5px}
@@ -397,6 +400,102 @@ textarea.fi{resize:none;line-height:1.5}
 .if-cancel{padding:9px 14px;background:none;border:1px solid var(--border);border-radius:7px;font-size:13px;cursor:pointer;color:var(--muted);font-family:var(--b)}
 .farm-search{width:100%;padding:9px 12px;background:var(--card);border:1px solid var(--border);border-radius:8px 8px 0 0;font-family:var(--b);font-size:13px;color:var(--text);outline:none;border-bottom:none}
 .farm-search:focus{border-color:var(--amber)}
+/* ── DRAFT STYLING (job cards + banners) ── */
+.jlc.draft{border-left:4px solid var(--red);background:linear-gradient(to right,var(--redD) 0%,var(--card) 40%)}
+.draft-hint{font-size:12px;color:var(--red);margin-top:6px;font-weight:600;display:flex;align-items:center;gap:5px}
+.draft-banner{margin:14px 16px 0;padding:14px 16px;background:var(--redD);border:1.5px dashed var(--redB);border-radius:var(--r);display:flex;align-items:center;gap:12px}
+.draft-banner-ic{font-size:26px;flex-shrink:0}
+.draft-banner-body{flex:1;min-width:0}
+.draft-banner-t{font-family:var(--h);font-size:15px;font-weight:800;color:var(--red);margin-bottom:2px;letter-spacing:.3px}
+.draft-banner-s{font-size:12px;color:var(--muted);line-height:1.4}
+.draft-publish-btn{padding:10px 14px;background:var(--red);color:#fff;border:none;border-radius:9px;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--b);white-space:nowrap;box-shadow:0 2px 8px rgba(220,38,38,.3);flex-shrink:0}
+.draft-publish-btn:active{transform:scale(.96);box-shadow:0 1px 4px rgba(220,38,38,.3)}
+.btn-draft{padding:13px 14px;background:none;color:var(--red);border:1.5px dashed var(--redB);border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;font-family:var(--b);white-space:nowrap;transition:.12s}
+.btn-draft:active{background:var(--redD)}
+.jd-draft-strip{background:rgba(220,38,38,.15);border-bottom:1px solid rgba(220,38,38,.3);padding:7px 16px;font-size:12px;color:#fff;font-weight:700;letter-spacing:.5px;text-transform:uppercase;display:flex;align-items:center;gap:6px}
+/* ── SCHEDULE SCREEN ── */
+.sched-wrap{height:calc(100dvh - 58px);display:flex;flex-direction:column;background:var(--bg);overflow:hidden}
+.sched-controls{padding:12px 14px;background:var(--card);border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:10px;flex-shrink:0}
+.sched-hdr-row{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.sched-range{font-family:var(--h);font-size:17px;font-weight:800;color:var(--text);letter-spacing:.2px;line-height:1.1;flex:1;min-width:0}
+.sched-range-sub{font-size:11px;color:var(--muted);font-weight:500;margin-top:1px}
+.sched-view-toggle{display:flex;background:var(--card2);border:1px solid var(--border);border-radius:8px;overflow:hidden;flex-shrink:0}
+.svt-btn{padding:6px 13px;font-size:12px;font-weight:700;background:none;border:none;color:var(--muted);cursor:pointer;transition:.12s}
+.svt-btn.on{background:var(--amber);color:#000}
+.sched-nav-row{display:flex;gap:8px;align-items:center}
+.sched-nav-btn{flex:1;padding:9px;background:var(--card2);border:1px solid var(--border);border-radius:8px;font-size:13px;font-weight:700;color:var(--text);cursor:pointer;font-family:var(--b);transition:.12s}
+.sched-nav-btn:active{background:var(--border)}
+.sched-nav-btn.today{background:var(--amberD);border-color:var(--amberB);color:var(--amber)}
+/* Legend strip */
+.sched-legend{display:flex;gap:14px;padding:8px 14px;background:var(--card2);border-bottom:1px solid var(--border);flex-wrap:wrap;flex-shrink:0;font-size:11px;color:var(--muted)}
+.sl-item{display:flex;align-items:center;gap:5px}
+.sl-dot{width:9px;height:9px;border-radius:2px}
+.sl-dot.a{background:var(--green)}.sl-dot.d{background:var(--red)}.sl-dot.c{background:var(--blue)}.sl-dot.ch{background:var(--purple)}.sl-dot.di{background:var(--amber)}
+/* Month stats strip */
+.sched-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--border);border-bottom:1px solid var(--border);flex-shrink:0}
+.ss-cell{padding:9px 6px;background:var(--card);text-align:center}
+.ss-num{font-family:var(--h);font-size:19px;font-weight:800;color:var(--text);line-height:1.1}
+.ss-lbl{font-size:10px;color:var(--muted);margin-top:2px;text-transform:uppercase;letter-spacing:.4px}
+/* Week view */
+.week-board{flex:1;overflow-y:auto;padding:0}
+.week-scroll{overflow-x:auto;padding:10px 0 14px;scrollbar-width:none}
+.week-scroll::-webkit-scrollbar{display:none}
+.week-grid{display:grid;grid-template-columns:repeat(7,minmax(150px,1fr));gap:7px;padding:0 10px;min-width:max-content}
+.wk-col{background:var(--card);border:1px solid var(--border);border-radius:10px;overflow:hidden;display:flex;flex-direction:column;min-height:260px}
+.wk-col.today{border-color:var(--amber);box-shadow:0 0 0 1px var(--amber)}
+.wk-col.weekend{background:var(--card2)}
+.wk-col-hdr{padding:9px 10px;background:var(--hdr);color:#fff;text-align:center;flex-shrink:0}
+.wk-col.today .wk-col-hdr{background:var(--amber);color:#000}
+.wk-day{font-family:var(--h);font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;opacity:.75;line-height:1}
+.wk-dnum{font-family:var(--h);font-size:22px;font-weight:800;margin-top:1px;line-height:1}
+.wk-body{padding:7px;display:flex;flex-direction:column;gap:6px;flex:1}
+.wk-empty{font-size:11px;color:var(--dim);text-align:center;padding:18px 6px;font-style:italic}
+.wk-tile{background:var(--card2);border:1px solid var(--border);border-left:4px solid var(--green);border-radius:7px;padding:8px 9px;cursor:pointer;transition:.12s;display:flex;flex-direction:column;gap:3px}
+.wk-tile:active{transform:scale(.97);background:var(--card)}
+.wk-tile.draft{border-left-color:var(--red);background:var(--redD)}
+.wk-tile.completed{border-left-color:var(--blue);opacity:.88}
+.wk-tile.charged{border-left-color:var(--purple);opacity:.75}
+.wk-tile.dispatched{border-left-color:var(--amber)}
+.wk-tile.cont{opacity:.7;font-style:italic}
+.wk-tile-name{font-family:var(--h);font-size:14px;font-weight:800;color:var(--text);line-height:1.15;word-break:break-word}
+.wk-tile-meta{display:flex;gap:7px;flex-wrap:wrap;font-size:10px;color:var(--muted);font-weight:600}
+.wk-tile-type{font-size:10px;font-weight:700;padding:1px 6px;border-radius:3px;background:var(--card);color:var(--muted);width:fit-content;text-transform:uppercase;letter-spacing:.3px}
+.wk-tile-type.sh{background:var(--blueD);color:var(--blue)}
+.wk-tile-type.cr{background:var(--amberD);color:var(--amber)}
+.wk-tile-prog{font-size:10px;color:var(--dim);display:flex;justify-content:space-between;margin-top:2px}
+.wk-tile-pbar{height:3px;background:var(--border);border-radius:2px;overflow:hidden}
+.wk-tile-pbarf{height:100%;background:var(--green);transition:width .3s}
+.wk-tile.draft .wk-tile-pbarf{background:var(--red)}
+.wk-tile-draft-tag{font-size:9px;font-weight:800;color:var(--red);text-transform:uppercase;letter-spacing:.8px;margin-top:1px}
+/* Month view */
+.month-board{flex:1;overflow-y:auto;padding:10px 10px 20px}
+.month-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;background:var(--border);border:1px solid var(--border);border-radius:10px;overflow:hidden}
+.month-day-hdr{padding:8px 4px;background:var(--hdr);color:rgba(255,255,255,.8);text-align:center;font-family:var(--h);font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase}
+.month-cell{min-height:82px;background:var(--card);padding:5px 5px 4px;display:flex;flex-direction:column;gap:2px;cursor:pointer;transition:.12s}
+.month-cell:active{background:var(--card2)}
+.month-cell.out-month{background:var(--card2);opacity:.45}
+.month-cell.today{background:var(--amberD);border:1.5px solid var(--amber);padding:4px}
+.month-cell-num{font-family:var(--h);font-size:13px;font-weight:700;color:var(--muted);display:flex;align-items:center;gap:4px;line-height:1;margin-bottom:2px}
+.month-cell.today .month-cell-num{color:var(--amber)}
+.month-cell-today-dot{width:5px;height:5px;border-radius:50%;background:var(--amber)}
+.month-chip{padding:2px 5px;border-radius:3px;font-size:10px;font-weight:700;background:var(--greenD);color:var(--green);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;border-left:2px solid var(--green)}
+.month-chip.draft{background:var(--redD);color:var(--red);border-left-color:var(--red)}
+.month-chip.completed{background:var(--blueD);color:var(--blue);border-left-color:var(--blue)}
+.month-chip.charged{background:var(--purpleD);color:var(--purple);border-left-color:var(--purple)}
+.month-chip.dispatched{background:var(--amberD);color:var(--amber);border-left-color:var(--amber)}
+.month-more{font-size:9px;color:var(--dim);font-weight:700;padding:1px 4px;cursor:pointer}
+.sched-empty{padding:50px 20px;text-align:center;color:var(--muted)}
+.sched-empty-ic{font-size:44px;margin-bottom:10px;opacity:.6}
+.sched-empty-title{font-family:var(--h);font-size:18px;font-weight:800;color:var(--text);margin-bottom:5px}
+.sched-empty-sub{font-size:13px;line-height:1.5;max-width:320px;margin:0 auto}
+/* Drafts collapsed pill on home */
+.drafts-pill{margin:10px 16px 0;padding:10px 14px;background:var(--redD);border:1px dashed var(--redB);border-radius:10px;display:flex;align-items:center;gap:10px;cursor:pointer;transition:.12s}
+.drafts-pill:active{background:rgba(220,38,38,.18)}
+.drafts-pill-ic{font-size:18px}
+.drafts-pill-body{flex:1;min-width:0}
+.drafts-pill-t{font-size:13px;font-weight:700;color:var(--red);line-height:1.1}
+.drafts-pill-s{font-size:11px;color:var(--muted);margin-top:2px}
+.drafts-pill-arr{color:var(--red);font-size:18px;font-weight:700}
 </style>
 </head>
 <body>
@@ -410,7 +509,7 @@ const {useState,useEffect,useRef}=React,e=React.createElement;
 /* ── SUPABASE CONFIG — update these 3 lines per deployment ── */
 const SUPABASE_URL='https://yhkcdycypwxzxxwaxnzj.supabase.co';
 const SUPABASE_ANON_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inloa2NkeWN5cHd4enh4d2F4bnpqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYzMjgxMTgsImV4cCI6MjA5MTkwNDExOH0.q9u1O_uixHxDcb8bJgPJg-CaSSPU3XNZxfqYV6YnHWE';
-const CONTRACTOR_SLUG='quality-shearing'; /* e.g. 'woolaway-shearing' */
+const CONTRACTOR_SLUG='quality-shearing';
 
 const sb=supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
 
@@ -444,10 +543,13 @@ async function flushQueue(){
   const failed=[];
   for(const item of q){
     try{
-      if(item.type==='job')await sb.from('jobs').upsert({id:item.id,contractor_slug:CONTRACTOR_SLUG,data:item.data,updated_at:new Date().toISOString()},{onConflict:'id'});
-      if(item.type==='farm')await sb.from('farms').upsert({id:item.id,contractor_slug:CONTRACTOR_SLUG,data:item.data},{onConflict:'id'});
-      if(item.type==='crew')await sb.from('crew_members').upsert({id:item.id,contractor_slug:CONTRACTOR_SLUG,data:item.data},{onConflict:'id'});
-      flushed++;
+      let res;
+      if(item.type==='job')res=await sb.from('jobs').upsert({id:item.id,contractor_slug:CONTRACTOR_SLUG,data:item.data,updated_at:new Date().toISOString()},{onConflict:'id'});
+      else if(item.type==='farm')res=await sb.from('farms').upsert({id:item.id,contractor_slug:CONTRACTOR_SLUG,data:item.data},{onConflict:'id'});
+      else if(item.type==='crew')res=await sb.from('crew_members').upsert({id:item.id,contractor_slug:CONTRACTOR_SLUG,data:item.data},{onConflict:'id'});
+      /* Check for Supabase error in response body — don't count as flushed if error */
+      if(res&&res.error){failed.push(item);}
+      else{flushed++;}
     }catch(e){failed.push(item);}
   }
   lsSet(LS_QUEUE,failed);
@@ -468,10 +570,23 @@ async function dbLoad(){
       crew:(cr.data||[]).map(r=>r.data),
       fromCache:false,
     };
-    /* Update local cache */
-    lsSet(LS_JOBS,result.jobs);
-    lsSet(LS_FARMS,result.farms);
-    lsSet(LS_CREW,result.crew);
+    /* Only overwrite local cache if no pending offline writes — 
+       if queue has items, local data is newer than Supabase */
+    const pendingQ=lsGet(LS_QUEUE)||[];
+    if(pendingQ.length===0){
+      lsSet(LS_JOBS,result.jobs);
+      lsSet(LS_FARMS,result.farms);
+      lsSet(LS_CREW,result.crew);
+    } else {
+      /* Merge: use local cache for jobs in queue, Supabase for others */
+      const qJobIds=new Set(pendingQ.filter(x=>x.type==='job').map(x=>x.id));
+      const localJobs=lsGet(LS_JOBS)||[];
+      const merged=result.jobs.map(j=>qJobIds.has(j.id)?localJobs.find(lj=>lj.id===j.id)||j:j);
+      result.jobs=merged;
+      lsSet(LS_JOBS,merged);
+      lsSet(LS_FARMS,result.farms);
+      lsSet(LS_CREW,result.crew);
+    }
     return result;
   }catch(e){
     /* Offline — serve from cache */
@@ -484,16 +599,21 @@ async function dbLoad(){
   }
 }
 async function dbSaveJob(job){
-  /* Always update local cache first */
+  /* Always write to local cache first — this survives page close */
   const jobs=lsGet(LS_JOBS)||[];
   const updated=jobs.find(j=>j.id===job.id)?jobs.map(j=>j.id===job.id?job:j):[job,...jobs];
   lsSet(LS_JOBS,updated);
+  /* Skip Supabase entirely if offline — avoids SW stub returning fake 200 */
+  if(!navigator.onLine){
+    queueWrite('job',job.id,job);
+    return;
+  }
   try{
-    await sb.from('jobs').upsert({id:job.id,contractor_slug:CONTRACTOR_SLUG,data:job,updated_at:new Date().toISOString()},{onConflict:'id'});
+    const {error}=await sb.from('jobs').upsert({id:job.id,contractor_slug:CONTRACTOR_SLUG,data:job,updated_at:new Date().toISOString()},{onConflict:'id'});
+    if(error)throw new Error(error.message);
     dequeue('job',job.id);
   }catch(e){
     queueWrite('job',job.id,job);
-    throw e;
   }
 }
 async function dbDeleteJob(jobId){
@@ -505,10 +625,12 @@ async function dbSaveFarm(farm){
   const farms=lsGet(LS_FARMS)||[];
   const updated=farms.find(f=>f.id===farm.id)?farms.map(f=>f.id===farm.id?farm:f):[farm,...farms];
   lsSet(LS_FARMS,updated);
+  if(!navigator.onLine){queueWrite('farm',farm.id,farm);return;}
   try{
-    await sb.from('farms').upsert({id:farm.id,contractor_slug:CONTRACTOR_SLUG,data:farm},{onConflict:'id'});
+    const {error}=await sb.from('farms').upsert({id:farm.id,contractor_slug:CONTRACTOR_SLUG,data:farm},{onConflict:'id'});
+    if(error)throw new Error(error.message);
     dequeue('farm',farm.id);
-  }catch(e){queueWrite('farm',farm.id,farm);throw e;}
+  }catch(e){queueWrite('farm',farm.id,farm);}
 }
 async function dbDeleteFarm(farmId){
   const farms=lsGet(LS_FARMS)||[];
@@ -519,10 +641,12 @@ async function dbSaveCrew(member){
   const crew=lsGet(LS_CREW)||[];
   const updated=crew.find(c=>c.id===member.id)?crew.map(c=>c.id===member.id?member:c):[member,...crew];
   lsSet(LS_CREW,updated);
+  if(!navigator.onLine){queueWrite('crew',member.id,member);return;}
   try{
-    await sb.from('crew_members').upsert({id:member.id,contractor_slug:CONTRACTOR_SLUG,data:member},{onConflict:'id'});
+    const {error}=await sb.from('crew_members').upsert({id:member.id,contractor_slug:CONTRACTOR_SLUG,data:member},{onConflict:'id'});
+    if(error)throw new Error(error.message);
     dequeue('crew',member.id);
-  }catch(e){queueWrite('crew',member.id,member);throw e;}
+  }catch(e){queueWrite('crew',member.id,member);}
 }
 let FARMS=[];
 let CREW=[];
@@ -541,13 +665,42 @@ const init=n=>n.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
 const sn=n=>{if(!n)return'Unknown';const p=n.trim().split(' ').filter(Boolean);if(p.length===1)return p[0];return p[0]+' '+p[p.length-1][0]+'.';};
 const DAY_NAMES=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 function Av({name,size=34}){const c=avc(name);return e('div',{className:'av',style:{width:size,height:size,background:c.bg,color:c.fg,fontSize:size*.38+'px'}},init(name));}
-function Bdg({status}){const m={Active:'b-active',Completed:'b-completed','Charged Out':'b-charged',Dispatched:'b-dispatched'};const d={Active:'● ',Dispatched:'◆ '};return e('span',{className:`badge ${m[status]||'b-active'}`},(d[status]||'')+status);}
+function Bdg({status}){const m={Active:'b-active',Completed:'b-completed','Charged Out':'b-charged',Dispatched:'b-dispatched',Draft:'b-draft'};const d={Active:'● ',Dispatched:'◆ ',Draft:'◌ '};return e('span',{className:`badge ${m[status]||'b-active'}`},(d[status]||'')+status);}
 /* LOCAL DATE HELPERS — no timezone issues */
 function addDays(d,n){const [y,mo,dy]=d.split('-').map(Number);const dt=new Date(y,mo-1,dy+n);return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;}
 function fmtDate(d){const [y,mo,dy]=d.split('-').map(Number);return new Date(y,mo-1,dy).toLocaleDateString('en-AU',{day:'2-digit',month:'2-digit',year:'numeric'});}
 function fmtDateLong(d){const [y,mo,dy]=d.split('-').map(Number);return new Date(y,mo-1,dy).toLocaleDateString('en-AU',{weekday:'short',day:'numeric',month:'short'});}
 function localToday(){const n=new Date();return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-${String(n.getDate()).padStart(2,'0')}`;}
 function jobDates(j){const ds=[];for(let i=0;i<j.daysAllocated;i++)ds.push(addDays(j.startDate,i));return ds;}
+/* Monday-start week helpers */
+function mondayOfWeek(dStr){const [y,mo,dy]=dStr.split('-').map(Number);const dt=new Date(y,mo-1,dy);const dow=dt.getDay();const diff=dow===0?-6:1-dow;dt.setDate(dt.getDate()+diff);return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;}
+function weekDatesFromMonday(mondayStr){const out=[];for(let i=0;i<7;i++)out.push(addDays(mondayStr,i));return out;}
+function monthCellsFor(year,month){
+  /* month is 1-indexed */
+  const first=new Date(year,month-1,1);
+  const firstDow=first.getDay(); /* 0=Sun..6=Sat */
+  const leading=firstDow===0?6:firstDow-1; /* Monday-start offset */
+  const cells=[];
+  for(let i=leading;i>0;i--){
+    const dt=new Date(year,month-1,1-i);
+    cells.push({date:`${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`,inMonth:false});
+  }
+  const daysInMonth=new Date(year,month,0).getDate();
+  for(let d=1;d<=daysInMonth;d++){
+    cells.push({date:`${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`,inMonth:true});
+  }
+  /* Pad to complete final week (multiple of 7) */
+  while(cells.length%7!==0){
+    const last=cells[cells.length-1].date;
+    const [ly,lm,ld]=last.split('-').map(Number);
+    const dt=new Date(ly,lm-1,ld+1);
+    cells.push({date:`${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`,inMonth:false});
+  }
+  return cells;
+}
+function fmtMonthYear(y,m){return new Date(y,m-1,1).toLocaleDateString('en-AU',{month:'long',year:'numeric'});}
+function fmtWeekRange(mondayStr){const [y1,m1,d1]=mondayStr.split('-').map(Number);const start=new Date(y1,m1-1,d1);const end=new Date(y1,m1-1,d1+6);const s=start.toLocaleDateString('en-AU',{day:'numeric',month:'short'});const eL=end.toLocaleDateString('en-AU',{day:'numeric',month:'short',year:'numeric'});return s+' — '+eL;}
+function statusClass(s){return s==='Draft'?'draft':s==='Completed'?'completed':s==='Charged Out'?'charged':s==='Dispatched'?'dispatched':'active';}
 const mobsOf=run=>run.mobs||[];
 function calcProg(job){
   /* Include both shearers and crutchers in progress count */
@@ -767,15 +920,24 @@ async function hashPin(pin){
   return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
 }
 
-/* In-memory PIN cache loaded from Supabase */
+/* PIN cache — loaded from Supabase, persisted to localStorage as offline fallback */
+const LS_PINS='mg_pins_'+CONTRACTOR_SLUG;
 let _pinCache={lead:null,admin:null};
 let _pinLoaded=false;
 
 async function loadPins(){
   if(_pinLoaded)return;
+  /* Load from localStorage first so PINs work immediately offline */
+  const cached=lsGet(LS_PINS);
+  if(cached){_pinCache.lead=cached.lead||null;_pinCache.admin=cached.admin||null;}
   try{
     const {data}=await sb.from('contractor_settings').select('lead_pin_hash,admin_pin_hash').eq('contractor_slug',CONTRACTOR_SLUG).single();
-    if(data){_pinCache.lead=data.lead_pin_hash;_pinCache.admin=data.admin_pin_hash;}
+    if(data){
+      _pinCache.lead=data.lead_pin_hash;
+      _pinCache.admin=data.admin_pin_hash;
+      /* Keep localStorage in sync */
+      lsSet(LS_PINS,{lead:_pinCache.lead,admin:_pinCache.admin});
+    }
   }catch(e){}
   _pinLoaded=true;
 }
@@ -795,6 +957,8 @@ async function checkPin(type,entered){
 async function savePin(type,newVal){
   const hash=await hashPin(newVal);
   _pinCache[type]=hash;
+  /* Always persist to localStorage so offline access works */
+  lsSet(LS_PINS,{lead:_pinCache.lead,admin:_pinCache.admin});
   const update={contractor_slug:CONTRACTOR_SLUG,updated_at:new Date().toISOString()};
   update[type==='admin'?'admin_pin_hash':'lead_pin_hash']=hash;
   await sb.from('contractor_settings').upsert(update,{onConflict:'contractor_slug'});
@@ -903,7 +1067,7 @@ function AdminPinModal({onSuccess,onClose}){
   );
 }
 
-function TopBar({role,setRole,onBack,backLabel}){
+function TopBar({role,setRole,onBack,backLabel,onSchedule}){
   const [showPin,setShowPin]=useState(null); /* 'lead' | 'admin' */
   const requestRole=rv=>{
     if(rv==='shed_lead'&&role!=='shed_lead'&&role!=='admin')setShowPin('lead');
@@ -915,6 +1079,7 @@ function TopBar({role,setRole,onBack,backLabel}){
     e('div',{className:'topbar'},
       onBack?e('button',{className:'back-btn',onClick:onBack},e('span',{className:'back-arr'},'←'),e('span',{className:'back-label'},backLabel||'Back')):e('div',{className:'logo'},'my',e('em',null,'Gang')),
       e('div',{style:{display:'flex',alignItems:'center',gap:6}},
+        onSchedule&&e('button',{className:'sched-btn',onClick:onSchedule,title:'Schedule'},e('span',{className:'sched-btn-ic'},'📅'),e('span',null,'Schedule')),
         role!=='read_only'&&e('button',{onClick:lockRole,title:'Lock',style:{background:'rgba(255,255,255,.1)',border:'none',borderRadius:6,padding:'4px 8px',color:'rgba(255,255,255,.5)',fontSize:14,cursor:'pointer'}},'🔒'),
         e('div',{className:'role-toggle'},[['👁','View','read_only'],['📋','Lead','shed_lead'],['🔑','Admin','admin']].map(([ic,lbl,rv])=>e('button',{key:rv,className:`rt-btn${role===rv?' active':''}`,onClick:()=>requestRole(rv)},`${ic} ${lbl}`)))
       )
@@ -948,10 +1113,12 @@ function WeekBanner({jobs,contractorName}){
 function JLC({job,onClick}){
   const farm=gf(job.farmId),p=calcProg(job);
   const cls=p.pct>=80?'fg':p.pct>=40?'fa':'fr';
-  return e('div',{className:'jlc',onClick},
+  const isDraft=job.status==='Draft';
+  return e('div',{className:'jlc'+(isDraft?' draft':''),onClick},
     e('div',{className:'jlc-top'},e('div',null,e('div',{className:'jlc-name'},job.jobName||(farm?farm.name:'Unknown'),job.jobPin&&e('span',{style:{fontSize:'14px',marginLeft:6,opacity:.5}},'🔒')),e('div',{className:'jlc-num'},'#'+job.jobNumber)),e(Bdg,{status:job.status})),
     e('div',{className:'jlc-meta'},e('span',{className:'pill'},job.type),e('span',{style:{fontSize:'12px',color:'var(--muted)'}},job.totalSheep.toLocaleString()+' sheep'),e('span',{style:{fontSize:'12px',color:'var(--muted)'}},job.crew.length+' crew')),
-    job.status==='Active'&&p.daysWorked>0&&e('div',null,e('div',{className:'jlc-pr'},e('span',null,p.shorn.toLocaleString()+' / '+job.totalSheep.toLocaleString()+' — Day '+p.daysWorked+' of '+job.daysAllocated),e('span',{className:'pct-lbl'},Math.round(p.pct)+'%')),e('div',{className:'pbar'},e('div',{className:`pbar-f ${cls}`,style:{width:p.pct+'%'}}))),
+    isDraft&&e('div',{className:'draft-hint'},'◌ Draft — not sent to crew yet. Tap to open and publish.'),
+    !isDraft&&job.status==='Active'&&p.daysWorked>0&&e('div',null,e('div',{className:'jlc-pr'},e('span',null,p.shorn.toLocaleString()+' / '+job.totalSheep.toLocaleString()+' — Day '+p.daysWorked+' of '+job.daysAllocated),e('span',{className:'pct-lbl'},Math.round(p.pct)+'%')),e('div',{className:'pbar'},e('div',{className:`pbar-f ${cls}`,style:{width:p.pct+'%'}}))),
     job.status==='Dispatched'&&e('div',{style:{fontSize:'12px',color:'var(--amber)',marginTop:'6px'}},'📱 Dispatched — starts '+fmtDateLong(job.startDate)),
     job.status==='Completed'&&e('div',{style:{fontSize:'12px',color:'var(--blue)',marginTop:'6px'}},'✓ '+p.shorn.toLocaleString()+' '+(job.type==='Crutching'?'crutched':'shorn'))
   );
@@ -1269,7 +1436,7 @@ function SummaryTab({job}){
   );
 }
 /* ── ADMIN TAB ── */
-function AdminTab({job,setJob,onEdit,onDeleteFarm,onDeleteJob}){
+function AdminTab({job,setJob,onEdit,onDeleteFarm,onDeleteJob,onPublish}){
   const [confirmDelete,setConfirmDelete]=useState(false);
   const [confirmDeleteJob,setConfirmDeleteJob]=useState(false);
   const [saved,setSaved]=useState(false);
@@ -1306,6 +1473,15 @@ function AdminTab({job,setJob,onEdit,onDeleteFarm,onDeleteJob}){
   );
 
   return e('div',{className:'admin-wrap'},
+    /* DRAFT → PUBLISH BANNER */
+    job.status==='Draft'&&onPublish&&e('div',{className:'draft-banner',style:{margin:'0 0 14px'}},
+      e('div',{className:'draft-banner-ic'},'◌'),
+      e('div',{className:'draft-banner-body'},
+        e('div',{className:'draft-banner-t'},'Draft — not yet sent'),
+        e('div',{className:'draft-banner-s'},'Publish activates the job and opens Send Cards. Draft crew never receive SMS.')
+      ),
+      e('button',{className:'draft-publish-btn',onClick:onPublish},'🚀 Publish')
+    ),
     /* JOB DETAILS */
     e('div',{className:'admin-section'},
       e('div',{className:'admin-sec-hdr'},e('div',{className:'admin-sec-title'},'Job Details')),
@@ -1654,7 +1830,7 @@ function EditFarmModal({farm,onSave,onClose}){
 }
 
 
-function OverviewTab({job,role,onSend,onBroadcast,canSend,onEditFarm}){
+function OverviewTab({job,role,onSend,onBroadcast,canSend,onEditFarm,isDraft,onPublish}){
   const farm=gf(job.farmId);
   const IC=({l,v,full})=>e('div',{className:'ic'+(full?' full-ic':'')},e('div',{className:'ic-l'},l),e('div',{className:'ic-v'},v));
   return e('div',null,
@@ -1664,7 +1840,11 @@ function OverviewTab({job,role,onSend,onBroadcast,canSend,onEditFarm}){
     farm&&e('div',{style:{padding:'0 16px',marginBottom:10}},e('div',{className:'ic'},e('div',{className:'ic-l'},'Farm Address'),e('div',{className:'ic-v'},farm.address),farm.notes&&e('div',{style:{fontSize:'12px',color:'var(--dim)',marginTop:4}},farm.notes),e('a',{href:'https://maps.google.com/?q='+encodeURIComponent(farm.address),target:'_blank',className:'map-link'},'📍 Open in Maps')),role==='admin'&&onEditFarm&&e('button',{className:'map-link',style:{marginTop:6,display:'block',color:'var(--amber)',cursor:'pointer',background:'none',border:'none',padding:0,fontSize:13},onClick:onEditFarm},'✏️ Edit farm details')),
     e('div',{className:'crew-hdr'},e('span',null,'Crew — '+job.crew.length)),
     job.crew.map(id=>{const c=gc(id);if(!c)return null;return e('div',{key:id,className:'crew-row'},e('div',{className:'cr-l'},e(Av,{name:c.name}),e('div',null,e('div',{className:'cr-name'},c.name,c.hasVehicle&&e('span',{className:'car-tag'},'🚗')),e('div',{className:'cr-role'},c.role))),role==='admin'&&e('div',{style:{fontFamily:'var(--m)',fontSize:'11px',color:'var(--dim)'}},c.phone));}),
-    /* SEND JOB CARDS — overview tab only (Edit 6) */
+    /* Draft → show Publish button instead of Send */
+    isDraft&&role==='admin'&&onPublish&&e('div',{className:'send-bar'},
+      e('button',{className:'send-btn',onClick:onPublish,style:{background:'linear-gradient(135deg,#dc2626,#991b1b)',boxShadow:'0 4px 16px rgba(220,38,38,.3)'}},'🚀 Publish Job & Send Cards to Crew')
+    ),
+    /* SEND JOB CARDS — overview tab only (not shown for drafts) */
     canSend&&e('div',{className:'send-bar'},
       e('button',{className:'send-btn',onClick:onSend,style:{marginBottom:8}},'📱 Send Job Cards to Crew'),
       role==='admin'&&e('button',{className:'send-btn',onClick:onBroadcast,style:{background:'linear-gradient(135deg,#7c3aed,#5b21b6)',boxShadow:'0 4px 16px rgba(124,58,237,.3)'}},'📢 Broadcast Update to Crew')
@@ -1673,7 +1853,7 @@ function OverviewTab({job,role,onSend,onBroadcast,canSend,onEditFarm}){
   );
 }
 /* ── JOB DETAIL ── */
-function JobDetailScreen({job,setJob,role,setRole,onBack,onSend,onBroadcast,onEdit,onDeleteJob,initialTab}){
+function JobDetailScreen({job,setJob,role,setRole,onBack,onSend,onBroadcast,onEdit,onDeleteJob,onPublish,initialTab}){
   const [tab,setTab]=useState(initialTab||'tallies');
   const [showEditFarm,setShowEditFarm]=useState(false);
   const farm=gf(job.farmId);
@@ -1688,30 +1868,44 @@ function JobDetailScreen({job,setJob,role,setRole,onBack,onSend,onBroadcast,onEd
   const defDate=dates.includes(todayStr)?todayStr:dates[dates.length-1];
   const [viewDate,setViewDate]=useState(defDate);
   const STATUS_SEQ=['Active','Completed','Charged Out'];
-  const cycleStatus=()=>setJob(prev=>({...prev,status:STATUS_SEQ[(STATUS_SEQ.indexOf(prev.status)+1)%STATUS_SEQ.length]}));
+  /* Draft is out of the cycle — Draft → Active only via explicit Publish action */
+  const cycleStatus=()=>setJob(prev=>{
+    if(prev.status==='Draft')return prev; /* guard — Publish button does this */
+    return {...prev,status:STATUS_SEQ[(STATUS_SEQ.indexOf(prev.status)+1)%STATUS_SEQ.length]};
+  });
+  const isDraft=job.status==='Draft';
   const tabs=[['tallies','Tallies'],['progress','Progress'],['overview','Overview'],['whiteboard','📋']];
   if(role==='admin'){tabs.push(['summary','Summary']);tabs.push(['admin','Admin']);}
-  const canSend=(role==='admin'||role==='shed_lead')&&job.status!=='Completed'&&job.status!=='Charged Out';
+  const canSend=(role==='admin'||role==='shed_lead')&&job.status!=='Completed'&&job.status!=='Charged Out'&&!isDraft;
   return e('div',null,
     e(TopBar,{role,setRole,onBack,backLabel:job.jobName||(farm?farm.name:'Jobs')}),
     e('div',{className:'screen'},
+      isDraft&&e('div',{className:'jd-draft-strip'},'◌ Draft — not sent to crew yet'),
       e('div',{className:'jd-hero'},
         e('div',{className:'jd-farm'},job.jobName||(farm?farm.name:'Unknown Farm')),
         e('div',{className:'jd-sub'},
-          role==='admin'
+          role==='admin'&&!isDraft
             ?e('button',{className:'status-btn',onClick:cycleStatus,title:'Tap to change status'},e(Bdg,{status:job.status}),e('span',{className:'status-hint'},'tap to change'))
             :e(Bdg,{status:job.status}),
           e('span',{className:'pill'},job.type),
           e('span',{style:{fontFamily:'var(--m)',fontSize:'11px',color:'rgba(255,255,255,.4)'}},'#'+job.jobNumber)
         )
       ),
+      isDraft&&role==='admin'&&onPublish&&e('div',{className:'draft-banner'},
+        e('div',{className:'draft-banner-ic'},'◌'),
+        e('div',{className:'draft-banner-body'},
+          e('div',{className:'draft-banner-t'},'This job is a draft'),
+          e('div',{className:'draft-banner-s'},'Crew have NOT been notified. Publish to activate the job and send job cards.')
+        ),
+        e('button',{className:'draft-publish-btn',onClick:onPublish},'🚀 Publish')
+      ),
       e('div',{className:'tabs'},tabs.map(([k,l])=>e('button',{key:k,className:`tab-btn${tab===k?' on':''}`,onClick:()=>setTab(k)},l))),
       tab==='tallies'&&e(TallyTab,{job,setJob,role,viewDate,setViewDate}),
       tab==='progress'&&e(ProgressTab,{job}),
-      tab==='overview'&&e(OverviewTab,{job,role,onSend,onBroadcast,canSend,onEditFarm:role==='admin'?()=>setShowEditFarm(true):null}),
+      tab==='overview'&&e(OverviewTab,{job,role,onSend,onBroadcast,canSend,onEditFarm:role==='admin'?()=>setShowEditFarm(true):null,isDraft,onPublish}),
       tab==='whiteboard'&&e(WhiteboardTab,{job,role}),
       tab==='summary'&&role==='admin'&&e(SummaryTab,{job}),
-      tab==='admin'&&role==='admin'&&e(AdminTab,{job,setJob,onEdit,onDeleteFarm:()=>{const farm=gf(job.farmId);if(!farm)return;dbDeleteFarm(farm.id);setFarmList(p=>{const n=p.filter(f=>f.id!==farm.id);syncLookups(n,CREW);return n;});},onDeleteJob}),
+      tab==='admin'&&role==='admin'&&e(AdminTab,{job,setJob,onEdit,onDeleteFarm:()=>{const farm=gf(job.farmId);if(!farm)return;dbDeleteFarm(farm.id);setFarmList(p=>{const n=p.filter(f=>f.id!==farm.id);syncLookups(n,CREW);return n;});},onDeleteJob,onPublish}),
       showEditFarm&&farm&&e(EditFarmModal,{farm,onSave:handleSaveFarm,onClose:()=>setShowEditFarm(false)})
     )
   );
@@ -2114,12 +2308,18 @@ function NewJobModal({onClose,onCreate,farmList,crewList,addFarm,addCrew}){
     return acc;
   },[]);
 
-  const doCreate=()=>{
+  const doCreate=(asDraft=false)=>{
     const days=rDays.current?.value?.trim();
     const sheep=rSheep.current?.value?.trim();
     const startDate=rStartDate.current?.value||localToday();
-    if(!farmId||!days||!sheep||selCrew.length===0){
-      setSubmitErr('Please select a farm, fill in days & sheep, and select at least one crew member.');
+    if(!farmId||!days||!sheep){
+      setSubmitErr(asDraft
+        ?'Please select a farm and fill in days & sheep. (Crew can be added later.)'
+        :'Please select a farm, fill in days & sheep, and select at least one crew member.');
+      return;
+    }
+    if(!asDraft&&selCrew.length===0){
+      setSubmitErr('Please select at least one crew member. To save without crew, use "Save as Draft".');
       return;
     }
     onCreate({
@@ -2132,7 +2332,7 @@ function NewJobModal({onClose,onCreate,farmList,crewList,addFarm,addCrew}){
       totalSheep:parseInt(sheep),
       evos,crutchingTrailer,transport,meals,
       accommodation:rAccomm.current?.value||'',
-      status:'Active',crew:selCrew,
+      status:asDraft?'Draft':'Active',crew:selCrew,
       jobPin:rJobPin.current?.value?.trim()||null,
       jobName:rJobName.current?.value?.trim()||'',
       rates:mkRates(),runs:{},shedTallies:{},baleTallies:{},baleBF:{},travelTallies:{},dayNotes:{}
@@ -2201,9 +2401,10 @@ function NewJobModal({onClose,onCreate,farmList,crewList,addFarm,addCrew}){
       ),
       submitErr&&e('div',{style:{padding:'0 16px 12px',fontSize:'13px',color:'var(--red)',fontWeight:600}},submitErr)
     ),
-    e('div',{style:{position:'fixed',bottom:0,left:0,right:0,background:'var(--card)',borderTop:'1px solid var(--border)',padding:'12px 16px',display:'flex',gap:10,zIndex:10}},
-      e('button',{className:'btn-g',onClick:onClose,style:{flex:1}},'Cancel'),
-      e('button',{className:'btn-p',onClick:doCreate,style:{flex:2}},'Create Job')
+    e('div',{style:{position:'fixed',bottom:0,left:0,right:0,background:'var(--card)',borderTop:'1px solid var(--border)',padding:'12px 16px',display:'flex',gap:8,zIndex:10}},
+      e('button',{className:'btn-g',onClick:onClose,style:{flex:0,padding:'13px 14px'}},'Cancel'),
+      e('button',{className:'btn-draft',onClick:()=>doCreate(true),style:{flex:1}},'◌ Save as Draft'),
+      e('button',{className:'btn-p',onClick:()=>doCreate(false),style:{flex:1.4}},'🚀 Publish')
     )
   );
 }
@@ -2345,7 +2546,7 @@ function EditJobScreen({job,onSave,onClose,farmList,addFarm,crewList,addCrew}){
 
 
 /* ── HOME ── */
-function HomeScreen({jobs,role,setRole,onJob,onNew,onDatabase,contractorName}){
+function HomeScreen({jobs,role,setRole,onJob,onNew,onDatabase,onSchedule,contractorName}){
   const [search,setSearch]=useState('');
   const [sort,setSort]=useState('date'); /* date | name | size | progress */
   const [showArchive,setShowArchive]=useState(false);
@@ -2364,6 +2565,7 @@ function HomeScreen({jobs,role,setRole,onJob,onNew,onDatabase,contractorName}){
   const q=search.toLowerCase().trim();
   const matches=j=>!q||jobName(j).toLowerCase().includes(q)||j.type.toLowerCase().includes(q);
 
+  const drafts=jobs.filter(j=>j.status==='Draft'&&matches(j));
   const active=jobs.filter(j=>j.status==='Active'&&matches(j)).sort(sortFn);
   const completed=jobs.filter(j=>j.status==='Completed'&&matches(j)).sort(sortFn);
   const charged=jobs.filter(j=>j.status==='Charged Out'&&matches(j)).sort(sortFn);
@@ -2390,7 +2592,7 @@ function HomeScreen({jobs,role,setRole,onJob,onNew,onDatabase,contractorName}){
   );
 
   return e('div',null,
-    e(TopBar,{role,setRole}),
+    e(TopBar,{role,setRole,onSchedule}),
     e('div',{className:'screen'},
       e(WeekBanner,{jobs,contractorName}),
 
@@ -2405,6 +2607,16 @@ function HomeScreen({jobs,role,setRole,onJob,onNew,onDatabase,contractorName}){
           e(SortBtn,{v:'size',lbl:'🐑 Size'}),
           e(SortBtn,{v:'progress',lbl:'📊 Progress'})
         )
+      ),
+
+      /* Drafts pill — only shown if drafts exist; directs to Schedule */
+      drafts.length>0&&onSchedule&&e('div',{className:'drafts-pill',onClick:onSchedule},
+        e('div',{className:'drafts-pill-ic'},'◌'),
+        e('div',{className:'drafts-pill-body'},
+          e('div',{className:'drafts-pill-t'},drafts.length+' draft'+(drafts.length>1?'s':'')+' planned'),
+          e('div',{className:'drafts-pill-s'},'Tap to open Schedule and publish')
+        ),
+        e('div',{className:'drafts-pill-arr'},'›')
       ),
 
       isEmpty&&e('div',{style:{margin:'32px 16px 0',padding:'32px 24px',background:'var(--card)',border:'2px dashed var(--border)',borderRadius:'var(--r)',textAlign:'center'}},
@@ -2572,6 +2784,231 @@ function DatabaseScreen({farmList,crewList,addFarm,addCrew,onClose,setFarmList,s
 }
 
 
+/* ════════════════════════
+   SCHEDULE SCREEN
+   Full-screen calendar with month + week views.
+   Week starts Monday always.
+═══════════════════════ */
+function ScheduleScreen({jobs,role,setRole,onBack,onJob,onNew,onNewDraft}){
+  const today=localToday();
+  const [view,setView]=useState('week'); /* 'week' | 'month' */
+  const [anchor,setAnchor]=useState(today); /* anchor date → determines visible window */
+
+  /* Build a map: date → list of jobs overlapping that date (with isStart flag) */
+  const jobsByDate=(()=>{
+    const map={};
+    jobs.forEach(job=>{
+      if(!job.startDate||!job.daysAllocated)return;
+      const days=jobDates(job);
+      days.forEach((d,idx)=>{
+        if(!map[d])map[d]=[];
+        map[d].push({job,isStart:idx===0,dayIdx:idx});
+      });
+    });
+    return map;
+  })();
+
+  const mondayStr=mondayOfWeek(anchor);
+  const weekDays=weekDatesFromMonday(mondayStr);
+
+  const [ay,am]=anchor.split('-').map(Number);
+  const monthCells=monthCellsFor(ay,am);
+
+  /* Range-wide jobs for stats strip */
+  const rangeStart=view==='week'?mondayStr:monthCells[0].date;
+  const rangeEnd=view==='week'?weekDays[6]:monthCells[monthCells.length-1].date;
+  const jobsInRange=jobs.filter(j=>{
+    if(!j.startDate||!j.daysAllocated)return false;
+    const end=addDays(j.startDate,j.daysAllocated-1);
+    /* overlap test */
+    return !(end<rangeStart||j.startDate>rangeEnd);
+  });
+  const totalSheep=jobsInRange.reduce((s,j)=>s+(j.totalSheep||0),0);
+  const totalCrew=new Set(jobsInRange.flatMap(j=>j.crew||[])).size;
+  const draftsInRange=jobsInRange.filter(j=>j.status==='Draft').length;
+
+  const prev=()=>{
+    if(view==='week')setAnchor(addDays(mondayStr,-7));
+    else{
+      const d=new Date(ay,am-1,1);d.setMonth(d.getMonth()-1);
+      setAnchor(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-01`);
+    }
+  };
+  const next=()=>{
+    if(view==='week')setAnchor(addDays(mondayStr,7));
+    else{
+      const d=new Date(ay,am-1,1);d.setMonth(d.getMonth()+1);
+      setAnchor(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-01`);
+    }
+  };
+  const goToday=()=>setAnchor(today);
+
+  /* Tile click — open job detail */
+  const onTileClick=(job)=>{
+    if(job.jobPin&&role!=='admin'){
+      onJob(job.id); /* parent will handle PIN gate */
+    } else {
+      onJob(job.id);
+    }
+  };
+
+  /* Month cell click: switch to week view anchored on that date */
+  const onMonthCellClick=(date)=>{
+    setAnchor(date);
+    setView('week');
+  };
+
+  /* Tile render helper */
+  const Tile=({job,isStart,dayIdx,compact})=>{
+    const farm=gf(job.farmId);
+    const name=job.jobName||(farm?farm.name:'Unknown');
+    const p=calcProg(job);
+    const isDraft=job.status==='Draft';
+    const isCont=!isStart; /* continuation day */
+    const type=job.type==='Crutching'?'cr':'sh';
+    return e('div',{className:`wk-tile ${statusClass(job.status)}${isCont?' cont':''}`,onClick:()=>onTileClick(job)},
+      e('div',{className:'wk-tile-name'},(isCont?'→ ':'')+name),
+      isDraft&&e('div',{className:'wk-tile-draft-tag'},'◌ Draft'),
+      !compact&&e('div',{className:'wk-tile-meta'},
+        e('span',null,'🐑 '+(job.totalSheep||0).toLocaleString()),
+        e('span',null,'👥 '+(job.crew?.length||0))
+      ),
+      !compact&&e('span',{className:'wk-tile-type '+type},job.type),
+      !compact&&!isDraft&&job.status==='Active'&&p.daysWorked>0&&e('div',null,
+        e('div',{className:'wk-tile-prog'},
+          e('span',null,p.shorn.toLocaleString()+' / '+(job.totalSheep||0).toLocaleString()),
+          e('span',null,Math.round(p.pct)+'%')
+        ),
+        e('div',{className:'wk-tile-pbar'},e('div',{className:'wk-tile-pbarf',style:{width:p.pct+'%'}}))
+      )
+    );
+  };
+
+  const weekRange=fmtWeekRange(mondayStr);
+  const monthTitle=fmtMonthYear(ay,am);
+
+  return e('div',null,
+    e(TopBar,{role,setRole,onBack,backLabel:'Home'}),
+    e('div',{className:'sched-wrap'},
+
+      /* Controls */
+      e('div',{className:'sched-controls'},
+        e('div',{className:'sched-hdr-row'},
+          e('div',null,
+            e('div',{className:'sched-range'},view==='week'?weekRange:monthTitle),
+            e('div',{className:'sched-range-sub'},view==='week'?'Week view — Mon to Sun':'Month view — tap a day for that week')
+          ),
+          e('div',{className:'sched-view-toggle'},
+            e('button',{className:`svt-btn${view==='week'?' on':''}`,onClick:()=>setView('week')},'Week'),
+            e('button',{className:`svt-btn${view==='month'?' on':''}`,onClick:()=>setView('month')},'Month')
+          )
+        ),
+        e('div',{className:'sched-nav-row'},
+          e('button',{className:'sched-nav-btn',onClick:prev},'‹ Prev'),
+          e('button',{className:'sched-nav-btn today',onClick:goToday},'Today'),
+          e('button',{className:'sched-nav-btn',onClick:next},'Next ›')
+        )
+      ),
+
+      /* Stats strip */
+      e('div',{className:'sched-stats'},
+        e('div',{className:'ss-cell'},e('div',{className:'ss-num'},jobsInRange.length),e('div',{className:'ss-lbl'},'Jobs')),
+        e('div',{className:'ss-cell'},e('div',{className:'ss-num'},totalSheep.toLocaleString()),e('div',{className:'ss-lbl'},'Sheep')),
+        e('div',{className:'ss-cell'},e('div',{className:'ss-num',style:draftsInRange>0?{color:'var(--red)'}:{}},draftsInRange),e('div',{className:'ss-lbl'},'Drafts'))
+      ),
+
+      /* Legend */
+      e('div',{className:'sched-legend'},
+        e('div',{className:'sl-item'},e('span',{className:'sl-dot a'}),'Active'),
+        e('div',{className:'sl-item'},e('span',{className:'sl-dot d'}),'Draft'),
+        e('div',{className:'sl-item'},e('span',{className:'sl-dot c'}),'Completed'),
+        e('div',{className:'sl-item'},e('span',{className:'sl-dot ch'}),'Charged'),
+        e('div',{className:'sl-item'},e('span',{className:'sl-dot di'}),'Dispatched')
+      ),
+
+      /* WEEK VIEW */
+      view==='week'&&e('div',{className:'week-board'},
+        e('div',{className:'week-scroll'},
+          e('div',{className:'week-grid'},
+            weekDays.map(d=>{
+              const [wy,wm,wd]=d.split('-').map(Number);
+              const dt=new Date(wy,wm-1,wd);
+              const dayName=dt.toLocaleDateString('en-AU',{weekday:'short'}).toUpperCase();
+              const isToday=d===today;
+              const dow=dt.getDay();
+              const isWeekend=dow===0||dow===6;
+              const dayJobs=jobsByDate[d]||[];
+              /* Sort: starts first, then continuations */
+              const sortedJobs=[...dayJobs].sort((a,b)=>{
+                if(a.isStart!==b.isStart)return a.isStart?-1:1;
+                return (a.job.startDate||'').localeCompare(b.job.startDate||'');
+              });
+              return e('div',{key:d,className:`wk-col${isToday?' today':''}${isWeekend&&!isToday?' weekend':''}`},
+                e('div',{className:'wk-col-hdr'},
+                  e('div',{className:'wk-day'},dayName),
+                  e('div',{className:'wk-dnum'},wd)
+                ),
+                e('div',{className:'wk-body'},
+                  sortedJobs.length===0
+                    ?e('div',{className:'wk-empty'},'—')
+                    :sortedJobs.map(({job,isStart,dayIdx})=>
+                        e(Tile,{key:job.id+'_'+d,job,isStart,dayIdx,compact:false})
+                      )
+                )
+              );
+            })
+          )
+        ),
+        jobsInRange.length===0&&e('div',{className:'sched-empty'},
+          e('div',{className:'sched-empty-ic'},'📅'),
+          e('div',{className:'sched-empty-title'},'No jobs this week'),
+          e('div',{className:'sched-empty-sub'},'Tap + below to plan a shed, or use Prev / Next to browse other weeks.')
+        )
+      ),
+
+      /* MONTH VIEW */
+      view==='month'&&e('div',{className:'month-board'},
+        e('div',{className:'month-grid'},
+          ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(d=>
+            e('div',{key:d,className:'month-day-hdr'},d)
+          ),
+          monthCells.map(({date,inMonth})=>{
+            const [,,cd]=date.split('-').map(Number);
+            const dayEntries=jobsByDate[date]||[];
+            /* In month view, prefer showing starting jobs first, continuation jobs if no starts */
+            const starts=dayEntries.filter(x=>x.isStart);
+            const continuations=dayEntries.filter(x=>!x.isStart);
+            const isToday=date===today;
+            return e('div',{key:date,className:`month-cell${!inMonth?' out-month':''}${isToday?' today':''}`,onClick:()=>onMonthCellClick(date)},
+              e('div',{className:'month-cell-num'},
+                e('span',null,cd),
+                isToday&&e('span',{className:'month-cell-today-dot'})
+              ),
+              starts.slice(0,3).map(({job})=>{
+                const farm=gf(job.farmId);
+                const nm=job.jobName||(farm?farm.name:'?');
+                return e('div',{key:job.id,className:`month-chip ${statusClass(job.status)}`,
+                  onClick:ev=>{ev.stopPropagation();onTileClick(job);}
+                },nm);
+              }),
+              starts.length>3&&e('div',{className:'month-more'},'+'+(starts.length-3)+' more'),
+              starts.length===0&&continuations.length>0&&continuations.slice(0,2).map(({job})=>{
+                const farm=gf(job.farmId);
+                const nm=job.jobName||(farm?farm.name:'?');
+                return e('div',{key:job.id+'_c',className:`month-chip ${statusClass(job.status)}`,style:{opacity:.55,fontStyle:'italic'},
+                  onClick:ev=>{ev.stopPropagation();onTileClick(job);}
+                },'→ '+nm);
+              })
+            );
+          })
+        )
+      )
+    ),
+    /* New-draft FAB — admin/lead only */
+    (role==='admin'||role==='shed_lead')&&onNewDraft&&e('button',{className:'fab',onClick:onNewDraft,title:'Plan a new job'},'+')
+  );
+}
+
 /* ── APP ── */
 const CONTRACTOR_NAME='Quality Shearing';
 const CONTRACTOR_URL='https://qualityshearing.vercel.app';
@@ -2609,7 +3046,9 @@ function App(){
   /* Load on mount */
   useEffect(()=>{
     loadPins(); /* load PIN hashes from Supabase on mount */
-    dbLoad().then(({jobs:j,farms:f,crew:c,fromCache})=>{
+    /* Flush any pending offline writes before loading — ensures Supabase is up to date */
+    const pendingOnMount=lsGet(LS_QUEUE)||[];
+    const mountLoad=()=>dbLoad().then(({jobs:j,farms:f,crew:c,fromCache})=>{
       syncLookups(f,c);
       setJobs(j);setFarmList(f);setCrewList(c);
       setLoadedFromCache(fromCache);
@@ -2637,6 +3076,11 @@ function App(){
         window.location.hash='';
       }
     }).catch(()=>{setLoading(false);isLoaded.current=true;});
+    if(pendingOnMount.length>0&&navigator.onLine){
+      flushQueue().then(()=>mountLoad()).catch(()=>mountLoad());
+    } else {
+      mountLoad();
+    }
   },[]);
 
   /* Sync global lookups whenever lists update */
@@ -2647,12 +3091,20 @@ function App(){
     const goOnline=async()=>{
       setIsOnline(true);
       setSaveStatus('syncing');
+      /* First: make sure every local job is queued before flushing */
+      const localJobs=lsGet(LS_JOBS)||[];
+      localJobs.forEach(job=>queueWrite('job',job.id,job));
+      /* Flush queue to Supabase */
       const n=await flushQueue().catch(()=>0);
-      setPendingCount((lsGet(LS_QUEUE)||[]).length);
+      const remaining=(lsGet(LS_QUEUE)||[]).length;
+      setPendingCount(remaining);
       if(n>0){setSaveStatus('saved');setTimeout(()=>setSaveStatus(''),2500);}
       else setSaveStatus('');
-      /* Re-fetch from Supabase to get latest */
-      dbLoad().then(({jobs:j,farms:f,crew:c})=>{setJobs(j);setFarmList(f);setCrewList(c);});
+      /* Only re-fetch from Supabase if queue is fully clear — otherwise our 
+         local data is newer and we must not overwrite it */
+      if(remaining===0){
+        dbLoad().then(({jobs:j,farms:f,crew:c})=>{setJobs(j);setFarmList(f);setCrewList(c);});
+      }
     };
     const goOffline=()=>{setIsOnline(false);setSaveStatus('');};
     window.addEventListener('online',goOnline);
@@ -2680,7 +3132,7 @@ function App(){
         setSaveStatus('offline');
         setPendingCount((lsGet(LS_QUEUE)||[]).length);
       }
-    },1500);
+    },800);
   },[jobs,isOnline]);
 
   const addFarm=async f=>{setFarmList(p=>{const n=[...p,f];syncLookups(n,CREW);return n;});await dbSaveFarm(f).catch(()=>{});};
@@ -2713,9 +3165,29 @@ function App(){
     lsSet(LS_LAST_RATES,job.rates); /* save rates for next job */
     setJobs(p=>[job,...p]);
     setShowNew(false);
-    setSelJobId(job.id);
-    setScreen('job');
+    /* If it's a draft, go to Schedule to see it in the plan; else open the job */
+    if(job.status==='Draft'){
+      setScreen('schedule');
+    } else {
+      setSelJobId(job.id);
+      setScreen('job');
+    }
     await dbSaveJob(job).catch(()=>{});
+  };
+  const goSchedule=()=>{
+    if(selJobId){const current=jobs.find(j=>j.id===selJobId);if(current)dbSaveJob(current).catch(()=>{});}
+    setScreen('schedule');setSelJobId(null);
+  };
+  /* Publish a draft: status→Active, save, open Send Cards modal on the job */
+  const publishJob=async()=>{
+    if(!selJob)return;
+    const updated={...selJob,status:'Active'};
+    setJobs(p=>p.map(j=>j.id===updated.id?updated:j));
+    await dbSaveJob(updated).catch(()=>{});
+    /* If crew exists, open SMS modal straight away so user can send cards */
+    if(updated.crew&&updated.crew.length>0){
+      setShowSMS(true);
+    }
   };
 
   /* Loading screen */
@@ -2744,8 +3216,9 @@ function App(){
 
   return e('div',{style:{paddingTop:!isOnline?20:0}},
     e(StatusBar),
-    screen==='home'&&e(HomeScreen,{jobs,role,setRole:persistRole,onJob:goJob,onNew:()=>setShowNew(true),onDatabase:()=>setShowDatabase(true),contractorName:CONTRACTOR_NAME}),
-    screen==='job'&&selJob&&e(JobDetailScreen,{job:selJob,setJob:setSelJob,role,setRole:persistRole,onBack:goHome,onSend:()=>setShowSMS(true),onBroadcast:()=>setShowBroadcast(true),gfl,gcl,onEdit:()=>setShowEdit(true),onDeleteJob:async()=>{await dbDeleteJob(selJob.id);setJobs(p=>p.filter(j=>j.id!==selJob.id));goHome();},initialTab:deepLinkTab,key:selJobId+(deepLinkTab||'')}),
+    screen==='home'&&e(HomeScreen,{jobs,role,setRole:persistRole,onJob:goJob,onNew:()=>setShowNew(true),onDatabase:()=>setShowDatabase(true),onSchedule:goSchedule,contractorName:CONTRACTOR_NAME}),
+    screen==='schedule'&&e(ScheduleScreen,{jobs,role,setRole:persistRole,onBack:goHome,onJob:goJob,onNew:()=>setShowNew(true),onNewDraft:()=>setShowNew(true)}),
+    screen==='job'&&selJob&&e(JobDetailScreen,{job:selJob,setJob:setSelJob,role,setRole:persistRole,onBack:goHome,onSend:()=>setShowSMS(true),onBroadcast:()=>setShowBroadcast(true),gfl,gcl,onEdit:()=>setShowEdit(true),onPublish:publishJob,onDeleteJob:async()=>{await dbDeleteJob(selJob.id);setJobs(p=>p.filter(j=>j.id!==selJob.id));goHome();},initialTab:deepLinkTab,key:selJobId+(deepLinkTab||'')}),
     showSMS&&selJob&&e(SMSModal,{job:selJob,onClose:()=>{setShowSMS(false);setPreviewId(null);},onPreview:id=>setPreviewId(id),farmList,crewList}),
     showBroadcast&&selJob&&e(BroadcastModal,{job:selJob,onClose:()=>setShowBroadcast(false),farmList,crewList}),
     previewId&&selJob&&e(JobCardView,{job:selJob,crewId:previewId,onClose:()=>setPreviewId(null),gfl,gcl}),
