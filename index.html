@@ -1495,6 +1495,23 @@ function SummaryTab({job}){
   );
 }
 /* ── ADMIN TAB ── */
+/* Rate-input components — defined at module scope so they survive AdminTab re-renders
+   without remounting and blowing away input focus. */
+function RInp({k,draft,onSet,placeholder,step,prefix,suffix,hi}){
+  return e('div',{className:'rate-inp-row'},
+    prefix&&e('span',{className:'rate-prefix'},prefix),
+    e('input',{type:'number',className:`rate-inp${hi?' hi':''}`,value:draft[k]??'',placeholder,step:step||'0.05',
+      onChange:ev=>onSet(k,ev.target.value===''?0:parseFloat(ev.target.value)||0)}),
+    suffix&&e('span',{style:{fontSize:11,color:'var(--muted)',marginLeft:4}},suffix)
+  );
+}
+function RCell({lbl,k,draft,onSet,hi,prefix,suffix,step}){
+  return e('div',{className:`rate-cell${hi?' amber-bg':''}`},
+    e('div',{className:`rate-lbl${hi?' hi':''}`},lbl),
+    e(RInp,{k,draft,onSet,prefix,suffix,hi,step:step||'0.05'})
+  );
+}
+
 function AdminTab({job,setJob,onEdit,onDeleteFarm,onDeleteJob,onPublish}){
   const [confirmDelete,setConfirmDelete]=useState(false);
   const [confirmDeleteJob,setConfirmDeleteJob]=useState(false);
@@ -1519,17 +1536,6 @@ function AdminTab({job,setJob,onEdit,onDeleteFarm,onDeleteJob,onPublish}){
   const loadingCrew=[...shearers,...crutchers]; /* shearers + crutchers get $/head loadings */
   const shedStaff=job.crew.filter(id=>gc(id)&&gc(id).role!=='Shearer'&&gc(id).role!=='Crutcher');
   const DAY_FULL_=['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
-
-  const RInp=({k,placeholder,step,prefix,suffix,hi})=>e('div',{className:'rate-inp-row'},
-    prefix&&e('span',{className:'rate-prefix'},prefix),
-    e('input',{type:'number',className:`rate-inp${hi?' hi':''}`,value:draft[k]??'',placeholder,step:step||'0.05',
-      onChange:ev=>set(k,ev.target.value===''?0:parseFloat(ev.target.value)||0)}),
-    suffix&&e('span',{style:{fontSize:11,color:'var(--muted)',marginLeft:4}},suffix)
-  );
-  const RCell=({lbl,k,hi,prefix,suffix})=>e('div',{className:`rate-cell${hi?' amber-bg':''}`},
-    e('div',{className:`rate-lbl${hi?' hi':''}`},lbl),
-    e(RInp,{k,prefix,suffix,hi,step:'0.05'})
-  );
 
   return e('div',{className:'admin-wrap'},
     /* DRAFT → PUBLISH BANNER */
@@ -1559,19 +1565,19 @@ function AdminTab({job,setJob,onEdit,onDeleteFarm,onDeleteJob,onPublish}){
     /* SHEARER BASE RATES */
     e('div',{className:'admin-section'},
       e('div',{className:'admin-sec-hdr'},e('div',{className:'admin-sec-title'},'Shearer Base Rates')),
-      e('div',{className:'rate-grid'},e(RCell,{lbl:'Shearing $/head',k:'shearingPerHead',prefix:'$'}),e(RCell,{lbl:'Crutching $/head',k:'crutchingPerHead',prefix:'$'}))
+      e('div',{className:'rate-grid'},e(RCell,{lbl:'Shearing $/head',k:'shearingPerHead',prefix:'$',draft,onSet:set}),e(RCell,{lbl:'Crutching $/head',k:'crutchingPerHead',prefix:'$',draft,onSet:set}))
     ),
 
     /* SHED STAFF RATES */
     e('div',{className:'admin-section'},
       e('div',{className:'admin-sec-hdr'},e('div',{className:'admin-sec-title'},'Shed Staff Rates'),e('div',{className:'admin-sec-sub'},'Per run. Presser switches to per-bale at threshold.')),
       e('div',{className:'rate-grid'},
-        e(RCell,{lbl:'Wool Handler',k:'woolHandlerPerRun',prefix:'$'}),
-        e(RCell,{lbl:'Classer',k:'classerPerRun',prefix:'$'}),
-        e(RCell,{lbl:'Penner',k:'pennerPerRun',prefix:'$'}),
-        e(RCell,{lbl:'Presser (per run)',k:'presserPerRun',prefix:'$'}),
-        e(RCell,{lbl:'Presser $/bale',k:'presserPerBale',prefix:'$',hi:true}),
-        e(RCell,{lbl:'Bale threshold/day',k:'baleThreshold',hi:true})
+        e(RCell,{lbl:'Wool Handler',k:'woolHandlerPerRun',prefix:'$',draft,onSet:set}),
+        e(RCell,{lbl:'Classer',k:'classerPerRun',prefix:'$',draft,onSet:set}),
+        e(RCell,{lbl:'Penner',k:'pennerPerRun',prefix:'$',draft,onSet:set}),
+        e(RCell,{lbl:'Presser (per run)',k:'presserPerRun',prefix:'$',draft,onSet:set}),
+        e(RCell,{lbl:'Presser $/bale',k:'presserPerBale',prefix:'$',hi:true,draft,onSet:set}),
+        e(RCell,{lbl:'Bale threshold/day',k:'baleThreshold',hi:true,draft,onSet:set})
       )
     ),
 
@@ -1681,8 +1687,8 @@ function AdminTab({job,setJob,onEdit,onDeleteFarm,onDeleteJob,onPublish}){
     e('div',{className:'admin-section'},
       e('div',{className:'admin-sec-hdr'},e('div',{className:'admin-sec-title'},'Farmer Charge-out Rates'),e('div',{className:'admin-sec-sub'},'What the contractor charges the farmer — separate from crew pay rates')),
       e('div',{className:'rate-grid'},
-        e(RCell,{lbl:'Shearing $/head',k:'farmerShearingRate',prefix:'$'}),
-        e(RCell,{lbl:'Crutching $/head',k:'farmerCrutchingRate',prefix:'$'})
+        e(RCell,{lbl:'Shearing $/head',k:'farmerShearingRate',prefix:'$',draft,onSet:set}),
+        e(RCell,{lbl:'Crutching $/head',k:'farmerCrutchingRate',prefix:'$',draft,onSet:set})
       )
     ),
 
