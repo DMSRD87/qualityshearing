@@ -1,72 +1,138 @@
-/* myGang — SMS Edge Function
-   Credentials stored in Vercel Environment Variables — never in code
-   Required env vars (set in Vercel dashboard):
-     TWILIO_SID
-     TWILIO_TOKEN
-     TWILIO_FROM
-*/
+/**
+ * myGang SMS send endpoint — batch-aware with AU number normalisation.
+ *
+ * Accepts payload shape:  { messages: [ {to, body}, ... ] }
+ * Returns:                { sent, failed, results: [...] }
+ *
+ * Env vars required on Vercel:
+ *   TWILIO_SID      (Account SID — starts with AC...)
+ *   TWILIO_TOKEN    (Auth token)
+ *   TWILIO_FROM     (Sender number in E.164 format, e.g. +61XXXXXXXXXX)
+ */
 
-export default async function handler(req, res) {
+/**
+ * Normalise any AU mobile input to E.164 (+61XXXXXXXXX).
+ * Accepts: +61 4XX XXX XXX, 61 4XX..., 04XX XXX XXX, 4XX XXX XXX.
+ * Whitespace, dashes and parens are stripped before the rules apply.
+ */
+function normaliseAU(raw) {
+  if (!raw) return null;
+  const cleaned = String(raw).replace(/[^\d+]/g, '');
+  if (!cleaned) return null;
+
+  // Already E.164 and AU-shaped
+  if (cleaned.startsWith('+61') && cleaned.length === 12) return cleaned;
+
+  // "61..." without plus
+  if (cleaned.startsWith('61') && cleaned.length === 11) return '+' + cleaned;
+
+  // "04XXXXXXXX" (10 digits)
+  if (cleaned.startsWith('04') && cleaned.length === 10) {
+    return '+61' + cleaned.slice(1);
+  }
+
+  // "4XXXXXXXX" (9 digits) — bare mobile
+  if (cleaned.startsWith('4') && cleaned.length === 9) {
+    return '+61' + cleaned;
+  }
+
+  // Anything else: let Twilio reject it with a clear error
+  return null;
+}
+
+module.exports = async (req, res) => {
   if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
+    res.status(405).json({ error: 'Method not allowed' });
+    return;
   }
 
-  const TWILIO_SID = process.env.TWILIO_SID;
-  const TWILIO_TOKEN = process.env.TWILIO_TOKEN;
-  const TWILIO_FROM = process.env.TWILIO_FROM;
+  const sid = process.env.TWILIO_SID;
+  const token = process.env.TWILIO_TOKEN;
+  const from = process.env.TWILIO_FROM;
 
-  const { messages } = req.body;
-
-  if (!messages || !Array.isArray(messages) || messages.length === 0) {
-    return res.status(400).json({ error: 'No messages provided' });
+  if (!sid || !token || !from) {
+    res.status(500).json({
+      error: 'Server not configured',
+      detail: 'Missing TWILIO_SID, TWILIO_TOKEN or TWILIO_FROM env vars',
+    });
+    return;
   }
+
+  // Accept EITHER the new batch format OR the legacy single-message format,
+  // so older deployments that still send {to, body} keep working.
+  let messages = [];
+  try {
+    const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
+    if (Array.isArray(body?.messages)) {
+      messages = body.messages;
+    } else if (body?.to && body?.body) {
+      messages = [{ to: body.to, body: body.body }];
+    } else {
+      res.status(400).json({ error: 'Invalid payload — expected {messages: [...]} or {to, body}' });
+      return;
+    }
+  } catch (e) {
+    res.status(400).json({ error: 'Invalid JSON body', detail: String(e) });
+    return;
+  }
+
+  if (messages.length === 0) {
+    res.status(400).json({ error: 'No messages to send' });
+    return;
+  }
+
+  const auth = 'Basic ' + Buffer.from(sid + ':' + token).toString('base64');
+  const url = `https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`;
 
   const results = [];
+  let sent = 0;
+  let failed = 0;
 
-  for (const msg of messages) {
-    const { to, body } = msg;
-
-    if (!to || !body) {
-      results.push({ to, status: 'error', error: 'Missing to or body' });
+  for (const m of messages) {
+    const toNorm = normaliseAU(m.to);
+    if (!toNorm) {
+      failed++;
+      results.push({ to: m.to, ok: false, error: 'Invalid AU mobile: ' + m.to });
+      continue;
+    }
+    if (!m.body || !String(m.body).trim()) {
+      failed++;
+      results.push({ to: toNorm, ok: false, error: 'Empty message body' });
       continue;
     }
 
-    /* Format Australian numbers to E.164 */
-    let phone = to.replace(/\s/g, '');
-    if (phone.startsWith('04')) phone = '+61' + phone.slice(1);
-    if (phone.startsWith('61') && !phone.startsWith('+')) phone = '+' + phone;
+    const form = new URLSearchParams();
+    form.append('To', toNorm);
+    form.append('From', from);
+    form.append('Body', String(m.body));
 
     try {
-      const response = await fetch(
-        `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Messages.json`,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': 'Basic ' + Buffer.from(`${TWILIO_SID}:${TWILIO_TOKEN}`).toString('base64'),
-            'Content-Type': 'application/x-www-form-urlencoded',
-          },
-          body: new URLSearchParams({
-            To: phone,
-            From: TWILIO_FROM,
-            Body: body,
-          }).toString(),
-        }
-      );
-
-      const data = await response.json();
-
-      if (response.ok) {
-        results.push({ to: phone, status: 'sent', sid: data.sid });
+      const twilioRes = await fetch(url, {
+        method: 'POST',
+        headers: {
+          Authorization: auth,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: form.toString(),
+      });
+      const data = await twilioRes.json().catch(() => ({}));
+      if (twilioRes.ok) {
+        sent++;
+        results.push({ to: toNorm, ok: true, sid: data.sid });
       } else {
-        results.push({ to: phone, status: 'error', error: data.message });
+        failed++;
+        results.push({
+          to: toNorm,
+          ok: false,
+          error: data.message || ('Twilio returned ' + twilioRes.status),
+          code: data.code,
+        });
       }
     } catch (err) {
-      results.push({ to: phone, status: 'error', error: err.message });
+      failed++;
+      results.push({ to: toNorm, ok: false, error: 'Network/Twilio error: ' + String(err) });
     }
   }
 
-  const sent = results.filter(r => r.status === 'sent').length;
-  const failed = results.filter(r => r.status === 'error').length;
-
-  return res.status(200).json({ sent, failed, results });
-}
+  res.status(200).json({ sent, failed, results });
+};
