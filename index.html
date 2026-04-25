@@ -806,47 +806,78 @@ function calcPeriodStats(job,period){
 }
 /* PAY SUMMARY */
 const pad=(str,len)=>String(str).padEnd(len,' ');
-function generateFarmerInvoice(job){
-  const farm=gf(job.farmId);const rates=job.rates||{};
+function generateFarmRecord(job){
+  const farm=gf(job.farmId);
   const shIds=job.crew.filter(id=>gc(id)&&(gc(id).role==='Shearer'||gc(id).role==='Crutcher'));
+  const shedIds=job.crew.filter(id=>gc(id)&&gc(id).role!=='Shearer'&&gc(id).role!=='Crutcher');
   const dash='\u2500'.repeat(56);
+  const dashEq='\u2550'.repeat(56);
   /* Group mobs by type+desc across entire job */
-  const groups={};
+  const shornGroups={};const crutchGroups={};
   Object.values(job.runs||{}).forEach(dayRuns=>{dayRuns.forEach(run=>{mobsOf(run).forEach(mob=>{
-    const key=mob.type+'|'+(mob.desc||'Unspecified');
     const cnt=shIds.reduce((s,id)=>s+(mob.counts[id]||0),0);if(!cnt)return;
-    const chargeRate=mob.rateOverride!=null?mob.rateOverride:(mob.type==='Shearing'?rates.farmerShearingRate||6.50:rates.farmerCrutchingRate||2.00);
-    if(!groups[key])groups[key]={type:mob.type,desc:mob.desc||'Unspecified',count:0,rate:chargeRate};
-    groups[key].count+=cnt;
+    const desc=mob.desc||'Unspecified';
+    const target=mob.type==='Shearing'?shornGroups:crutchGroups;
+    if(!target[desc])target[desc]=0;
+    target[desc]+=cnt;
   });});});
-  /* Presser bales for info */
+  /* Total bales */
   const pressers=job.crew.filter(id=>gc(id)?.role==='Presser');
   const totalBales=pressers.reduce((s,id)=>s+Object.values(job.baleTallies[id]||{}).reduce((a,b)=>a+b,0)+(job.baleBF[id]||0),0);
+  /* Days actually worked */
+  const datesWorked=Object.keys(job.runs||{}).filter(d=>(job.runs[d]||[]).some(run=>mobsOf(run).some(mob=>shIds.some(id=>(mob.counts[id]||0)>0)))).sort();
+  /* Shed staff breakdown by role */
+  const staffByRole={};
+  shedIds.forEach(id=>{const c=gc(id);if(!c)return;if(!staffByRole[c.role])staffByRole[c.role]=0;staffByRole[c.role]++;});
   const today=localToday();
   const L=[];
-  L.push('INVOICE');
-  L.push('myGang — Digital Tally Book');
-  L.push('Date: '+fmtDate(today));
+  L.push(dashEq);
+  L.push('                    FARM RECORD');
+  L.push(dashEq);
   L.push('');
-  if(farm){L.push('To:  '+farm.name);L.push('     '+farm.address);}
-  L.push('');
-  L.push('Job: #'+job.jobNumber+' \u2014 '+job.type);
-  L.push('     From: '+fmtDate(job.startDate)+'   ('+job.daysAllocated+' days allocated)');
+  if(farm){L.push('To:     '+farm.name);L.push('        '+farm.address);L.push('');}
+  L.push('Job #:  '+job.jobNumber+' \u2014 '+job.type);
+  L.push('From:   '+fmtDate(job.startDate)+'   ('+job.daysAllocated+' days allocated)');
+  if(datesWorked.length>0){
+    const range=datesWorked.length===1?fmtDate(datesWorked[0]):fmtDate(datesWorked[0])+' \u2014 '+fmtDate(datesWorked[datesWorked.length-1]);
+    L.push('Worked: '+range+'   ('+datesWorked.length+' day'+(datesWorked.length!==1?'s':'')+')');
+  }
+  L.push('Status: '+job.status.toUpperCase());
+  L.push('');L.push(dash);L.push('WORK COMPLETED');L.push(dash);L.push('');
+  /* Sheep shorn */
+  const totalShorn=Object.values(shornGroups).reduce((a,b)=>a+b,0);
+  if(totalShorn>0){
+    L.push('Sheep shorn:');
+    Object.entries(shornGroups).forEach(([desc,cnt])=>{L.push('  '+pad(desc,34)+pad(cnt.toLocaleString(),6)+' head');});
+    if(Object.keys(shornGroups).length>1){
+      L.push('  '+pad('',34)+'\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500');
+      L.push('  '+pad('Total shorn:',34)+pad(totalShorn.toLocaleString(),6)+' head');
+    }
+    L.push('');
+  }
+  /* Sheep crutched */
+  const totalCrutch=Object.values(crutchGroups).reduce((a,b)=>a+b,0);
+  if(totalCrutch>0){
+    L.push('Sheep crutched:');
+    Object.entries(crutchGroups).forEach(([desc,cnt])=>{L.push('  '+pad(desc,34)+pad(cnt.toLocaleString(),6)+' head');});
+    if(Object.keys(crutchGroups).length>1){
+      L.push('  '+pad('',34)+'\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500');
+      L.push('  '+pad('Total crutched:',34)+pad(totalCrutch.toLocaleString(),6)+' head');
+    }
+    L.push('');
+  }
+  /* Wool baled */
+  if(totalBales>0){L.push('Wool baled:'+pad('',25)+pad(totalBales.toLocaleString(),6)+' bales');L.push('');}
+  L.push(dash);L.push('CREW ON SITE');L.push(dash);L.push('');
+  L.push('Shearers:    '+shIds.length);
+  if(shedIds.length>0){
+    const roleStr=Object.entries(staffByRole).map(([r,n])=>n+' '+r.toLowerCase()+(n!==1?'s':'')).join(', ');
+    L.push('Shed staff:  '+shedIds.length+' ('+roleStr+')');
+  }
+  if(datesWorked.length>0)L.push('Days worked: '+datesWorked.length);
   L.push('');L.push(dash);
-  L.push(pad('Description',32)+pad('Qty',9)+pad('Rate',10)+'Amount');
-  L.push(dash);
-  let totalDue=0;
-  Object.values(groups).forEach(g=>{
-    const amt=g.count*g.rate;totalDue+=amt;
-    L.push(pad(g.type+' \u2014 '+g.desc,32)+pad(g.count.toLocaleString(),9)+pad('$'+g.rate.toFixed(2),10)+'$'+amt.toFixed(2));
-  });
-  if(totalBales>0)L.push(pad('Bales pressed (info only)',32)+pad(totalBales,9)+pad('\u2014',10)+'\u2014');
-  L.push(dash);L.push('');
-  const totalShorn=Object.values(groups).reduce((s,g)=>s+g.count,0);
-  L.push('Total sheep: '+totalShorn.toLocaleString());L.push('');
-  L.push('TOTAL DUE:   $'+totalDue.toFixed(2));
-  L.push('');L.push(dash);
-  L.push('Payment terms: 7 days from invoice date');
+  L.push('Generated by myGang \u2014 '+fmtDate(today));
+  L.push(CONTRACTOR_NAME);
   return L.join('\n');
 }
 function generateSummary(job,period){
@@ -858,9 +889,9 @@ function generateSummary(job,period){
   const shornBy={};shIds.forEach(id=>{shornBy[id]={sh:0,shEarn:0,cr:0,crEarn:0,mobs:[]};});
   Object.entries(job.runs||{}).forEach(([date,dayRuns])=>{if(!inP(date))return;dayRuns.forEach(run=>{mobsOf(run).forEach(mob=>{const hasOverride=mob.rateOverride!=null;const br=hasOverride?mob.rateOverride:(mob.type==='Shearing'?rates.shearingPerHead:rates.crutchingPerHead)||0;shIds.forEach(id=>{const cnt=mob.counts[id]||0;if(!cnt)return;const load=(rates.shearerLoadings||{})[id]||0;const loadType=(rates.loadingType||{})[id]||'individual';const effRate=loadType==='team'?br:(br+load);const earn=cnt*effRate;if(mob.type==='Shearing'){shornBy[id].sh+=cnt;shornBy[id].shEarn+=earn;}else{shornBy[id].cr+=cnt;shornBy[id].crEarn+=earn;}/* merge into same mob bucket if same type/desc/rate */const key=mob.type+'|'+(mob.desc||'')+'|'+effRate.toFixed(4)+'|'+(hasOverride?'O':'B');let bucket=shornBy[id].mobs.find(m=>m.key===key);if(!bucket){bucket={key,type:mob.type,desc:mob.desc||'',rate:effRate,hasOverride,count:0,earn:0};shornBy[id].mobs.push(bucket);}bucket.count+=cnt;bucket.earn+=earn;});});});});
   const tr=rates.travelRate||{};
-  const travelDayCount=id=>Object.values((job.travelTallies||{})[id]||{}).reduce((a,b)=>a+(b?1:0),0);
+  const travelDayCount=id=>Object.entries((job.travelTallies||{})[id]||{}).filter(([d,v])=>v&&inP(d)).length;
   const trvl=id=>travelDayCount(id)*(tr[id]||0);
-  let totalShEarn=0,totalShedEarn=0,totalTravel=0;
+  let totalShEarn=0,totalShedEarn=0,totalTravel=0,totalTeamLoad=0;
   const L=[];
   L.push('PAY SUMMARY \u2014 '+(farm?farm.name.toUpperCase():'JOB'));
   if(farm)L.push('Address: '+farm.address+'  |  From: '+fmtDate(job.startDate));
@@ -873,14 +904,14 @@ function generateSummary(job,period){
     const taxPct=parseFloat(det.taxRate||0)||0;
     const baseLoad=(rates.shearerLoadings||{})[id]||0;
     const loadType=(rates.loadingType||{})[id]||'individual';
-    /* Team loading: applied to full team count, not individual */
+    /* Team loading: applied to team count for THIS PERIOD only (filters by inP) */
     const teamTotal=loadType==='team'?shIds.reduce((s,sid)=>{
-      let t=0;Object.values(job.runs||{}).forEach(rs=>rs.forEach(run=>mobsOf(run).forEach(mob=>{t+=mob.counts[sid]||0;})));return s+t;
+      let t=0;Object.entries(job.runs||{}).forEach(([date,rs])=>{if(!inP(date))return;rs.forEach(run=>mobsOf(run).forEach(mob=>{t+=mob.counts[sid]||0;}));});return s+t;
     },0):0;
     const teamLoadEarn=loadType==='team'&&baseLoad>0?baseLoad*teamTotal:0;
     const travel=trvl(id);const gross=s.shEarn+s.crEarn+travel+(loadType==='team'?teamLoadEarn:0);
     const taxAmt=taxPct>0?gross*(taxPct/100):0;
-    totalShEarn+=s.shEarn+s.crEarn;totalTravel+=travel;
+    totalShEarn+=s.shEarn+s.crEarn;totalTravel+=travel;totalTeamLoad+=teamLoadEarn;
     L.push('');L.push(c.name+' \u2014 '+(det.role||c.role));
     /* Split mobs by type. If a type has >1 mob OR any override, show detailed breakdown; else simple one-liner. */
     const shMobs=s.mobs.filter(m=>m.type==='Shearing');
@@ -934,10 +965,11 @@ function generateSummary(job,period){
     if(taxPct>0){L.push('  Tax withheld ('+taxPct+'%): -$'+taxAmt.toFixed(2));L.push('  NET PAY: $'+(gross-taxAmt).toFixed(2));}
   });
   const totalShorn=shIds.reduce((s,id)=>s+(shornBy[id].sh+shornBy[id].cr),0);
-  const jobTotal=totalShEarn+totalShedEarn+totalTravel;
+  const jobTotal=totalShEarn+totalTeamLoad+totalShedEarn+totalTravel;
   L.push('');L.push(dash);L.push('');L.push('CONTRACTOR TOTALS');L.push(dash);L.push('');
   L.push('Total sheep: '+totalShorn.toLocaleString());
   L.push('Shearer wages:    $'+totalShEarn.toFixed(2));
+  if(totalTeamLoad>0)L.push('Team loading:     $'+totalTeamLoad.toFixed(2));
   L.push('Shed staff wages: $'+totalShedEarn.toFixed(2));
   L.push('Travel:           $'+totalTravel.toFixed(2));
   L.push('');L.push('JOB TOTAL:        $'+jobTotal.toFixed(2));
@@ -1413,12 +1445,14 @@ function TallyTab({job,setJob,role,viewDate,setViewDate}){
   );
 }
 /* ── SUMMARY TAB ── */
-function SummaryTab({job}){
+function SummaryTab({job,role}){
   const rates=job.rates||{};
   const payDayOfWeek=rates.payDayOfWeek!=null?rates.payDayOfWeek:4;
   const payFrequency=rates.payFrequency||'weekly';
   const todayStr=localToday();
   const periodLen=payFrequency==='fortnightly'?14:7;
+  const canSeePay=role==='admin';
+  const canShare=role==='admin'||role==='shed_lead';
 
   /* Find the offset of the most recent period that actually has data */
   function findBestOffset(){
@@ -1433,34 +1467,56 @@ function SummaryTab({job}){
   }
 
   const [offset,setOffset]=useState(()=>findBestOffset());
-  const [view,setView]=useState('crew');
+  const [view,setView]=useState(canSeePay?'crew':'record');
   const [copied,setCopied]=useState(false);
-  const [copiedInv,setCopiedInv]=useState(false);
+  const [copiedRec,setCopiedRec]=useState(false);
+  const [shared,setShared]=useState(false);
 
   const period=payFrequency==='shed'?null:getPeriodByOffset(todayStr,payDayOfWeek,offset,payFrequency);
   const isCurrentPeriod=offset===0;
   const isFuture=period&&period.start>todayStr;
   const stats=period?calcPeriodStats(job,period):{shorn:0,totalEarn:0};
-  const crewText=generateSummary(job,period);
-  const invText=generateFarmerInvoice(job);
+  const crewText=canSeePay?generateSummary(job,period):'';
+  const recordText=generateFarmRecord(job);
   const copy=(txt,set)=>{navigator.clipboard.writeText(txt).then(()=>{set(true);setTimeout(()=>set(false),2000);}).catch(()=>{});};
+  const farmName=gf(job.farmId)?gf(job.farmId).name:'Job';
+  const printText=(text,title)=>{
+    const w=window.open('','_blank','width=800,height=900');
+    if(!w){alert('Pop-up blocked. Please allow pop-ups to print.');return;}
+    const safe=text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    w.document.write('<!DOCTYPE html><html><head><title>'+title+'</title>'+
+      '<style>body{font-family:"Courier New","Lucida Console",monospace;font-size:13px;padding:30px;max-width:640px;margin:0 auto;line-height:1.55;color:#1a1e2e;background:#fff}'+
+      'pre{white-space:pre-wrap;word-wrap:break-word;margin:0;font-family:inherit}'+
+      '@media print{body{padding:15px}}</style>'+
+      '</head><body><pre>'+safe+'</pre></body></html>');
+    w.document.close();
+    setTimeout(()=>{try{w.focus();w.print();}catch(e){}},300);
+  };
+  const printRecord=()=>printText(recordText,'Farm Record \u2014 '+farmName);
+  const shareRecord=async()=>{
+    if(navigator.share){
+      try{await navigator.share({title:'Farm Record \u2014 '+farmName,text:recordText});setShared(true);setTimeout(()=>setShared(false),2000);}
+      catch(e){/* user cancelled */}
+    }else{
+      copy(recordText,setShared);
+    }
+  };
   const freqLabel=payFrequency==='weekly'?'Weekly':payFrequency==='fortnightly'?'Fortnightly':'End of Shed';
   const prevStart=period?addDays(period.start,-periodLen):null;
   const nextStart=period?addDays(period.start,periodLen):null;
   const btnLabel=d=>{const [,mo,dy]=d.split('-').map(Number);const dt=new Date(d.split('-')[0],mo-1,dy);const dn=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];return dn[dt.getDay()]+' '+String(dy).padStart(2,'0')+'/'+String(mo).padStart(2,'0');};
   const shIds=job.crew.filter(id=>gc(id)&&(gc(id).role==='Shearer'||gc(id).role==='Crutcher'));
   const totalJobShorn=Object.values(job.runs||{}).flat().flatMap(r=>mobsOf(r)).reduce((s,mob)=>s+shIds.reduce((a,id)=>a+(mob.counts[id]||0),0),0);
-  const totalDue=Object.values(job.runs||{}).flat().flatMap(r=>mobsOf(r)).reduce((s,mob)=>{const cnt=shIds.reduce((a,id)=>a+(mob.counts[id]||0),0);const r2=mob.rateOverride!=null?mob.rateOverride:(mob.type==='Shearing'?rates.farmerShearingRate||6.50:rates.farmerCrutchingRate||2.00);return s+cnt*r2;},0);
 
   return e('div',{className:'summary-wrap'},
-    /* View toggle */
+    /* View toggle — Crew Pays only visible to admin */
     e('div',{className:'sum-toggle'},
-      e('button',{className:`sum-tab${view==='crew'?' on':''}`,onClick:()=>setView('crew')},'💰 Crew Pays'),
-      e('button',{className:`sum-tab${view==='invoice'?' on':''}`,onClick:()=>setView('invoice')},'🧾 Farmer Invoice')
+      canSeePay&&e('button',{className:`sum-tab${view==='crew'?' on':''}`,onClick:()=>setView('crew')},'💰 Crew Pays'),
+      e('button',{className:`sum-tab${view==='record'?' on':''}`,onClick:()=>setView('record')},'📄 Farm Record')
     ),
 
-    /* ── CREW PAYS VIEW ── */
-    view==='crew'&&e('div',null,
+    /* ── CREW PAYS VIEW (admin only) ── */
+    canSeePay&&view==='crew'&&e('div',null,
       /* Period navigator */
       e('div',{className:'period-nav'},
         e('div',{className:'period-top'},
@@ -1485,29 +1541,39 @@ function SummaryTab({job}){
       isFuture
         ?e('div',{style:{padding:'32px 0',textAlign:'center',color:'var(--dim)'}},e('div',{style:{fontSize:32,marginBottom:8}},'📅'),e('div',null,'Future period — no data yet'))
         :e('div',null,
-            e('div',{className:'summary-actions'},e('button',{className:'btn-copy',onClick:()=>copy(crewText,setCopied)},copied?'✓ Copied!':'📋 Copy Crew Pay Summary')),
+            e('div',{className:'summary-actions',style:{display:'flex',gap:8,flexWrap:'wrap'}},
+              e('button',{className:'btn-copy',onClick:()=>copy(crewText,setCopied)},copied?'✓ Copied!':'📋 Copy Crew Pay Summary'),
+              e('button',{className:'btn-copy',style:{background:'#0ea5e9'},onClick:()=>printText(crewText,'Crew Pay Summary \u2014 '+farmName+(period?' \u2014 '+fmtPeriodLabel(period.start,period.end):''))},'🖨️ Print / PDF')
+            ),
             e('pre',{className:'summary-pre'},crewText)
           )
     ),
 
-    /* ── FARMER INVOICE VIEW ── */
-    view==='invoice'&&e('div',null,
+    /* ── FARM RECORD VIEW (visible to all roles) ── */
+    view==='record'&&e('div',null,
       e('div',{className:'invoice-hdr'},
-        e('div',{className:'inv-title'},'Farmer Invoice — Full Job'),
-        e('div',{className:'inv-farm'},gf(job.farmId)?gf(job.farmId).name:'Unknown Farm'),
+        e('div',{className:'inv-title'},'Farm Record — Full Job'),
+        e('div',{className:'inv-farm'},farmName),
         e('div',{style:{fontSize:'12px',color:'rgba(255,255,255,.5)',marginBottom:10}},
           'Covers entire job '+fmtDate(job.startDate)+' — '+job.daysAllocated+' days allocated'
         ),
         e('div',{className:'inv-stats'},
           e('div',{className:'inv-stat'},e('div',{className:'inv-stat-num'},totalJobShorn.toLocaleString()),e('div',{className:'inv-stat-lbl'},'Total Sheep')),
-          e('div',{className:'inv-stat'},e('div',{className:'inv-stat-num'},'$'+Math.round(totalDue).toLocaleString()),e('div',{className:'inv-stat-lbl'},'Invoice Total'))
+          e('div',{className:'inv-stat'},e('div',{className:'inv-stat-num'},job.crew.length),e('div',{className:'inv-stat-lbl'},'Crew Members'))
         )
       ),
       e('div',{style:{fontSize:'12px',color:'var(--muted)',marginBottom:10,padding:'0 2px'}},
-        '✓ Farmer invoice always shows the complete job — independent of crew pay cycles. A 12-day shed spanning 2 pay periods still invoices as one job.'
+        '✓ Factual record of work completed — no dollar amounts. Share with the farmer for their records.'
       ),
-      e('div',{className:'summary-actions'},e('button',{className:'btn-copy',onClick:()=>copy(invText,setCopiedInv)},copiedInv?'✓ Copied!':'📋 Copy Farmer Invoice')),
-      e('pre',{className:'summary-pre'},invText)
+      canShare&&e('div',{className:'summary-actions',style:{display:'flex',gap:8,flexWrap:'wrap'}},
+        e('button',{className:'btn-copy',onClick:()=>copy(recordText,setCopiedRec)},copiedRec?'✓ Copied!':'📋 Copy'),
+        e('button',{className:'btn-copy',style:{background:'#0ea5e9'},onClick:printRecord},'🖨️ Print / PDF'),
+        e('button',{className:'btn-copy',style:{background:'#16a34a'},onClick:shareRecord},shared?'✓ Done!':(navigator.share?'📤 Share':'📤 Copy & Share'))
+      ),
+      !canShare&&e('div',{style:{fontSize:'11px',color:'var(--dim)',marginBottom:10,padding:'8px 12px',background:'rgba(255,255,255,.03)',borderRadius:'8px',border:'1px dashed rgba(255,255,255,.08)'}},
+        'ℹ️ Switch to Lead or Admin role to copy, print, or share this record.'
+      ),
+      e('pre',{className:'summary-pre'},recordText)
     )
   );
 }
@@ -1956,8 +2022,8 @@ function JobDetailScreen({job,setJob,role,setRole,onBack,onSend,onBroadcast,onEd
     return {...prev,status:STATUS_SEQ[(STATUS_SEQ.indexOf(prev.status)+1)%STATUS_SEQ.length]};
   });
   const isDraft=job.status==='Draft';
-  const tabs=[['tallies','Tallies'],['progress','Progress'],['overview','Overview'],['whiteboard','📋']];
-  if(role==='admin'){tabs.push(['summary','Summary']);tabs.push(['admin','Admin']);}
+  const tabs=[['tallies','Tallies'],['progress','Progress'],['overview','Overview'],['whiteboard','📋'],['summary','Summary']];
+  if(role==='admin')tabs.push(['admin','Admin']);
   const canSend=(role==='admin'||role==='shed_lead')&&job.status!=='Completed'&&job.status!=='Charged Out'&&!isDraft;
   return e('div',null,
     e(TopBar,{role,setRole,onBack,backLabel:job.jobName||(farm?farm.name:'Jobs')}),
@@ -1986,7 +2052,7 @@ function JobDetailScreen({job,setJob,role,setRole,onBack,onSend,onBroadcast,onEd
       tab==='progress'&&e(ProgressTab,{job}),
       tab==='overview'&&e(OverviewTab,{job,role,onSend,onBroadcast,canSend,onEditFarm:role==='admin'?()=>setShowEditFarm(true):null,isDraft,onPublish}),
       tab==='whiteboard'&&e(WhiteboardTab,{job,role}),
-      tab==='summary'&&role==='admin'&&e(SummaryTab,{job}),
+      tab==='summary'&&e(SummaryTab,{job,role}),
       tab==='admin'&&role==='admin'&&e(AdminTab,{job,setJob,onEdit,onDeleteFarm:()=>{const farm=gf(job.farmId);if(!farm)return;dbDeleteFarm(farm.id);setFarmList(p=>{const n=p.filter(f=>f.id!==farm.id);syncLookups(n,CREW);return n;});},onDeleteJob,onPublish}),
       showEditFarm&&farm&&e(EditFarmModal,{farm,onSave:handleSaveFarm,onClose:()=>setShowEditFarm(false)})
     )
