@@ -543,14 +543,23 @@ async function flushQueue(){
   const failed=[];
   for(const item of q){
     try{
-      let res;
-      if(item.type==='job')res=await sb.from('jobs').upsert({id:item.id,contractor_slug:CONTRACTOR_SLUG,data:item.data,updated_at:new Date().toISOString()},{onConflict:'id'});
-      else if(item.type==='farm')res=await sb.from('farms').upsert({id:item.id,contractor_slug:CONTRACTOR_SLUG,data:item.data},{onConflict:'id'});
-      else if(item.type==='crew')res=await sb.from('crew_members').upsert({id:item.id,contractor_slug:CONTRACTOR_SLUG,data:item.data},{onConflict:'id'});
+      let call;
+      if(item.type==='job')call=sb.from('jobs').upsert({id:item.id,contractor_slug:CONTRACTOR_SLUG,data:item.data,updated_at:new Date().toISOString()},{onConflict:'id'});
+      else if(item.type==='farm')call=sb.from('farms').upsert({id:item.id,contractor_slug:CONTRACTOR_SLUG,data:item.data},{onConflict:'id'});
+      else if(item.type==='crew')call=sb.from('crew_members').upsert({id:item.id,contractor_slug:CONTRACTOR_SLUG,data:item.data},{onConflict:'id'});
+      /* Cap each upsert at 5s — prevents one hanging item from stalling
+         the whole queue flush. */
+      const res=await withTimeout(call,5000,'flush_timeout');
       /* Check for Supabase error in response body — don't count as flushed if error */
-      if(res&&res.error){failed.push(item);}
+      if(res&&res.error){
+        failed.push(item);
+        logSaveFailure('error',item.type+':'+item.id,res.error.message);
+      }
       else{flushed++;}
-    }catch(e){failed.push(item);}
+    }catch(e){
+      failed.push(item);
+      logSaveFailure(e.message==='flush_timeout'?'timeout':'error',item.type+':'+item.id,e.message);
+    }
   }
   lsSet(LS_QUEUE,failed);
   return flushed;
@@ -559,11 +568,30 @@ async function flushQueue(){
 /* ── DB HELPERS ── */
 async function dbLoad(){
   try{
-    const [jr,fr,cr]=await Promise.all([
+    /* Cap each select at 8s — if Supabase hangs we fall through to cache.
+       Without this, dbLoad can sit forever on a marginal connection,
+       blocking app startup. */
+    const [jr,fr,cr]=await withTimeout(Promise.all([
       sb.from('jobs').select('id,data').eq('contractor_slug',CONTRACTOR_SLUG).order('updated_at',{ascending:false}),
       sb.from('farms').select('id,data').eq('contractor_slug',CONTRACTOR_SLUG),
       sb.from('crew_members').select('id,data').eq('contractor_slug',CONTRACTOR_SLUG),
-    ]);
+    ]),8000,'load_timeout');
+    /* CRITICAL: if any of the three calls returned an error (or the SW
+       offline stub returned fake-200-with-error), DO NOT trust the result.
+       Treat as offline — fall through to cache. Without this check, a
+       marginal connection could overwrite localStorage with empty arrays
+       and destroy unsaved local state. */
+    if((jr&&jr.error)||(fr&&fr.error)||(cr&&cr.error)){
+      logSaveFailure('error','dbLoad',
+        'jr.error='+(jr?.error?.message||'')+';fr.error='+(fr?.error?.message||'')+';cr.error='+(cr?.error?.message||'')
+      );
+      return{
+        jobs:lsGet(LS_JOBS)||[],
+        farms:lsGet(LS_FARMS)||[],
+        crew:lsGet(LS_CREW)||[],
+        fromCache:true,
+      };
+    }
     const result={
       jobs:(jr.data||[]).map(r=>r.data),
       farms:(fr.data||[]).map(r=>r.data),
@@ -589,7 +617,8 @@ async function dbLoad(){
     }
     return result;
   }catch(e){
-    /* Offline — serve from cache */
+    /* Offline or load_timeout — serve from cache */
+    if(e.message==='load_timeout')logSaveFailure('timeout','dbLoad',e.message);
     return{
       jobs:lsGet(LS_JOBS)||[],
       farms:lsGet(LS_FARMS)||[],
@@ -598,6 +627,43 @@ async function dbLoad(){
     };
   }
 }
+/* withTimeout — race a promise against a setTimeout. Used to cap Supabase
+   calls that can hang silently on poor signal. If the timeout wins, the
+   returned promise rejects with a labelled error so callers can route it
+   to queue + log. The original work may still complete in the background;
+   that's fine — at worst we have a duplicate write to localStorage which
+   the queue dedupes by id. */
+function withTimeout(promise,ms,label){
+  let timer;
+  const timeout=new Promise((_,reject)=>{
+    timer=setTimeout(()=>reject(new Error(label||'timeout')),ms);
+  });
+  return Promise.race([promise,timeout]).finally(()=>clearTimeout(timer));
+}
+
+/* logSaveFailure — best-effort forensic insert. Captures save failures so
+   we can investigate later. The log call itself has its OWN short timeout
+   and any failure is swallowed — logging must NEVER affect the save flow. */
+function logSaveFailure(reason,jobId,details){
+  try{
+    const payload={
+      contractor_slug:CONTRACTOR_SLUG,
+      job_id:jobId||null,
+      reason:reason||'unknown',
+      details:(details||'').toString().slice(0,1000), /* cap long stack traces */
+      user_agent:(navigator.userAgent||'').slice(0,500),
+      online_status:navigator.onLine,
+      queue_length:(lsGet(LS_QUEUE)||[]).length
+    };
+    /* Fire and forget. 3s timeout. Errors silently ignored. */
+    withTimeout(
+      sb.from('save_failures').insert(payload).then(()=>{}),
+      3000,
+      'log_timeout'
+    ).catch(()=>{});
+  }catch(e){ /* never break the save flow */ }
+}
+
 async function dbSaveJob(job){
   /* Always write to local cache first — this survives page close */
   const jobs=lsGet(LS_JOBS)||[];
@@ -608,12 +674,28 @@ async function dbSaveJob(job){
     queueWrite('job',job.id,job);
     return;
   }
+  /* Online path: cap the upsert at 5 seconds to prevent silent hangs.
+     A hanging upsert on poor signal that never resolves is the EXACT
+     bug pattern that wiped Cutting Edge job 002125 — without a timeout
+     the await never returns, the catch block never fires, and the data
+     never makes it to the queue. */
   try{
-    const {error}=await sb.from('jobs').upsert({id:job.id,contractor_slug:CONTRACTOR_SLUG,data:job,updated_at:new Date().toISOString()},{onConflict:'id'});
-    if(error)throw new Error(error.message);
+    const upsertCall=sb.from('jobs').upsert(
+      {id:job.id,contractor_slug:CONTRACTOR_SLUG,data:job,updated_at:new Date().toISOString()},
+      {onConflict:'id'}
+    );
+    const result=await withTimeout(upsertCall,5000,'upsert_timeout');
+    if(result&&result.error)throw new Error(result.error.message);
     dequeue('job',job.id);
   }catch(e){
+    /* Queue for retry on next online event or mountLoad */
     queueWrite('job',job.id,job);
+    /* Log forensically — fire-and-forget, never throws */
+    logSaveFailure(
+      e.message==='upsert_timeout'?'timeout':'error',
+      job.id,
+      e.message
+    );
   }
 }
 async function dbDeleteJob(jobId){
@@ -627,10 +709,14 @@ async function dbSaveFarm(farm){
   lsSet(LS_FARMS,updated);
   if(!navigator.onLine){queueWrite('farm',farm.id,farm);return;}
   try{
-    const {error}=await sb.from('farms').upsert({id:farm.id,contractor_slug:CONTRACTOR_SLUG,data:farm},{onConflict:'id'});
-    if(error)throw new Error(error.message);
+    const upsertCall=sb.from('farms').upsert({id:farm.id,contractor_slug:CONTRACTOR_SLUG,data:farm},{onConflict:'id'});
+    const result=await withTimeout(upsertCall,5000,'upsert_timeout');
+    if(result&&result.error)throw new Error(result.error.message);
     dequeue('farm',farm.id);
-  }catch(e){queueWrite('farm',farm.id,farm);}
+  }catch(e){
+    queueWrite('farm',farm.id,farm);
+    logSaveFailure(e.message==='upsert_timeout'?'timeout':'error','farm:'+farm.id,e.message);
+  }
 }
 async function dbDeleteFarm(farmId){
   const farms=lsGet(LS_FARMS)||[];
@@ -643,10 +729,14 @@ async function dbSaveCrew(member){
   lsSet(LS_CREW,updated);
   if(!navigator.onLine){queueWrite('crew',member.id,member);return;}
   try{
-    const {error}=await sb.from('crew_members').upsert({id:member.id,contractor_slug:CONTRACTOR_SLUG,data:member},{onConflict:'id'});
-    if(error)throw new Error(error.message);
+    const upsertCall=sb.from('crew_members').upsert({id:member.id,contractor_slug:CONTRACTOR_SLUG,data:member},{onConflict:'id'});
+    const result=await withTimeout(upsertCall,5000,'upsert_timeout');
+    if(result&&result.error)throw new Error(result.error.message);
     dequeue('crew',member.id);
-  }catch(e){queueWrite('crew',member.id,member);}
+  }catch(e){
+    queueWrite('crew',member.id,member);
+    logSaveFailure(e.message==='upsert_timeout'?'timeout':'error','crew:'+member.id,e.message);
+  }
 }
 let FARMS=[];
 let CREW=[];
@@ -659,6 +749,38 @@ const mkRates=(ov={})=>{
 const INIT_JOBS=[];
 const gf=id=>FARMS.find(f=>f.id===id);
 const gc=id=>CREW.find(c=>c.id===id);
+/* getJobRole — returns the role this crew member had ON THIS JOB.
+   Once a crew member is added to a job, their role is snapshotted in
+   job.rates.crewDetails[id].role. Reads should always go through this so
+   global role changes (e.g. promote a Wool Handler to Wool Classer) don't
+   retroactively rewrite past pay summaries. Falls back to live role for
+   crew added before this snapshot system existed. */
+const getJobRole=(job,id)=>{
+  const det=((job?.rates?.crewDetails)||{})[id]||{};
+  if(det.role)return det.role;
+  const c=gc(id);
+  return c?c.role:null;
+};
+
+/* migrateJobRoles — backfills crewDetails.role from the LIVE crew record for
+   any crew member on this job that doesn't yet have a per-job role snapshot.
+   Runs on load. Without this migration, legacy jobs (created before the
+   snapshot system) still leak global role changes into past pay summaries. */
+function migrateJobRoles(job,crewArr){
+  const cd={...(job?.rates?.crewDetails||{})};
+  let changed=false;
+  (job.crew||[]).forEach(id=>{
+    if(!cd[id]?.role){
+      const c=(crewArr||CREW).find(x=>x.id===id);
+      if(c){
+        cd[id]={...(cd[id]||{}),role:c.role};
+        changed=true;
+      }
+    }
+  });
+  if(!changed)return job;
+  return {...job,rates:{...(job.rates||{}),crewDetails:cd}};
+}
 const AVC=[{bg:'#78350f',fg:'#fbbf24'},{bg:'#14532d',fg:'#4ade80'},{bg:'#1e3a5f',fg:'#60a5fa'},{bg:'#7f1d1d',fg:'#f87171'},{bg:'#3b0764',fg:'#c084fc'},{bg:'#064e3b',fg:'#34d399'},{bg:'#7c2d12',fg:'#fb923c'},{bg:'#581c87',fg:'#e879f9'},{bg:'#0c4a6e',fg:'#38bdf8'},{bg:'#1a2e05',fg:'#a3e635'},{bg:'#431407',fg:'#fdba74'},{bg:'#1e1b4b',fg:'#818cf8'}];
 const avc=n=>AVC[n.charCodeAt(0)%AVC.length];
 const init=n=>n.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
@@ -722,7 +844,7 @@ function statusClass(s){return s==='Draft'?'draft':s==='Completed'?'completed':s
 const mobsOf=run=>run.mobs||[];
 function calcProg(job){
   /* Include both shearers and crutchers in progress count */
-  const shIds=job.crew.filter(id=>gc(id)&&(gc(id).role==='Shearer'||gc(id).role==='Crutcher'));
+  const shIds=job.crew.filter(id=>{const r=getJobRole(job,id);return r==='Shearer'||r==='Crutcher';});
   let shorn=0,daysWorked=0;
   Object.entries(job.runs||{}).forEach(([,rs])=>{if(rs&&rs.length){daysWorked++;rs.forEach(run=>{mobsOf(run).forEach(mob=>{shIds.forEach(id=>{shorn+=mob.counts[id]||0;});});});}});
   /* Also count any counts regardless of role if no shearers/crutchers found */
@@ -785,17 +907,18 @@ function fmtPeriodLabel(start,end){
   return dn[sdt.getDay()]+' '+sd+' '+mo[sm-1]+' \u2013 '+dn[edt.getDay()]+' '+ed+' '+mo[em-1];
 }
 function calcPeriodStats(job,period){
-  const shIds=job.crew.filter(id=>gc(id)&&(gc(id).role==='Shearer'||gc(id).role==='Crutcher'));
+  const shIds=job.crew.filter(id=>{const r=getJobRole(job,id);return r==='Shearer'||r==='Crutcher';});
   const rates=job.rates||{};
   let shorn=0,totalEarn=0;
   const inP=date=>date>=period.start&&date<=period.end;
   Object.entries(job.runs||{}).forEach(([date,rs])=>{if(!inP(date))return;rs.forEach(run=>{mobsOf(run).forEach(mob=>{const br=mob.rateOverride!=null?mob.rateOverride:(mob.type==='Shearing'?rates.shearingPerHead:rates.crutchingPerHead)||0;shIds.forEach(id=>{const cnt=mob.counts[id]||0;if(!cnt)return;shorn+=cnt;const load=(rates.shearerLoadings||{})[id]||0;totalEarn+=cnt*(br+load);});});});});
   // Shed staff
-  job.crew.filter(id=>gc(id)&&gc(id).role!=='Shearer'&&gc(id).role!=='Crutcher').forEach(id=>{
+  job.crew.filter(id=>{const r=getJobRole(job,id);return r&&r!=='Shearer'&&r!=='Crutcher';}).forEach(id=>{
     const ov=(rates.crewOverrides||{})[id];const c=gc(id);if(!c)return;
-    const defR=c.role==='Wool Classer'?rates.classerPerRun:c.role==='Penner'?rates.pennerPerRun:c.role==='Presser'?rates.presserPerRun:rates.woolHandlerPerRun;
+    const role=getJobRole(job,id);
+    const defR=role==='Wool Classer'?rates.classerPerRun:role==='Penner'?rates.pennerPerRun:role==='Presser'?rates.presserPerRun:rates.woolHandlerPerRun;
     const rpr=ov||defR||80;
-    if(c.role==='Presser'){Object.entries(job.shedTallies[id]||{}).forEach(([date,runs])=>{if(!inP(date))return;const bales=(job.baleTallies[id]||{})[date]||0;totalEarn+=bales>(rates.baleThreshold||13)?bales*(rates.presserPerBale||14.20):runs*rpr;});}
+    if(role==='Presser'){Object.entries(job.shedTallies[id]||{}).forEach(([date,runs])=>{if(!inP(date))return;const bales=(job.baleTallies[id]||{})[date]||0;totalEarn+=bales>(rates.baleThreshold||13)?bales*(rates.presserPerBale||14.20):runs*rpr;});}
     else{Object.entries(job.shedTallies[id]||{}).forEach(([date,runs])=>{if(!inP(date))return;totalEarn+=runs*rpr;});}
     const tr2=rates.travelRate||{};
     totalEarn+=Object.values((job.travelTallies||{})[id]||{}).reduce((a,b)=>a+(b?1:0),0)*(tr2[id]||0);
@@ -808,8 +931,8 @@ function calcPeriodStats(job,period){
 const pad=(str,len)=>String(str).padEnd(len,' ');
 function generateFarmRecord(job){
   const farm=gf(job.farmId);
-  const shIds=job.crew.filter(id=>gc(id)&&(gc(id).role==='Shearer'||gc(id).role==='Crutcher'));
-  const shedIds=job.crew.filter(id=>gc(id)&&gc(id).role!=='Shearer'&&gc(id).role!=='Crutcher');
+  const shIds=job.crew.filter(id=>{const r=getJobRole(job,id);return r==='Shearer'||r==='Crutcher';});
+  const shedIds=job.crew.filter(id=>{const r=getJobRole(job,id);return r&&r!=='Shearer'&&r!=='Crutcher';});
   const dash='\u2500'.repeat(56);
   const dashEq='\u2550'.repeat(56);
   /* Group mobs by type+desc across entire job */
@@ -822,13 +945,13 @@ function generateFarmRecord(job){
     target[desc]+=cnt;
   });});});
   /* Total bales */
-  const pressers=job.crew.filter(id=>gc(id)?.role==='Presser');
+  const pressers=job.crew.filter(id=>(getJobRole(job,id)||gc(id)?.role)==='Presser');
   const totalBales=pressers.reduce((s,id)=>s+Object.values(job.baleTallies[id]||{}).reduce((a,b)=>a+b,0)+(job.baleBF[id]||0),0);
   /* Days actually worked */
   const datesWorked=Object.keys(job.runs||{}).filter(d=>(job.runs[d]||[]).some(run=>mobsOf(run).some(mob=>shIds.some(id=>(mob.counts[id]||0)>0)))).sort();
   /* Shed staff breakdown by role */
   const staffByRole={};
-  shedIds.forEach(id=>{const c=gc(id);if(!c)return;if(!staffByRole[c.role])staffByRole[c.role]=0;staffByRole[c.role]++;});
+  shedIds.forEach(id=>{const c=gc(id);if(!c)return;const r=getJobRole(job,id)||c.role;if(!staffByRole[r])staffByRole[r]=0;staffByRole[r]++;});
   const today=localToday();
   const L=[];
   L.push(dashEq);
@@ -882,8 +1005,8 @@ function generateFarmRecord(job){
 }
 function generateSummary(job,period){
   const farm=gf(job.farmId);const rates=job.rates||{};
-  const shIds=job.crew.filter(id=>gc(id)&&(gc(id).role==='Shearer'||gc(id).role==='Crutcher'));
-  const shedIds=job.crew.filter(id=>gc(id)&&gc(id).role!=='Shearer'&&gc(id).role!=='Crutcher');
+  const shIds=job.crew.filter(id=>{const r=getJobRole(job,id);return r==='Shearer'||r==='Crutcher';});
+  const shedIds=job.crew.filter(id=>{const r=getJobRole(job,id);return r&&r!=='Shearer'&&r!=='Crutcher';});
   const dash='\u2500'.repeat(52);
   const inP=date=>!period||(date>=period.start&&date<=period.end);
   const shornBy={};shIds.forEach(id=>{shornBy[id]={sh:0,shEarn:0,cr:0,crEarn:0,mobs:[]};});
@@ -941,12 +1064,13 @@ function generateSummary(job,period){
   L.push('');L.push(dash);L.push('');L.push('SHED STAFF');L.push(dash);
   shedIds.forEach(id=>{
     const c=gc(id);if(!c)return;
+    const role=getJobRole(job,id);
     const ov=(rates.crewOverrides||{})[id];
-    const defR=c.role==='Wool Classer'?rates.classerPerRun:c.role==='Penner'?rates.pennerPerRun:c.role==='Presser'?rates.presserPerRun:rates.woolHandlerPerRun;
+    const defR=role==='Wool Classer'?rates.classerPerRun:role==='Penner'?rates.pennerPerRun:role==='Presser'?rates.presserPerRun:rates.woolHandlerPerRun;
     const rpr=ov||defR||80;
     const totalRuns=Object.entries(job.shedTallies[id]||{}).filter(([d])=>inP(d)).reduce((a,[,b])=>a+b,0);
     const travel=trvl(id);let earn=0,earnLine='';
-    if(c.role==='Presser'){
+    if(role==='Presser'){
       let rEarn=0,bEarn=0;
       Object.entries(job.shedTallies[id]||{}).forEach(([date,runs])=>{if(!inP(date))return;const bales=(job.baleTallies[id]||{})[date]||0;if(bales>(rates.baleThreshold||13)){bEarn+=bales*(rates.presserPerBale||14.20);}else{rEarn+=runs*rpr;}});
       earn=rEarn+bEarn;
@@ -959,7 +1083,7 @@ function generateSummary(job,period){
     const det=(rates.crewDetails||{})[id]||{};
     const taxPct=parseFloat(det.taxRate||0)||0;
     const taxAmt=taxPct>0?gross*(taxPct/100):0;
-    L.push('');L.push(c.name+' \u2014 '+(det.role||c.role));L.push(earnLine);
+    L.push('');L.push(c.name+' \u2014 '+role);L.push(earnLine);
     const tDays=travelDayCount(id);if(tDays)L.push('  Travel: '+tDays+' days x $'+(tr[id]||0).toFixed(2)+'/day = $'+travel.toFixed(2));
     L.push('  GROSS TOTAL: $'+gross.toFixed(2));
     if(taxPct>0){L.push('  Tax withheld ('+taxPct+'%): -$'+taxAmt.toFixed(2));L.push('  NET PAY: $'+(gross-taxAmt).toFixed(2));}
@@ -1042,6 +1166,13 @@ function PinPad({onSuccess,onCancel,label,subtitle,allowChange,changeLabel,_over
   const type=label==='Admin PIN'?'admin':'lead';
 
   const tryPin=async p=>{
+    /* If an override PIN is supplied (e.g. a per-job PIN), verify against
+       it directly rather than going to Supabase for the role PIN. */
+    if(_overridePin!=null){
+      if(String(p)===String(_overridePin)){setErr('');onSuccess();}
+      else{setErr('Incorrect PIN');setEntry('');setTimeout(()=>setErr(''),1500);}
+      return;
+    }
     const ok=await checkPin(type,p);
     if(ok){setErr('');onSuccess();}
     else{setErr('Incorrect PIN');setEntry('');setTimeout(()=>setErr(''),1500);}
@@ -1060,29 +1191,26 @@ function PinPad({onSuccess,onCancel,label,subtitle,allowChange,changeLabel,_over
         }
       } else if(step==='new1'){
         const np=newPin+n;
-        setNewPin(np);
-        if(np.length===6){setStep('new2');setEntry('');}
-        else setEntry(np);
+        if(np.length>6)return; /* cap at 6 digits */
+        setNewPin(np);setEntry(np);
       } else {
         const conf=entry+n;
+        if(conf.length>6)return; /* cap at 6 digits */
         setEntry(conf);
-        if(conf.length===6){
-          if(conf===newPin){
-            const pinType=_pinType||type;
-            savePin(pinType,newPin).then(()=>{
-              setChanging(false);setStep('enter');setNewPin('');setEntry('');setErr('✓ PIN changed — all devices updated!');
-              if(_onChanged)setTimeout(_onChanged,1500);
-              /* Reset role on PIN change for security */
-              lsSet(LS_ROLE,'read_only');lsSet(LS_ROLE_TS,0);
-            });
-          } else{setErr('PINs do not match');setEntry('');setNewPin('');setStep('new1');setTimeout(()=>setErr(''),1500);}
-        }
       }
       return;
     }
     const next=entry+n;
+    if(next.length>6)return; /* cap at 6 digits */
     setEntry(next);
-    if(next.length===6)tryPin(next);
+    /* Auto-submit ONLY at 6 digits when no override (back-compat with role PINs).
+       For shorter PINs (4-5), user taps Submit. With override (job PINs), auto-submit
+       at the override's exact length. */
+    if(_overridePin!=null){
+      if(next.length===String(_overridePin).length)tryPin(next);
+    } else if(next.length===6){
+      tryPin(next);
+    }
   };
 
   const del=()=>{
@@ -1094,6 +1222,30 @@ function PinPad({onSuccess,onCancel,label,subtitle,allowChange,changeLabel,_over
 
   const startChange=()=>{setChanging(true);setStep('verify_current');setEntry('');setNewPin('');setErr('');};
 
+  /* Submit handler for variable-length PINs. Used when user has typed 4-5
+     digits and needs to commit (since auto-submit only fires at 6). */
+  const submitEntry=()=>{
+    if(changing){
+      if(step==='new1'){
+        if(newPin.length<4){setErr('PIN must be at least 4 digits');setTimeout(()=>setErr(''),1500);return;}
+        setStep('new2');setEntry('');
+      } else if(step==='new2'){
+        if(entry===newPin){
+          const pinType=_pinType||type;
+          savePin(pinType,newPin).then(()=>{
+            setChanging(false);setStep('enter');setNewPin('');setEntry('');setErr('✓ PIN changed — all devices updated!');
+            if(_onChanged)setTimeout(_onChanged,1500);
+            /* Reset role on PIN change for security */
+            lsSet(LS_ROLE,'read_only');lsSet(LS_ROLE_TS,0);
+          });
+        } else{setErr('PINs do not match');setEntry('');setNewPin('');setStep('new1');setTimeout(()=>setErr(''),1500);}
+      }
+      return;
+    }
+    if(entry.length<4){setErr('PIN must be at least 4 digits');setTimeout(()=>setErr(''),1500);return;}
+    tryPin(entry);
+  };
+
   const displayEntry=changing?(step==='new1'?newPin:entry):entry;
   const displayLabel=changing?(
     step==='verify_current'?'Enter Current PIN':
@@ -1101,8 +1253,15 @@ function PinPad({onSuccess,onCancel,label,subtitle,allowChange,changeLabel,_over
   ):label;
   const displaySub=changing?(
     step==='verify_current'?'Verify your current PIN before changing':
-    step==='new1'?'Choose a new 6-digit PIN':'Re-enter to confirm'
+    step==='new1'?'Choose a 4-6 digit PIN':'Re-enter to confirm'
   ):subtitle;
+
+  /* Show a Submit button when:
+     - User is verifying a job-override PIN of any length (waits for full PIN)
+     - User is changing a PIN (new1/new2 steps need explicit submit since
+       length is variable)
+     - Always available as a "tap when ready" once 4+ digits typed */
+  const canSubmit=displayEntry.length>=4&&!err.includes('changed');
 
   return e('div',{className:'pin-screen'},
     e('div',{className:'pin-logo'},'my',e('em',null,'Gang')),
@@ -1119,6 +1278,12 @@ function PinPad({onSuccess,onCancel,label,subtitle,allowChange,changeLabel,_over
         e('button',{key:i,className:'pin-key',onClick:()=>press(String(k))},k)
       )
     ),
+    /* Submit button — visible when 4+ digits typed. Auto-submit at 6 still works for back-compat. */
+    canSubmit&&e('button',{
+      className:'pin-change-btn',
+      style:{background:'var(--green)',color:'#fff',fontWeight:700,marginTop:8},
+      onClick:submitEntry
+    },'✓ Submit '+displayEntry.length+'-digit PIN'),
     allowChange&&!changing&&e('button',{className:'pin-change-btn',onClick:startChange},changeLabel||'Change PIN'),
     onCancel&&!changing&&e('button',{className:'pin-change-btn',onClick:onCancel},'Cancel'),
     changing&&e('button',{className:'pin-change-btn',onClick:()=>{setChanging(false);setStep('enter');setEntry('');setNewPin('');}}, 'Cancel')
@@ -1146,7 +1311,7 @@ function TopBar({role,setRole,onBack,backLabel,onSchedule}){
     e('div',{className:'topbar'},
       onBack?e('button',{className:'back-btn',onClick:onBack},e('span',{className:'back-arr'},'←'),e('span',{className:'back-label'},backLabel||'Back')):e('div',{className:'logo'},'my',e('em',null,'Gang')),
       e('div',{style:{display:'flex',alignItems:'center',gap:6}},
-        onSchedule&&e('button',{className:'sched-btn',onClick:onSchedule,title:'Schedule'},e('span',{className:'sched-btn-ic'},'📅'),e('span',null,'Schedule')),
+        onSchedule&&role!=='read_only'&&e('button',{className:'sched-btn',onClick:onSchedule,title:'Schedule'},e('span',{className:'sched-btn-ic'},'📅'),e('span',null,'Schedule')),
         role!=='read_only'&&e('button',{onClick:lockRole,title:'Lock',style:{background:'rgba(255,255,255,.1)',border:'none',borderRadius:6,padding:'4px 8px',color:'rgba(255,255,255,.5)',fontSize:14,cursor:'pointer'}},'🔒'),
         e('div',{className:'role-toggle'},[['👁','View','read_only'],['📋','Lead','shed_lead'],['🔑','Admin','admin']].map(([ic,lbl,rv])=>e('button',{key:rv,className:`rt-btn${role===rv?' active':''}`,onClick:()=>requestRole(rv)},`${ic} ${lbl}`)))
       )
@@ -1199,7 +1364,7 @@ function TallyTab({job,setJob,role,viewDate,setViewDate}){
   const todayStr=localToday();
   const dates=jobDates(job);
   const dayRuns=(job.runs||{})[viewDate]||[];
-  const shearers=job.crew.filter(id=>gc(id)&&(gc(id).role==='Shearer'||gc(id).role==='Crutcher'));
+  const shearers=job.crew.filter(id=>{const r=getJobRole(job,id);return r==='Shearer'||r==='Crutcher';});
   /* STAND ORDER — persisted per-job. New shearers added later appear at end of the order. */
   const savedOrder=Array.isArray(job.shearerOrder)?job.shearerOrder:[];
   const orderedFromSaved=savedOrder.filter(id=>shearers.includes(id));
@@ -1207,8 +1372,8 @@ function TallyTab({job,setJob,role,viewDate,setViewDate}){
   const orderedShearers=[...orderedFromSaved,...unorderedNew];
   const [reorderMode,setReorderMode]=useState(false);
   const [confirmDelRun,setConfirmDelRun]=useState(null); /* run id awaiting delete confirmation */
-  const shedStaff=job.crew.filter(id=>{const c=gc(id);return c&&(c.role==='Wool Handler'||c.role==='Wool Classer'||c.role==='Penner');});
-  const pressers=job.crew.filter(id=>gc(id)?.role==='Presser');
+  const shedStaff=job.crew.filter(id=>{const r=getJobRole(job,id);return r==='Wool Handler'||r==='Wool Classer'||r==='Penner';});
+  const pressers=job.crew.filter(id=>(getJobRole(job,id)||gc(id)?.role)==='Presser');
   const rates=job.rates||{};
   const mobRunTot=mob=>shearers.reduce((s,id)=>s+(mob.counts[id]||0),0);
   const runTot=run=>mobsOf(run).reduce((s,mob)=>s+mobRunTot(mob),0);
@@ -1243,7 +1408,7 @@ function TallyTab({job,setJob,role,viewDate,setViewDate}){
   const hasCrutch=Object.values(job.runs||{}).flat().some(run=>mobsOf(run).some(m=>m.type==='Crutching'));
   const stats=shearerStats(job,viewDate,shearers);
   const mts=mobTotals(job,viewDate,shearers);
-  const roleGroups=[{lbl:'WOOL HANDLER',ids:shedStaff.filter(id=>gc(id)?.role==='Wool Handler')},{lbl:'CLASSER',ids:shedStaff.filter(id=>gc(id)?.role==='Wool Classer')},{lbl:'PENNER',ids:shedStaff.filter(id=>gc(id)?.role==='Penner')}].filter(g=>g.ids.length>0);
+  const roleGroups=[{lbl:'WOOL HANDLER',ids:shedStaff.filter(id=>(getJobRole(job,id)||gc(id)?.role)==='Wool Handler')},{lbl:'CLASSER',ids:shedStaff.filter(id=>(getJobRole(job,id)||gc(id)?.role)==='Wool Classer')},{lbl:'PENNER',ids:shedStaff.filter(id=>(getJobRole(job,id)||gc(id)?.role)==='Penner')}].filter(g=>g.ids.length>0);
 
   return e('div',null,
     /* DATE STRIP */
@@ -1420,7 +1585,7 @@ function TallyTab({job,setJob,role,viewDate,setViewDate}){
           e(Av,{name:c.name,size:32}),
           e('div',{className:'staff-info'},
             e('div',{className:'staff-name'},c.name),
-            e('div',{className:'staff-rate-lbl'},c.role+(isAdmin&&rate?' · $'+rate+'/day':''))
+            e('div',{className:'staff-rate-lbl'},(getJobRole(job,id)||c.role)+(isAdmin&&rate?' · $'+rate+'/day':''))
           ),
           e('div',{className:'staff-stats'},
             e('div',{className:'s-grp'},e('div',{className:'s-lbl'},'Today'),
@@ -1505,7 +1670,7 @@ function SummaryTab({job,role}){
   const prevStart=period?addDays(period.start,-periodLen):null;
   const nextStart=period?addDays(period.start,periodLen):null;
   const btnLabel=d=>{const [,mo,dy]=d.split('-').map(Number);const dt=new Date(d.split('-')[0],mo-1,dy);const dn=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];return dn[dt.getDay()]+' '+String(dy).padStart(2,'0')+'/'+String(mo).padStart(2,'0');};
-  const shIds=job.crew.filter(id=>gc(id)&&(gc(id).role==='Shearer'||gc(id).role==='Crutcher'));
+  const shIds=job.crew.filter(id=>{const r=getJobRole(job,id);return r==='Shearer'||r==='Crutcher';});
   const totalJobShorn=Object.values(job.runs||{}).flat().flatMap(r=>mobsOf(r)).reduce((s,mob)=>s+shIds.reduce((a,id)=>a+(mob.counts[id]||0),0),0);
 
   return e('div',{className:'summary-wrap'},
@@ -1614,10 +1779,9 @@ function AdminTab({job,setJob,onEdit,onDeleteFarm,onDeleteJob,onPublish}){
     setSaved(true);setTimeout(()=>setSaved(false),2000);
   };
 
-  const shearers=job.crew.filter(id=>gc(id)&&(gc(id).role==='Shearer'||gc(id).role==='Crutcher'));
-  const crutchers=job.crew.filter(id=>gc(id)?.role==='Crutcher');
-  const loadingCrew=[...shearers,...crutchers]; /* shearers + crutchers get $/head loadings */
-  const shedStaff=job.crew.filter(id=>gc(id)&&gc(id).role!=='Shearer'&&gc(id).role!=='Crutcher');
+  const shearers=job.crew.filter(id=>{const r=getJobRole(job,id);return r==='Shearer'||r==='Crutcher';});
+  const loadingCrew=shearers; /* shearers + crutchers get $/head loadings — already included in `shearers` */
+  const shedStaff=job.crew.filter(id=>{const r=getJobRole(job,id);return r&&r!=='Shearer'&&r!=='Crutcher';});
   const DAY_FULL_=['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
 
   return e('div',{className:'admin-wrap'},
@@ -1669,10 +1833,11 @@ function AdminTab({job,setJob,onEdit,onDeleteFarm,onDeleteJob,onPublish}){
       e('div',{className:'admin-sec-hdr'},e('div',{className:'admin-sec-title'},'Per Person Rate Overrides'),e('div',{className:'admin-sec-sub'},'Override default $/run for individuals')),
       shedStaff.map(id=>{
         const c=gc(id);if(!c)return null;
+        const role=getJobRole(job,id);
         const cur=(draft.crewOverrides||{})[id]??'';
-        const defR=c.role==='Wool Classer'?draft.classerPerRun:c.role==='Penner'?draft.pennerPerRun:c.role==='Presser'?draft.presserPerRun:draft.woolHandlerPerRun;
+        const defR=role==='Wool Classer'?draft.classerPerRun:role==='Penner'?draft.pennerPerRun:role==='Presser'?draft.presserPerRun:draft.woolHandlerPerRun;
         return e('div',{key:id,className:'loading-row'},
-          e('div',{className:'lr-l'},e(Av,{name:c.name,size:32}),e('div',null,e('div',{className:'lr-name'},c.name),e('div',{className:'lr-role'},c.role+' — default $'+defR+'/run'))),
+          e('div',{className:'lr-l'},e(Av,{name:c.name,size:32}),e('div',null,e('div',{className:'lr-name'},c.name),e('div',{className:'lr-role'},role+' — default $'+defR+'/run'))),
           e('div',{className:'lr-r'},e('span',{className:'lr-prefix'},'$'),e('input',{type:'number',className:'lr-inp',value:cur,placeholder:defR,step:'1',onChange:ev=>setOv(id,ev.target.value)}),e('span',{className:'lr-unit'},'/run'))
         );
       })
@@ -1686,7 +1851,7 @@ function AdminTab({job,setJob,onEdit,onDeleteFarm,onDeleteJob,onPublish}){
         const cur=(draft.shearerLoadings||{})[id]??'';
         const ltype=(draft.loadingType||{})[id]||'individual';
         return e('div',{key:id,className:'loading-row',style:{flexWrap:'wrap',gap:8}},
-          e('div',{className:'lr-l'},e(Av,{name:c.name,size:32}),e('div',null,e('div',{className:'lr-name'},c.name),e('div',{className:'lr-role'},c.role))),
+          e('div',{className:'lr-l'},e(Av,{name:c.name,size:32}),e('div',null,e('div',{className:'lr-name'},c.name),e('div',{className:'lr-role'},getJobRole(job,id)||c.role))),
           e('div',{className:'lr-r',style:{gap:6}},
             e('span',{className:'lr-prefix'},'+$'),
             e('input',{type:'number',className:'lr-inp',value:cur,placeholder:'0',step:'0.05',onChange:ev=>setLoad(id,ev.target.value)}),
@@ -1708,7 +1873,7 @@ function AdminTab({job,setJob,onEdit,onDeleteFarm,onDeleteJob,onPublish}){
         const rate=(draft.travelRate||{})[id]??'';
         const days=Object.values((job.travelTallies||{})[id]||{}).reduce((a,b)=>a+(b?1:0),0);
         return e('div',{key:id,className:'loading-row'},
-          e('div',{className:'lr-l'},e(Av,{name:c.name,size:32}),e('div',null,e('div',{className:'lr-name'},c.name),e('div',{className:'lr-role'},c.role+(days?' · '+days+' day'+(days!==1?'s':''):'')))),
+          e('div',{className:'lr-l'},e(Av,{name:c.name,size:32}),e('div',null,e('div',{className:'lr-name'},c.name),e('div',{className:'lr-role'},(getJobRole(job,id)||c.role)+(days?' · '+days+' day'+(days!==1?'s':''):'')))),
           e('div',{className:'lr-r',style:{gap:6}},
             e('span',{className:'lr-prefix'},'$'),
             e('input',{type:'number',className:'tr-inp',style:{width:58},value:rate,placeholder:'40',step:'5',onChange:ev=>setTR(id,ev.target.value)}),
@@ -1980,6 +2145,24 @@ function EditFarmModal({farm,onSave,onClose}){
 
 function OverviewTab({job,role,onSend,onBroadcast,canSend,onEditFarm,isDraft,onPublish}){
   const farm=gf(job.farmId);
+  const [views,setViews]=useState({});
+
+  /* Fetch view receipts (Admin only) so the crew list shows who has opened
+     their job card. Auto-refreshes every 30s while this tab is open. */
+  useEffect(()=>{
+    if(role!=='admin')return;
+    let cancelled=false;
+    const fetchViews=async()=>{
+      try{
+        const {data}=await sb.from('job_views').select('crew_id,viewed_at').eq('job_id',job.id).eq('contractor_slug',CONTRACTOR_SLUG);
+        if(!cancelled&&data){const v={};data.forEach(r=>{v[r.crew_id]=r.viewed_at;});setViews(v);}
+      }catch(e){}
+    };
+    fetchViews();
+    const t=setInterval(fetchViews,30000);
+    return()=>{cancelled=true;clearInterval(t);};
+  },[job.id,role]);
+
   const IC=({l,v,full})=>e('div',{className:'ic'+(full?' full-ic':'')},e('div',{className:'ic-l'},l),e('div',{className:'ic-v'},v));
   return e('div',null,
     e('div',{style:{height:12}}),
@@ -1987,7 +2170,26 @@ function OverviewTab({job,role,onSend,onBroadcast,canSend,onEditFarm,isDraft,onP
     job.notes_job&&e('div',{style:{padding:'0 16px',marginBottom:10}},e('div',{className:'ic'},e('div',{className:'ic-l'},'Notes'),e('div',{className:'ic-v',style:{fontSize:'13px',color:'var(--muted)',fontWeight:400}},job.notes_job))),
     farm&&e('div',{style:{padding:'0 16px',marginBottom:10}},e('div',{className:'ic'},e('div',{className:'ic-l'},'Farm Address'),e('div',{className:'ic-v'},farm.address),farm.notes&&e('div',{style:{fontSize:'12px',color:'var(--dim)',marginTop:4}},farm.notes),e('a',{href:'https://maps.google.com/?q='+encodeURIComponent(farm.address),target:'_blank',className:'map-link'},'📍 Open in Maps')),role==='admin'&&onEditFarm&&e('button',{className:'map-link',style:{marginTop:6,display:'block',color:'var(--amber)',cursor:'pointer',background:'none',border:'none',padding:0,fontSize:13},onClick:onEditFarm},'✏️ Edit farm details')),
     e('div',{className:'crew-hdr'},e('span',null,'Crew — '+job.crew.length)),
-    job.crew.map(id=>{const c=gc(id);if(!c)return null;return e('div',{key:id,className:'crew-row'},e('div',{className:'cr-l'},e(Av,{name:c.name}),e('div',null,e('div',{className:'cr-name'},c.name,c.hasVehicle&&e('span',{className:'car-tag'},'🚗')),e('div',{className:'cr-role'},c.role))),role==='admin'&&e('div',{style:{fontFamily:'var(--m)',fontSize:'11px',color:'var(--dim)'}},c.phone));}),
+    job.crew.map(id=>{
+      const c=gc(id);if(!c)return null;
+      const role_for_job=getJobRole(job,id)||c.role;
+      const viewedAt=views[id];
+      return e('div',{key:id,className:'crew-row'},
+        e('div',{className:'cr-l'},
+          e(Av,{name:c.name}),
+          e('div',null,
+            e('div',{className:'cr-name'},c.name,c.hasVehicle&&e('span',{className:'car-tag'},'🚗')),
+            e('div',{className:'cr-role'},role_for_job),
+            /* View-receipt indicator (Admin only) */
+            role==='admin'&&c.phone&&(viewedAt
+              ?e('div',{style:{fontSize:11,color:'var(--green)',fontWeight:700,marginTop:2}},'👁 Viewed '+fmtViewed(viewedAt))
+              :e('div',{style:{fontSize:11,color:'var(--dim)',marginTop:2}},'⌛ Not yet opened')
+            )
+          )
+        ),
+        role==='admin'&&e('div',{style:{fontFamily:'var(--m)',fontSize:'11px',color:'var(--dim)'}},c.phone)
+      );
+    }),
     /* Draft → show Publish button instead of Send */
     isDraft&&role==='admin'&&onPublish&&e('div',{className:'send-bar'},
       e('button',{className:'send-btn',onClick:onPublish,style:{background:'linear-gradient(135deg,#dc2626,#991b1b)',boxShadow:'0 4px 16px rgba(220,38,38,.3)'}},'🚀 Publish Job & Send Cards to Crew')
@@ -2074,7 +2276,7 @@ function JobCardView({job,crewId,onClose}){
         e('div',{key:lbl,className:'jcw-f'},e('div',{className:'jcw-fl'},lbl),isAddr?e('div',null,e('div',{className:'jcw-fv'},val),e('a',{href:'https://maps.google.com/?q='+encodeURIComponent(val),target:'_blank',className:'map-btn'},'📍 Open in Maps')):e('div',{className:'jcw-fv'},val))
       ),
       job.notes_job&&e('div',{className:'jcw-f'},e('div',{className:'jcw-fl'},'Further Details'),e('div',{className:'jcw-fv',style:{fontSize:'14px',color:'#444'}},job.notes_job)),
-      e('div',{className:'jcw-f'},e('div',{className:'jcw-fl'},'Your Team'),team.map(c=>e('div',{key:c.id,className:'team-item'},e('div',{style:{width:36,height:36,borderRadius:'50%',background:avc(c.name).bg,color:avc(c.name).fg,display:'flex',alignItems:'center',justifyContent:'center',fontFamily:'var(--h)',fontSize:'14px',fontWeight:'700',flexShrink:0}},init(c.name)),e('div',null,e('div',{className:'ti-name'},c.name),e('div',{className:'ti-role'},c.role),c.hasVehicle&&e('div',{className:'ti-car'},'🚗 Has a vehicle')))))
+      e('div',{className:'jcw-f'},e('div',{className:'jcw-fl'},'Your Team'),team.map(c=>e('div',{key:c.id,className:'team-item'},e('div',{style:{width:36,height:36,borderRadius:'50%',background:avc(c.name).bg,color:avc(c.name).fg,display:'flex',alignItems:'center',justifyContent:'center',fontFamily:'var(--h)',fontSize:'14px',fontWeight:'700',flexShrink:0}},init(c.name)),e('div',null,e('div',{className:'ti-name'},c.name),e('div',{className:'ti-role'},getJobRole(job,c.id)||c.role),c.hasVehicle&&e('div',{className:'ti-car'},'🚗 Has a vehicle')))))
     )
   ));
 }
@@ -2172,7 +2374,7 @@ function buildJobCardSMS(job,crewId,farmList,crewList,appUrl){
   if(!crew)return null;
   const jds=jobDates(job);
   const endDate=jds.length?jds[jds.length-1]:job.startDate;
-  const teamNames=job.crew.map(id=>gcl(id)).filter(Boolean).map(c=>c.name+' ('+c.role+')').join(', ');
+  const teamNames=job.crew.map(id=>{const c=gcl(id);if(!c)return null;return {c,id};}).filter(Boolean).map(({c,id})=>c.name+' ('+(getJobRole(job,id)||c.role)+')').join(', ');
   const jobName=job.jobName||(farm?farm.name:'Farm');
   return [
     'Hi '+crew.name.split(' ')[0]+'! You have been added to a job with '+CONTRACTOR_NAME+'.',
@@ -2237,7 +2439,7 @@ function CrewSMSRow({id,c,views,status,onPreview,job,farmList,crewList,appUrl}){
       e(Av,{name:c.name,size:40}),
       e('div',null,
         e('div',{className:'sms-name'},c.name),
-        e('div',{className:'sms-role'},c.role),
+        e('div',{className:'sms-role'},getJobRole(job,id)||c.role),
         e('div',{className:'sms-ph'},c.phone||e('span',{style:{color:'var(--red)'}},'No number')),
         viewedAt&&e('div',{style:{fontSize:11,color:'var(--green)',fontWeight:700,marginTop:2}},'👁 Viewed '+fmtViewed(viewedAt))
       )
@@ -2480,6 +2682,14 @@ function NewJobModal({onClose,onCreate,farmList,crewList,addFarm,addCrew}){
       setSubmitErr('Please select at least one crew member. To save without crew, use "Save as Draft".');
       return;
     }
+    /* Snapshot each crew member's CURRENT role into crewDetails for this job.
+       This way, future global role changes won't retroactively rewrite this
+       job's pay history. (Bug fix — Apr 2026.) */
+    const initialCrewDetails={};
+    selCrew.forEach(id=>{
+      const c=crewList.find(cr=>cr.id===id);
+      if(c)initialCrewDetails[id]={role:c.role};
+    });
     onCreate({
       id:'j'+Date.now(),
       jobNumber:String(Math.floor(2104+Math.random()*50)).padStart(6,'0'),
@@ -2494,7 +2704,8 @@ function NewJobModal({onClose,onCreate,farmList,crewList,addFarm,addCrew}){
       status:asDraft?'Draft':'Active',crew:selCrew,
       jobPin:rJobPin.current?.value?.trim()||null,
       jobName:rJobName.current?.value?.trim()||'',
-      rates:mkRates(),runs:{},shedTallies:{},baleTallies:{},baleBF:{},travelTallies:{},dayNotes:{}
+      rates:{...mkRates(),crewDetails:initialCrewDetails},
+      runs:{},shedTallies:{},baleTallies:{},baleBF:{},travelTallies:{},dayNotes:{}
     });
   };
 
@@ -2551,7 +2762,7 @@ function NewJobModal({onClose,onCreate,farmList,crewList,addFarm,addCrew}){
       e(FF,{label:'Notes'},e('textarea',{className:'fi',rows:3,placeholder:'e.g. Merino full CRT and wig.',ref:rNotes})),
       e(FF,{label:'Job PIN (optional)'},
         e('div',null,
-          e('input',{type:'number',className:'fi',placeholder:'Leave blank for no PIN — e.g. 4821',ref:rJobPin,maxLength:6,inputMode:'numeric'}),
+          e('input',{type:'number',className:'fi',placeholder:'4-6 digits, leave blank for no PIN',ref:rJobPin,maxLength:6,inputMode:'numeric'}),
           e('div',{style:{fontSize:'11px',color:'var(--muted)',marginTop:5}},'🔒 If set, crew must enter this PIN to open the job.')
         )
       ),
@@ -2604,6 +2815,16 @@ function EditJobScreen({job,onSave,onClose,farmList,addFarm,crewList,addCrew}){
     const sheep=rSheep.current?.value?.trim();
     const startDate=rStartDate.current?.value||job.startDate;
     if(!farmId||!days||!sheep){setSubmitErr('Farm, days and sheep are required.');return;}
+    /* Snapshot roles for any NEW crew members being added.
+       Preserve existing snapshots so historical role context is kept. */
+    const existingDetails=(job.rates?.crewDetails)||{};
+    const newDetails={...existingDetails};
+    selCrew.forEach(id=>{
+      if(!newDetails[id]?.role){
+        const c=crewList.find(cr=>cr.id===id);
+        if(c)newDetails[id]={...(newDetails[id]||{}),role:c.role};
+      }
+    });
     onSave({
       ...job,
       farmId,type,
@@ -2617,6 +2838,7 @@ function EditJobScreen({job,onSave,onClose,farmList,addFarm,crewList,addCrew}){
       jobPin:rJobPin.current?.value?.trim()||null,
       jobName:rJobName.current?.value?.trim()||'',
       crew:selCrew,
+      rates:{...(job.rates||{}),crewDetails:newDetails},
     });
   };
 
@@ -2699,7 +2921,7 @@ function EditJobScreen({job,onSave,onClose,farmList,addFarm,crewList,addCrew}){
         e('textarea',{className:'fi',rows:3,defaultValue:job.notes_job||'',placeholder:'e.g. Merino full CRT and wig.',ref:rNotes})),
       e(FF,{label:'Job PIN (optional)'},
         e('div',null,
-          e('input',{type:'number',className:'fi',defaultValue:job.jobPin||'',placeholder:'Leave blank for no PIN',ref:rJobPin,inputMode:'numeric'}),
+          e('input',{type:'number',className:'fi',defaultValue:job.jobPin||'',placeholder:'4-6 digits, leave blank for no PIN',ref:rJobPin,inputMode:'numeric'}),
           e('div',{style:{fontSize:'11px',color:'var(--muted)',marginTop:5}},'🔒 If set, crew must enter this PIN to open the job.')
         )
       ),
@@ -2791,8 +3013,8 @@ function HomeScreen({jobs,role,setRole,onJob,onNew,onDatabase,onSchedule,contrac
         )
       ),
 
-      /* Drafts pill — only shown if drafts exist; directs to Schedule */
-      drafts.length>0&&onSchedule&&e('div',{className:'drafts-pill',onClick:onSchedule},
+      /* Drafts pill — only shown if drafts exist; directs to Schedule. Hidden for read-only role. */
+      drafts.length>0&&onSchedule&&role!=='read_only'&&e('div',{className:'drafts-pill',onClick:onSchedule},
         e('div',{className:'drafts-pill-ic'},'◌'),
         e('div',{className:'drafts-pill-body'},
           e('div',{className:'drafts-pill-t'},drafts.length+' draft'+(drafts.length>1?'s':'')+' planned'),
@@ -3284,6 +3506,12 @@ function App(){
   const [previewId,setPreviewId]=useState(null);
   const saveTimer=useRef(null);
   const isLoaded=useRef(false);
+  /* dirtyRef tracks whether React state has user changes not yet saved to BOTH localStorage AND Supabase.
+     dbLoad refuses to overwrite local state while dirty — prevents races losing tallies. */
+  const dirtyRef=useRef(false);
+  /* jobsRef holds the latest jobs state so that event handlers (goOnline, beforeunload, visibilitychange)
+     can read current React state synchronously. Updated whenever jobs state changes via the effect below. */
+  const jobsRef=useRef([]);
 
   /* Load on mount */
   useEffect(()=>{
@@ -3292,7 +3520,11 @@ function App(){
     const pendingOnMount=lsGet(LS_QUEUE)||[];
     const mountLoad=()=>dbLoad().then(({jobs:j,farms:f,crew:c,fromCache})=>{
       syncLookups(f,c);
-      setJobs(j);setFarmList(f);setCrewList(c);
+      /* Migrate legacy jobs — backfill crewDetails.role for any crew member
+         that doesn't yet have a per-job role snapshot. Prevents global role
+         changes from retroactively rewriting past pay summaries. */
+      const migratedJobs=j.map(job=>migrateJobRoles(job,c));
+      setJobs(migratedJobs);setFarmList(f);setCrewList(c);
       setLoadedFromCache(fromCache);
       setLoading(false);isLoaded.current=true;
       setPendingCount((lsGet(LS_QUEUE)||[]).length);
@@ -3333,19 +3565,33 @@ function App(){
     const goOnline=async()=>{
       setIsOnline(true);
       setSaveStatus('syncing');
-      /* First: make sure every local job is queued before flushing */
-      const localJobs=lsGet(LS_JOBS)||[];
-      localJobs.forEach(job=>queueWrite('job',job.id,job));
+      /* CRITICAL: queue writes from CURRENT REACT STATE, not stale localStorage.
+         The user may have typed tallies that are in React state but haven't yet
+         been written to localStorage by the debounced auto-save. */
+      const currentJobs=jobsRef.current.length>0?jobsRef.current:(lsGet(LS_JOBS)||[]);
+      currentJobs.forEach(job=>queueWrite('job',job.id,job));
       /* Flush queue to Supabase */
       const n=await flushQueue().catch(()=>0);
       const remaining=(lsGet(LS_QUEUE)||[]).length;
       setPendingCount(remaining);
       if(n>0){setSaveStatus('saved');setTimeout(()=>setSaveStatus(''),2500);}
       else setSaveStatus('');
-      /* Only re-fetch from Supabase if queue is fully clear — otherwise our 
-         local data is newer and we must not overwrite it */
-      if(remaining===0){
-        dbLoad().then(({jobs:j,farms:f,crew:c})=>{setJobs(j);setFarmList(f);setCrewList(c);});
+      /* Only re-fetch from Supabase if:
+         (a) queue is fully clear (otherwise our local data is newer), AND
+         (b) we have NO unsaved changes in React state (otherwise we'd lose them).
+         The dirtyRef check is the critical protection against the auto-save race. */
+      if(remaining===0&&!dirtyRef.current){
+        dbLoad().then(({jobs:j,farms:f,crew:c})=>{
+          /* Double-check dirty hasn't flipped during the await — if user typed
+             during the dbLoad, abort the overwrite. */
+          if(dirtyRef.current)return;
+          /* CRITICAL: sync globals BEFORE setting state so gf()/gc() return correct
+             values during the next render. Otherwise jobs render as "Unknown". */
+          syncLookups(f,c);
+          /* Migrate legacy jobs — backfill crewDetails.role for any crew without snapshot */
+          const migratedJobs=j.map(job=>migrateJobRoles(job,c));
+          setJobs(migratedJobs);setFarmList(f);setCrewList(c);
+        });
       }
     };
     const goOffline=()=>{setIsOnline(false);setSaveStatus('');};
@@ -3354,14 +3600,23 @@ function App(){
     return()=>{window.removeEventListener('online',goOnline);window.removeEventListener('offline',goOffline);};
   },[]);
 
-  /* Auto-save jobs debounced 1.5s — always saves to local cache, queues if offline */
+  /* Keep jobsRef in sync so async handlers can read current state synchronously */
+  useEffect(()=>{jobsRef.current=jobs;},[jobs]);
+
+  /* Auto-save jobs debounced 400ms — always saves to local cache, queues if offline.
+     Sets dirtyRef=true on every state change; clears only after successful save of ALL jobs.
+     This dirty flag is checked by goOnline → dbLoad to prevent overwriting unsaved local edits. */
   useEffect(()=>{
     if(!isLoaded.current)return;
+    /* Mark dirty AS SOON AS user makes a change. Cleared only on save success. */
+    dirtyRef.current=true;
     clearTimeout(saveTimer.current);
     setSaveStatus(isOnline?'saving':'offline');
     saveTimer.current=setTimeout(async()=>{
       try{
         await Promise.all(jobs.map(job=>dbSaveJob(job)));
+        /* Save complete — clear dirty flag so dbLoad can refresh from Supabase if needed */
+        dirtyRef.current=false;
         if(isOnline){
           setSaveStatus('saved');
           setPendingCount(0);
@@ -3371,11 +3626,41 @@ function App(){
           setPendingCount((lsGet(LS_QUEUE)||[]).length);
         }
       }catch(err){
+        /* Save failed — keep dirty so we don't risk overwriting local with stale Supabase */
         setSaveStatus('offline');
         setPendingCount((lsGet(LS_QUEUE)||[]).length);
       }
-    },800);
+    },400);
   },[jobs,isOnline]);
+
+  /* CRITICAL: Save immediately on tab hide / before unload.
+     If user types a tally and then locks phone or backgrounds the app within the 400ms
+     debounce, the save would never fire. This handler flushes pending changes synchronously.
+     localStorage is synchronous and survives unload; Supabase upserts are fire-and-forget
+     (they queue via the offline path if they don't complete in time). */
+  useEffect(()=>{
+    if(!isLoaded.current)return;
+    const flushNow=()=>{
+      /* Cancel any pending debounce — we're saving now */
+      clearTimeout(saveTimer.current);
+      const currentJobs=jobsRef.current;
+      if(!currentJobs||currentJobs.length===0)return;
+      /* dbSaveJob writes localStorage synchronously then returns a promise for Supabase.
+         Even if the page unloads mid-Supabase-call, localStorage is already written. */
+      currentJobs.forEach(job=>{
+        try{dbSaveJob(job);}catch(e){}
+      });
+    };
+    const onVis=()=>{if(document.visibilityState==='hidden')flushNow();};
+    window.addEventListener('beforeunload',flushNow);
+    window.addEventListener('pagehide',flushNow);
+    document.addEventListener('visibilitychange',onVis);
+    return()=>{
+      window.removeEventListener('beforeunload',flushNow);
+      window.removeEventListener('pagehide',flushNow);
+      document.removeEventListener('visibilitychange',onVis);
+    };
+  },[]);
 
   const addFarm=async f=>{setFarmList(p=>{const n=[...p,f];syncLookups(n,CREW);return n;});await dbSaveFarm(f).catch(()=>{});};
   const addCrew=async c=>{setCrewList(p=>{const n=[...p,c];syncLookups(FARMS,n);return n;});await dbSaveCrew(c).catch(()=>{});};
@@ -3459,7 +3744,7 @@ function App(){
   return e('div',{style:{paddingTop:!isOnline?20:0}},
     e(StatusBar),
     screen==='home'&&e(HomeScreen,{jobs,role,setRole:persistRole,onJob:goJob,onNew:()=>setShowNew(true),onDatabase:()=>setShowDatabase(true),onSchedule:goSchedule,contractorName:CONTRACTOR_NAME}),
-    screen==='schedule'&&e(ScheduleScreen,{jobs,role,setRole:persistRole,onBack:goHome,onJob:goJob,onNew:()=>setShowNew(true),onNewDraft:()=>setShowNew(true)}),
+    screen==='schedule'&&role!=='read_only'&&e(ScheduleScreen,{jobs,role,setRole:persistRole,onBack:goHome,onJob:goJob,onNew:()=>setShowNew(true),onNewDraft:()=>setShowNew(true)}),
     screen==='job'&&selJob&&e(JobDetailScreen,{job:selJob,setJob:setSelJob,role,setRole:persistRole,onBack:goHome,onSend:()=>setShowSMS(true),onBroadcast:()=>setShowBroadcast(true),gfl,gcl,onEdit:()=>setShowEdit(true),onPublish:publishJob,onDeleteJob:async()=>{await dbDeleteJob(selJob.id);setJobs(p=>p.filter(j=>j.id!==selJob.id));goHome();},initialTab:deepLinkTab,key:selJobId+(deepLinkTab||'')}),
     showSMS&&selJob&&e(SMSModal,{job:selJob,onClose:()=>{setShowSMS(false);setPreviewId(null);},onPreview:id=>setPreviewId(id),farmList,crewList}),
     showBroadcast&&selJob&&e(BroadcastModal,{job:selJob,onClose:()=>setShowBroadcast(false),farmList,crewList}),
