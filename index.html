@@ -3564,11 +3564,24 @@ function App(){
   useEffect(()=>{
     const goOnline=async()=>{
       setIsOnline(true);
+      /* v4-3 FIX: Don't run sync logic until mountLoad has completed.
+         Before this guard, an early 'online' event could fire goOnline
+         while jobsRef.current was still []. The fallback to lsGet(LS_JOBS)
+         then queued and uploaded stale localStorage from a previous session,
+         overwriting good Supabase data. (Caused Lachie's perceived data loss
+         after v4-2 deploy on 2026-04-29.) Skipping sync until isLoaded.current
+         is safe — once mountLoad finishes, dbLoad has populated React state
+         from Supabase, and any subsequent online events will have valid
+         jobsRef.current to work from. */
+      if(!isLoaded.current){
+        setSaveStatus('');
+        return;
+      }
       setSaveStatus('syncing');
       /* CRITICAL: queue writes from CURRENT REACT STATE, not stale localStorage.
          The user may have typed tallies that are in React state but haven't yet
          been written to localStorage by the debounced auto-save. */
-      const currentJobs=jobsRef.current.length>0?jobsRef.current:(lsGet(LS_JOBS)||[]);
+      const currentJobs=jobsRef.current;
       currentJobs.forEach(job=>queueWrite('job',job.id,job));
       /* Flush queue to Supabase */
       const n=await flushQueue().catch(()=>0);
