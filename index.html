@@ -3537,15 +3537,23 @@ function App(){
         const cid=crewMatch?crewMatch[1]:null;
         const found=j.find(x=>x.id===jid);
         if(found){setSelJobId(jid);setScreen('job');setDeepLinkTab('overview');}
-        /* Log the view to Supabase */
+        /* Log the view to Supabase. Wrap the response in a setTimeout so the 
+           request actually fires before mountLoad's .then() returns and the 
+           promise gets abandoned. */
         if(jid&&cid){
-          sb.from('job_views').upsert({
+          const upsertPromise=sb.from('job_views').upsert({
             id:jid+'_'+cid,
             contractor_slug:CONTRACTOR_SLUG,
             job_id:jid,
             crew_id:cid,
             viewed_at:new Date().toISOString()
-          },{onConflict:'id'}).then(()=>{}).catch(()=>{});
+          },{onConflict:'id'});
+          /* Force the request to actually execute by attaching .then with 
+             real work in it. Just .catch() alone doesn't seem to trigger 
+             execution in this Supabase client version. */
+          upsertPromise.then(res=>{
+            if(res&&res.error){console.warn('job_view write failed:',res.error.message);}
+          }).catch(e=>{console.warn('job_view threw:',e?.message);});
         }
         window.location.hash='';
       }
