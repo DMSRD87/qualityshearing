@@ -3545,7 +3545,7 @@ function App(){
             job_id:jid,
             crew_id:cid,
             viewed_at:new Date().toISOString()
-          },{onConflict:'id'}).catch(()=>{});
+          },{onConflict:'id'}).then(()=>{}).catch(()=>{});
         }
         window.location.hash='';
       }
