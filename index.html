@@ -522,6 +522,7 @@ const LS_ROLE='mg_role_'+CONTRACTOR_SLUG;
 const LS_LAST_RATES='mg_last_rates_'+CONTRACTOR_SLUG;
 const LS_ROLE_TS='mg_role_ts_'+CONTRACTOR_SLUG;
 const ROLE_TIMEOUT_HOURS=12; /* auto-reset after 12h inactivity */
+const APP_VERSION='v4.4.0'; /* Increment per deploy. Surfaces in admin footer + save_failures logs for diagnostics. */
 
 const lsGet=k=>{try{return JSON.parse(localStorage.getItem(k)||'null');}catch{return null;}};
 const lsSet=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v));}catch(e){console.warn('localStorage full',e);}};
@@ -687,6 +688,34 @@ async function dbSaveJob(job){
     const result=await withTimeout(upsertCall,5000,'upsert_timeout');
     if(result&&result.error)throw new Error(result.error.message);
     dequeue('job',job.id);
+    /* PATCH A — Snapshot system. After every successful main save, fire a
+       parallel upsert into job_snapshots keyed by (slug, job_id, today AEST).
+       Throughout today this overwrites today's row. At local midnight, today
+       rolls over to a new date and yesterday's snapshot becomes frozen — no
+       future write can target it. Recovery from any future wipe = a single
+       UPDATE query against the most recent snapshot.
+
+       Fire-and-forget with 3s timeout. The main save has already succeeded;
+       a failed snapshot must not block, throw, or affect anything user-facing.
+       Failures are logged to save_failures for visibility. */
+    try{
+      const snapPayload={
+        contractor_slug:CONTRACTOR_SLUG,
+        job_id:job.id,
+        snapshot_date:localToday(),
+        data:job,
+        updated_at:new Date().toISOString()
+      };
+      withTimeout(
+        sb.from('job_snapshots').upsert(snapPayload,{onConflict:'contractor_slug,job_id,snapshot_date'}).then(r=>{
+          if(r&&r.error)logSaveFailure('snapshot_error',job.id,r.error.message);
+        }),
+        3000,
+        'snapshot_timeout'
+      ).catch(err=>{
+        logSaveFailure(err.message==='snapshot_timeout'?'snapshot_timeout':'snapshot_error',job.id,err.message);
+      });
+    }catch(snapErr){ /* never break the save flow */ }
   }catch(e){
     /* Queue for retry on next online event or mountLoad */
     queueWrite('job',job.id,job);
@@ -701,6 +730,9 @@ async function dbSaveJob(job){
 async function dbDeleteJob(jobId){
   const jobs=lsGet(LS_JOBS)||[];
   lsSet(LS_JOBS,jobs.filter(j=>j.id!==jobId));
+  /* Clear any pending queued upsert for this job — without this, a queued
+     write from before the delete would resurrect the job on next flushQueue. */
+  dequeue('job',jobId);
   try{await sb.from('jobs').delete().eq('id',jobId).eq('contractor_slug',CONTRACTOR_SLUG);}catch(e){}
 }
 async function dbSaveFarm(farm){
@@ -1984,7 +2016,8 @@ function AdminTab({job,setJob,onEdit,onDeleteFarm,onDeleteJob,onPublish}){
         )
       )
     ),
-    e('div',{style:{height:16}})
+    e('div',{style:{height:16}}),
+    e('div',{style:{textAlign:'center',fontSize:10,color:'var(--dim)',padding:'8px 0 24px',fontFamily:'var(--m)',letterSpacing:'.5px'}},'myGang '+APP_VERSION)
   );
 }
 
@@ -3763,7 +3796,7 @@ function App(){
     e(StatusBar),
     screen==='home'&&e(HomeScreen,{jobs,role,setRole:persistRole,onJob:goJob,onNew:()=>setShowNew(true),onDatabase:()=>setShowDatabase(true),onSchedule:goSchedule,contractorName:CONTRACTOR_NAME}),
     screen==='schedule'&&role!=='read_only'&&e(ScheduleScreen,{jobs,role,setRole:persistRole,onBack:goHome,onJob:goJob,onNew:()=>setShowNew(true),onNewDraft:()=>setShowNew(true)}),
-    screen==='job'&&selJob&&e(JobDetailScreen,{job:selJob,setJob:setSelJob,role,setRole:persistRole,onBack:goHome,onSend:()=>setShowSMS(true),onBroadcast:()=>setShowBroadcast(true),gfl,gcl,onEdit:()=>setShowEdit(true),onPublish:publishJob,onDeleteJob:async()=>{await dbDeleteJob(selJob.id);setJobs(p=>p.filter(j=>j.id!==selJob.id));goHome();},initialTab:deepLinkTab,key:selJobId+(deepLinkTab||'')}),
+    screen==='job'&&selJob&&e(JobDetailScreen,{job:selJob,setJob:setSelJob,role,setRole:persistRole,onBack:goHome,onSend:()=>setShowSMS(true),onBroadcast:()=>setShowBroadcast(true),gfl,gcl,onEdit:()=>setShowEdit(true),onPublish:publishJob,onDeleteJob:async()=>{const id=selJob.id;setSelJobId(null);await dbDeleteJob(id);setJobs(p=>p.filter(j=>j.id!==id));setScreen('home');setShowSMS(false);setPreviewId(null);setJobPinPending(null);},initialTab:deepLinkTab,key:selJobId+(deepLinkTab||'')}),
     showSMS&&selJob&&e(SMSModal,{job:selJob,onClose:()=>{setShowSMS(false);setPreviewId(null);},onPreview:id=>setPreviewId(id),farmList,crewList}),
     showBroadcast&&selJob&&e(BroadcastModal,{job:selJob,onClose:()=>setShowBroadcast(false),farmList,crewList}),
     previewId&&selJob&&e(JobCardView,{job:selJob,crewId:previewId,onClose:()=>setPreviewId(null),gfl,gcl}),
