@@ -521,11 +521,14 @@ const LS_QUEUE='mg_queue_'+CONTRACTOR_SLUG;
 const LS_ROLE='mg_role_'+CONTRACTOR_SLUG;
 const LS_LAST_RATES='mg_last_rates_'+CONTRACTOR_SLUG;
 const LS_ROLE_TS='mg_role_ts_'+CONTRACTOR_SLUG;
+const LS_DATA_VERSION='mg_data_version_'+CONTRACTOR_SLUG; /* tracks DATA_VERSION for one-time cache wipe */
 const ROLE_TIMEOUT_HOURS=12; /* auto-reset after 12h inactivity */
-const APP_VERSION='v4.4.0'; /* Increment per deploy. Surfaces in admin footer + save_failures logs for diagnostics. */
+const APP_VERSION='v4.5.0'; /* Increment per deploy. Surfaces in admin footer + save_failures logs for diagnostics. */
+const DATA_VERSION='2026-05-02-cleanup'; /* Bump to force a one-time localStorage cache wipe on next boot. Used to clear stale state across all devices after a deploy that fixes data-corruption bugs. The wipe only happens if the offline queue is empty or successfully flushed first. */
 
 const lsGet=k=>{try{return JSON.parse(localStorage.getItem(k)||'null');}catch{return null;}};
 const lsSet=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v));}catch(e){console.warn('localStorage full',e);}};
+const lsRemove=k=>{try{localStorage.removeItem(k);}catch(e){}};
 
 function queueWrite(type,id,data){
   const q=lsGet(LS_QUEUE)||[];
@@ -681,6 +684,35 @@ async function dbSaveJob(job){
      the await never returns, the catch block never fires, and the data
      never makes it to the queue. */
   try{
+    /* PATCH v4.5.0 — Pre-save guard.
+       Fetch current Supabase state for this job. If Supabase has STRICTLY MORE
+       dates of runs than we're about to save, refuse the save — this state we'd
+       be about to write is regressive and almost certainly stale. Log the rejection
+       so we can investigate.
+       This is the last-line-of-defense against the multi-contractor wipe bug.
+       Even if isFresh gates fail somehow, this catches saves that would shrink
+       the job's runs history. */
+    const incomingRunDates=Object.keys((job&&job.runs)||{}).length;
+    if(incomingRunDates>0){
+      const guardCheck=await withTimeout(
+        sb.from('jobs').select('data').eq('id',job.id).eq('contractor_slug',CONTRACTOR_SLUG).maybeSingle(),
+        3000,
+        'guard_timeout'
+      ).catch(err=>({error:{message:'guard_check_failed:'+err.message}}));
+      if(guardCheck&&!guardCheck.error&&guardCheck.data&&guardCheck.data.data){
+        const supabaseRunDates=Object.keys((guardCheck.data.data.runs)||{}).length;
+        if(supabaseRunDates>incomingRunDates){
+          logSaveFailure(
+            'guard_rejected_save',
+            job.id,
+            'incoming_dates='+incomingRunDates+';supabase_dates='+supabaseRunDates+';refused'
+          );
+          /* Don't throw — just queue for later. Next save with full state will succeed. */
+          queueWrite('job',job.id,job);
+          return;
+        }
+      }
+    }
     const upsertCall=sb.from('jobs').upsert(
       {id:job.id,contractor_slug:CONTRACTOR_SLUG,data:job,updated_at:new Date().toISOString()},
       {onConflict:'id'}
@@ -3545,11 +3577,31 @@ function App(){
   /* jobsRef holds the latest jobs state so that event handlers (goOnline, beforeunload, visibilitychange)
      can read current React state synchronously. Updated whenever jobs state changes via the effect below. */
   const jobsRef=useRef([]);
+  /* isFreshRef tracks whether current React jobs state came from a successful Supabase round-trip.
+     - false initially and after cache fallback (means: we don't trust this state enough to write it back)
+     - true after successful dbLoad with fromCache=false
+     - true after a user-initiated edit within this session (their input is the new truth)
+     ALL save paths gate on this. If !isFresh, save paths become no-ops to prevent stale state from
+     overwriting Supabase. This is the primary fix for the multi-contractor data wipe bug. */
+  const isFreshRef=useRef(false);
+  /* isFreshState mirrors isFreshRef but as React state, so UI components can react to changes. */
+  const [isFreshState,setIsFreshState]=useState(false);
+  /* Helper to update both ref and state in sync */
+  const setFresh=v=>{isFreshRef.current=v;setIsFreshState(v);};
+  /* lastVisibleRef tracks the timestamp of the last time the tab was visible.
+     Used by the visibilitychange handler to decide if a long-hidden tab needs a fresh dbLoad on resume. */
+  const lastVisibleRef=useRef(Date.now());
+  /* suppressNextSaveRef: when system code (mountLoad, dbLoad refresh, visibility revalidate, goOnline)
+     calls setJobs to install state FROM Supabase (or cache fallback), it sets this flag. The auto-save
+     effect respects the flag — it does NOT mark dirty and does NOT push to Supabase, then clears the
+     flag. This prevents two specific bugs:
+       a) Mount-load auto-save echo (writing Supabase data straight back to Supabase, wasted I/O)
+       b) Mount-load false dirty (causing goOnline to skip future refresh because "we have unsaved work") */
+  const suppressNextSaveRef=useRef(false);
 
   /* Load on mount */
   useEffect(()=>{
     loadPins(); /* load PIN hashes from Supabase on mount */
-    /* Flush any pending offline writes before loading — ensures Supabase is up to date */
     const pendingOnMount=lsGet(LS_QUEUE)||[];
     const mountLoad=()=>dbLoad().then(({jobs:j,farms:f,crew:c,fromCache})=>{
       syncLookups(f,c);
@@ -3557,9 +3609,22 @@ function App(){
          that doesn't yet have a per-job role snapshot. Prevents global role
          changes from retroactively rewriting past pay summaries. */
       const migratedJobs=j.map(job=>migrateJobRoles(job,c));
+      /* Mark this state set as system-driven so auto-save doesn't fire on it */
+      suppressNextSaveRef.current=true;
       setJobs(migratedJobs);setFarmList(f);setCrewList(c);
       setLoadedFromCache(fromCache);
       setLoading(false);isLoaded.current=true;
+      /* PATCH v4.5.0: Mark data fresh ONLY if we got a real Supabase response.
+         If fromCache=true (network failure, fell through to localStorage), we cannot
+         trust this state. Save paths gate on isFreshRef and become no-ops until a
+         successful Supabase load promotes us to fresh. */
+      if(!fromCache){
+        setFresh(true);
+        logSaveFailure('diag_load','mountLoad','fresh_from_supabase;jobs='+j.length);
+      }else{
+        setFresh(false);
+        logSaveFailure('diag_load','mountLoad','stale_from_cache;jobs='+j.length+';online='+navigator.onLine);
+      }
       setPendingCount((lsGet(LS_QUEUE)||[]).length);
       /* Deep link: #job=JOB_ID&crew=CREW_ID opens that job on Overview tab and logs view */
       const hash=window.location.hash;
@@ -3570,28 +3635,66 @@ function App(){
         const cid=crewMatch?crewMatch[1]:null;
         const found=j.find(x=>x.id===jid);
         if(found){setSelJobId(jid);setScreen('job');setDeepLinkTab('overview');}
-        /* Log the view to Supabase */
         if(jid&&cid){
-          logSaveFailure('debug_deeplink','about_to_upsert',jid+'_'+cid);
           sb.from('job_views').upsert({
             id:jid+'_'+cid,
             contractor_slug:CONTRACTOR_SLUG,
             job_id:jid,
             crew_id:cid,
             viewed_at:new Date().toISOString()
-          },{onConflict:'id'}).then(res=>{
-            logSaveFailure('debug_deeplink','upsert_response','status='+(res?.status||'?')+';error='+(res?.error?.message||'none'));
-          }).catch(e=>{
-            logSaveFailure('debug_deeplink','upsert_threw',e?.message||String(e));
-          });
+          },{onConflict:'id'}).catch(()=>{});
         }
         window.location.hash='';
       }
-    }).catch(()=>{setLoading(false);isLoaded.current=true;});
-    if(pendingOnMount.length>0&&navigator.onLine){
-      flushQueue().then(()=>mountLoad()).catch(()=>mountLoad());
-    } else {
-      mountLoad();
+    }).catch(()=>{setLoading(false);isLoaded.current=true;setFresh(false);});
+
+    /* PATCH v4.5.0: Data version check.
+       On boot, compare stored DATA_VERSION against the version this code build expects.
+       If different, we know stale local state is at risk of being pushed to Supabase. We:
+         1. Try to flush any pending offline queue first (preserves unsynced user work)
+         2. If queue is fully flushed (or was empty), wipe local caches so mountLoad must
+            pull fresh from Supabase. Cannot serve stale cache.
+         3. If queue still has items after flush attempt (offline), DO NOT wipe — the
+            user has unsynced work we'd destroy. Defer the wipe and proceed with mountLoad
+            as normal; next successful online session will trigger the wipe.
+       This is a one-time event per device per DATA_VERSION change. */
+    const proceedWithLoad=()=>{
+      if(pendingOnMount.length>0&&navigator.onLine){
+        flushQueue().then(()=>mountLoad()).catch(()=>mountLoad());
+      } else {
+        mountLoad();
+      }
+    };
+    const storedDataVersion=lsGet(LS_DATA_VERSION);
+    if(storedDataVersion!==DATA_VERSION){
+      logSaveFailure('diag_dataversion','mismatch','stored='+storedDataVersion+';expected='+DATA_VERSION);
+      const performWipe=()=>{
+        const remainingQ=lsGet(LS_QUEUE)||[];
+        if(remainingQ.length===0){
+          lsRemove(LS_JOBS);
+          lsRemove(LS_FARMS);
+          lsRemove(LS_CREW);
+          lsSet(LS_DATA_VERSION,DATA_VERSION);
+          logSaveFailure('diag_dataversion','wiped_caches','queue_empty');
+        }else{
+          /* Defer: queue still has items, don't destroy them */
+          logSaveFailure('diag_dataversion','wipe_deferred','queue_has='+remainingQ.length);
+        }
+        proceedWithLoad();
+      };
+      if(pendingOnMount.length>0&&navigator.onLine){
+        /* Try queue flush first */
+        flushQueue().then(()=>performWipe()).catch(()=>performWipe());
+      }else if(pendingOnMount.length>0){
+        /* Have queue but offline — defer wipe, just proceed */
+        logSaveFailure('diag_dataversion','wipe_deferred','offline_with_queue');
+        proceedWithLoad();
+      }else{
+        /* Queue empty, just wipe and proceed */
+        performWipe();
+      }
+    }else{
+      proceedWithLoad();
     }
   },[]);
 
@@ -3616,32 +3719,53 @@ function App(){
         return;
       }
       setSaveStatus('syncing');
-      /* CRITICAL: queue writes from CURRENT REACT STATE, not stale localStorage.
-         The user may have typed tallies that are in React state but haven't yet
-         been written to localStorage by the debounced auto-save. */
-      const currentJobs=jobsRef.current;
-      currentJobs.forEach(job=>queueWrite('job',job.id,job));
+      /* PATCH v4.5.0: Only queue+upload from React state if we KNOW that state is fresh.
+         If isFresh is false, our React state came from cache fallback and could be stale.
+         Pushing it would cause the multi-contractor wipe bug. Instead, try a fresh dbLoad
+         to upgrade ourselves to fresh, then queue legitimately-fresh state. */
+      if(isFreshRef.current){
+        /* CRITICAL: queue writes from CURRENT REACT STATE, not stale localStorage.
+           The user may have typed tallies that are in React state but haven't yet
+           been written to localStorage by the debounced auto-save. */
+        const currentJobs=jobsRef.current;
+        currentJobs.forEach(job=>queueWrite('job',job.id,job));
+      }else{
+        logSaveFailure('diag_save','goOnline_skipped_queue','not_fresh;jobs='+jobsRef.current.length);
+      }
       /* Flush queue to Supabase */
       const n=await flushQueue().catch(()=>0);
       const remaining=(lsGet(LS_QUEUE)||[]).length;
       setPendingCount(remaining);
       if(n>0){setSaveStatus('saved');setTimeout(()=>setSaveStatus(''),2500);}
       else setSaveStatus('');
-      /* Only re-fetch from Supabase if:
-         (a) queue is fully clear (otherwise our local data is newer), AND
-         (b) we have NO unsaved changes in React state (otherwise we'd lose them).
-         The dirtyRef check is the critical protection against the auto-save race. */
-      if(remaining===0&&!dirtyRef.current){
-        dbLoad().then(({jobs:j,farms:f,crew:c})=>{
-          /* Double-check dirty hasn't flipped during the await — if user typed
-             during the dbLoad, abort the overwrite. */
-          if(dirtyRef.current)return;
+      /* Re-fetch from Supabase if:
+         (a) queue is fully clear (otherwise local has unsynced writes), AND
+         (b) either we're in stale mode (we MUST recover to fresh, even if user typed
+             something while stale — those local edits are unreliable anyway since they
+             were typed against incomplete state), OR we have no dirty React state. */
+      const shouldRefetch=remaining===0 && (!isFreshRef.current || !dirtyRef.current);
+      if(shouldRefetch){
+        if(!isFreshRef.current){
+          logSaveFailure('diag_load','goOnline_stale_recovery','attempting_dbLoad');
+        }
+        dbLoad().then(({jobs:j,farms:f,crew:c,fromCache})=>{
+          /* If we're already fresh, respect dirty check (don't overwrite user edits).
+             If we're stale, prioritise recovery — overwrite anyway. */
+          if(isFreshRef.current && dirtyRef.current)return;
           /* CRITICAL: sync globals BEFORE setting state so gf()/gc() return correct
              values during the next render. Otherwise jobs render as "Unknown". */
           syncLookups(f,c);
           /* Migrate legacy jobs — backfill crewDetails.role for any crew without snapshot */
           const migratedJobs=j.map(job=>migrateJobRoles(job,c));
+          /* Mark this state set as system-driven so auto-save doesn't fire on it */
+          suppressNextSaveRef.current=true;
           setJobs(migratedJobs);setFarmList(f);setCrewList(c);
+          /* PATCH v4.5.0: Promote to fresh if this dbLoad succeeded against Supabase */
+          if(!fromCache){
+            setFresh(true);
+            dirtyRef.current=false; /* state is now fresh from Supabase, not dirty */
+            logSaveFailure('diag_load','goOnline_dbLoad','promoted_to_fresh');
+          }
         });
       }
     };
@@ -3656,11 +3780,34 @@ function App(){
 
   /* Auto-save jobs debounced 400ms — always saves to local cache, queues if offline.
      Sets dirtyRef=true on every state change; clears only after successful save of ALL jobs.
-     This dirty flag is checked by goOnline → dbLoad to prevent overwriting unsaved local edits. */
+     This dirty flag is checked by goOnline → dbLoad to prevent overwriting unsaved local edits.
+
+     PATCH v4.5.0: Two changes to fix the multi-contractor wipe bug:
+     1. Gated on isFreshRef. If state isn't fresh (came from cache fallback), refuse to save.
+        Without this gate, mountLoad's cache fallback was triggering immediate auto-save with
+        stale state, overwriting good Supabase data.
+     2. Removed isOnline from dependency array. Previously, isOnline flipping (e.g. wifi blip,
+        screen wake) would re-fire this effect with whatever React state was active — possibly
+        stale. Now the effect only fires when jobs actually change. */
   useEffect(()=>{
     if(!isLoaded.current)return;
-    /* Mark dirty AS SOON AS user makes a change. Cleared only on save success. */
+    /* If the most recent state change was from system code (mountLoad, dbLoad, etc),
+       don't treat it as user input. Don't mark dirty, don't push to Supabase. */
+    if(suppressNextSaveRef.current){
+      suppressNextSaveRef.current=false;
+      return;
+    }
+    /* Mark dirty FIRST — before the isFresh gate. We need this set even when blocking
+       Supabase saves so that any subsequent dbLoad refresh won't overwrite user input. */
     dirtyRef.current=true;
+    /* Always update local cache with current state — survives page close even
+       when we can't push to Supabase. This is the user's own work; it should
+       never be lost just because the cloud is stale. */
+    try{lsSet(LS_JOBS,jobs);}catch(e){}
+    if(!isFreshRef.current){
+      logSaveFailure('diag_save','autosave_blocked_stale','jobs='+jobs.length+';local_cached');
+      return;
+    }
     clearTimeout(saveTimer.current);
     setSaveStatus(isOnline?'saving':'offline');
     saveTimer.current=setTimeout(async()=>{
@@ -3682,7 +3829,17 @@ function App(){
         setPendingCount((lsGet(LS_QUEUE)||[]).length);
       }
     },400);
-  },[jobs,isOnline]);
+  },[jobs]);
+
+  /* PATCH v4.5.0: Status indicator update moved out of auto-save effect.
+     Originally the auto-save effect listened to isOnline so the UI could update on network changes.
+     Now isolated here — UI updates without triggering save logic. */
+  useEffect(()=>{
+    if(!isLoaded.current)return;
+    if(saveTimer.current)return; /* an active save is already updating status */
+    setSaveStatus(isOnline?'':'offline');
+    if(!isOnline)setPendingCount((lsGet(LS_QUEUE)||[]).length);
+  },[isOnline]);
 
   /* CRITICAL: Save immediately on tab hide / before unload.
      If user types a tally and then locks phone or backgrounds the app within the 400ms
@@ -3694,6 +3851,13 @@ function App(){
     const flushNow=()=>{
       /* Cancel any pending debounce — we're saving now */
       clearTimeout(saveTimer.current);
+      /* PATCH v4.5.0: Don't push state we can't trust to Supabase.
+         If !isFresh, we'll skip the Supabase upsert path. localStorage write still
+         happens synchronously (harmless — it's only a local cache). */
+      if(!isFreshRef.current){
+        logSaveFailure('diag_save','flushNow_blocked_stale','jobs='+(jobsRef.current||[]).length);
+        return;
+      }
       const currentJobs=jobsRef.current;
       if(!currentJobs||currentJobs.length===0)return;
       /* dbSaveJob writes localStorage synchronously then returns a promise for Supabase.
@@ -3702,7 +3866,39 @@ function App(){
         try{dbSaveJob(job);}catch(e){}
       });
     };
-    const onVis=()=>{if(document.visibilityState==='hidden')flushNow();};
+    /* PATCH v4.5.0: On visibility change, also handle the resume case.
+       If the tab was hidden for >10 minutes, force a fresh dbLoad before allowing
+       any saves to fire. This catches the wakeup-from-pocket scenario where a stale
+       device's React state would otherwise auto-save and overwrite Supabase. */
+    const VISIBILITY_REVALIDATE_MS=10*60*1000; /* 10 minutes */
+    const onVis=()=>{
+      if(document.visibilityState==='hidden'){
+        lastVisibleRef.current=Date.now();
+        flushNow();
+      }else{
+        const hiddenFor=Date.now()-lastVisibleRef.current;
+        if(hiddenFor>VISIBILITY_REVALIDATE_MS){
+          /* Long hidden — invalidate freshness and force a fresh dbLoad */
+          logSaveFailure('diag_visibility','revalidate_required','hidden_ms='+hiddenFor);
+          setFresh(false);
+          if(navigator.onLine){
+            dbLoad().then(({jobs:j,farms:f,crew:c,fromCache})=>{
+              if(dirtyRef.current)return;
+              syncLookups(f,c);
+              const migratedJobs=j.map(job=>migrateJobRoles(job,c));
+              /* Mark this state set as system-driven so auto-save doesn't fire on it */
+              suppressNextSaveRef.current=true;
+              setJobs(migratedJobs);setFarmList(f);setCrewList(c);
+              if(!fromCache){
+                setFresh(true);
+                logSaveFailure('diag_load','visibility_revalidate','fresh_after_revalidate');
+              }
+            }).catch(()=>{});
+          }
+        }
+        lastVisibleRef.current=Date.now();
+      }
+    };
     window.addEventListener('beforeunload',flushNow);
     window.addEventListener('pagehide',flushNow);
     document.addEventListener('visibilitychange',onVis);
@@ -3789,10 +3985,13 @@ function App(){
     !isOnline&&e('div',{style:{position:'fixed',top:0,left:0,right:0,zIndex:200,background:'#1e293b',color:'rgba(255,255,255,.7)',fontSize:11,fontWeight:700,textAlign:'center',padding:'4px',letterSpacing:.5}},
       pendingCount>0?`✈ Offline — ${pendingCount} change${pendingCount>1?'s':''} will sync when signal returns`:'✈ Offline — changes saved to device'
     ),
+    isOnline&&!isFreshState&&isLoaded.current&&e('div',{style:{position:'fixed',top:0,left:0,right:0,zIndex:200,background:'#7c2d12',color:'#fff',fontSize:11,fontWeight:700,textAlign:'center',padding:'4px',letterSpacing:.5}},
+      '⟳ Reconnecting to server — changes will save once connected'
+    ),
     sc&&e('div',{style:{position:'fixed',bottom:80,right:18,padding:'5px 12px',borderRadius:20,fontSize:11,fontWeight:700,zIndex:100,background:sc.bg,color:'#fff',boxShadow:'0 2px 8px rgba(0,0,0,.2)'}},sc.txt)
   );
 
-  return e('div',{style:{paddingTop:!isOnline?20:0}},
+  return e('div',{style:{paddingTop:(!isOnline||(isOnline&&!isFreshState&&isLoaded.current))?20:0}},
     e(StatusBar),
     screen==='home'&&e(HomeScreen,{jobs,role,setRole:persistRole,onJob:goJob,onNew:()=>setShowNew(true),onDatabase:()=>setShowDatabase(true),onSchedule:goSchedule,contractorName:CONTRACTOR_NAME}),
     screen==='schedule'&&role!=='read_only'&&e(ScheduleScreen,{jobs,role,setRole:persistRole,onBack:goHome,onJob:goJob,onNew:()=>setShowNew(true),onNewDraft:()=>setShowNew(true)}),
