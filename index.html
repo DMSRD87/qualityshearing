@@ -509,7 +509,7 @@ const {useState,useEffect,useRef}=React,e=React.createElement;
 /* ── SUPABASE CONFIG — update these 3 lines per deployment ── */
 const SUPABASE_URL='https://yhkcdycypwxzxxwaxnzj.supabase.co';
 const SUPABASE_ANON_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inloa2NkeWN5cHd4enh4d2F4bnpqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYzMjgxMTgsImV4cCI6MjA5MTkwNDExOH0.q9u1O_uixHxDcb8bJgPJg-CaSSPU3XNZxfqYV6YnHWE';
-const CONTRACTOR_SLUG='quality-shearing';
+const CONTRACTOR_SLUG='darby-shearing';
 
 const sb=supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
 
@@ -523,8 +523,18 @@ const LS_LAST_RATES='mg_last_rates_'+CONTRACTOR_SLUG;
 const LS_ROLE_TS='mg_role_ts_'+CONTRACTOR_SLUG;
 const LS_DATA_VERSION='mg_data_version_'+CONTRACTOR_SLUG; /* tracks DATA_VERSION for one-time cache wipe */
 const ROLE_TIMEOUT_HOURS=12; /* auto-reset after 12h inactivity */
-const APP_VERSION='v4.5.0'; /* Increment per deploy. Surfaces in admin footer + save_failures logs for diagnostics. */
-const DATA_VERSION='2026-05-02-cleanup'; /* Bump to force a one-time localStorage cache wipe on next boot. Used to clear stale state across all devices after a deploy that fixes data-corruption bugs. The wipe only happens if the offline queue is empty or successfully flushed first. */
+const APP_VERSION='v4.5.5'; /* CRITICAL FIX over v4.5.4. The useEffect that installs
+  visibilitychange / beforeunload / pagehide / pageshow handlers was gated by an early
+  return: if(!isLoaded.current)return;. Because that effect has [] deps and isLoaded.current
+  is only set true asynchronously inside mountLoad's .then(), the gate ALWAYS triggered on
+  mount and the effect returned without installing any listeners. The effect never re-ran
+  (deps were []). So in production NO ONE had lifecycle handlers installed. Result: when
+  iOS Safari aggressively killed tabs (constant for shed leads with phones in pockets), the
+  400ms autosave debounce timer was killed before firing — local edits sat in localStorage
+  but next mountLoad overwrote them with Supabase. Confirmed by 7 days of telemetry showing
+  ZERO diag_visibility / diag_pageshow / diag_pagehide entries across 1,936 iPhone autosave
+  events. v4.5.4 cross-job save fix carried forward. */
+const DATA_VERSION='2026-05-05-iphone-fix'; /* Bump to force one-time localStorage cache wipe on next boot, ensuring all devices start clean with the iPhone bugfix in place. */
 
 const lsGet=k=>{try{return JSON.parse(localStorage.getItem(k)||'null');}catch{return null;}};
 const lsSet=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v));}catch(e){console.warn('localStorage full',e);}};
@@ -872,6 +882,26 @@ function jobDates(j){
       const dow=new Date(y,mo-1,dy).getDay();
       if(dow!==0&&dow!==6){ds.push(d);added++;}
       i++;
+    }
+  }
+  /* PATCH v4.5.3: Sheds run over allocated days. For Active jobs, extend the
+     date strip past daysAllocated up to today so tallies can still be entered.
+     Honors includeWeekends. Inactive jobs (Completed/Charged Out/Draft/
+     Dispatched) remain capped at daysAllocated. */
+  if((j.status||'Active')==='Active'){
+    const today=localToday();
+    let cursor=ds.length>0?ds[ds.length-1]:j.startDate;
+    let safety=0;
+    while(cursor<today&&safety<400){
+      cursor=addDays(cursor,1);
+      if(includeWeekends){
+        ds.push(cursor);
+      } else {
+        const [y,mo,dy]=cursor.split('-').map(Number);
+        const dow=new Date(y,mo-1,dy).getDay();
+        if(dow!==0&&dow!==6)ds.push(cursor);
+      }
+      safety++;
     }
   }
   return ds;
@@ -3138,9 +3168,10 @@ function HomeScreen({jobs,role,setRole,onJob,onNew,onDatabase,onSchedule,contrac
       )
     ),
     e('div',{style:{position:'fixed',bottom:24,right:20,display:'flex',flexDirection:'column',gap:10,alignItems:'flex-end'}},
-      role==='admin'&&e('button',{onClick:onDatabase,style:{background:'var(--navy)',border:'1px solid rgba(255,255,255,.2)',borderRadius:24,padding:'10px 18px',color:'rgba(255,255,255,.8)',fontWeight:700,fontSize:13,cursor:'pointer',boxShadow:'0 4px 14px rgba(0,0,0,.3)'}},'📂 My Database'),
+      role==='admin'&&e('button',{onClick:onDatabase,style:{background:'var(--hdr)',border:'1px solid rgba(255,255,255,.2)',borderRadius:24,padding:'10px 18px',color:'#ffffff',fontWeight:700,fontSize:13,cursor:'pointer',boxShadow:'0 4px 14px rgba(0,0,0,.3)'}},'📂 My Database'),
       (role==='admin'||role==='shed_lead')&&e('button',{className:'fab',onClick:onNew},'+')
-    )
+    ),
+    e('div',{style:{position:'fixed',bottom:8,left:0,right:0,textAlign:'center',fontSize:11,color:'var(--muted)',fontFamily:'var(--m)',letterSpacing:'.5px',pointerEvents:'none',fontWeight:600,opacity:.7}},'myGang '+APP_VERSION)
   );
 }
 /* ── EDIT CREW FORM (reused in database) ── */
@@ -3539,8 +3570,8 @@ function ScheduleScreen({jobs,role,setRole,onBack,onJob,onNew,onNewDraft}){
 }
 
 /* ── APP ── */
-const CONTRACTOR_NAME='Quality Shearing';
-const CONTRACTOR_URL='https://qualityshearing.vercel.app';
+const CONTRACTOR_NAME='Darby Shearing';
+const CONTRACTOR_URL='https://darbyshearing.vercel.app';
 function App(){
   const [appUnlocked,setAppUnlocked]=useState(true);
   const [loading,setLoading]=useState(true);
@@ -3587,7 +3618,13 @@ function App(){
   /* isFreshState mirrors isFreshRef but as React state, so UI components can react to changes. */
   const [isFreshState,setIsFreshState]=useState(false);
   /* Helper to update both ref and state in sync */
-  const setFresh=v=>{isFreshRef.current=v;setIsFreshState(v);};
+  const setFresh=(v,why)=>{
+    const prev=isFreshRef.current;
+    isFreshRef.current=v;
+    setIsFreshState(v);
+    /* TELEMETRY v4.5.1: Log every flip with reason. If fresh→stale unexpectedly, this catches it. */
+    try{logSaveFailure('diag_setfresh',(why||'unknown'),'prev='+prev+';new='+v);}catch(e){}
+  };
   /* lastVisibleRef tracks the timestamp of the last time the tab was visible.
      Used by the visibilitychange handler to decide if a long-hidden tab needs a fresh dbLoad on resume. */
   const lastVisibleRef=useRef(Date.now());
@@ -3598,6 +3635,13 @@ function App(){
        a) Mount-load auto-save echo (writing Supabase data straight back to Supabase, wasted I/O)
        b) Mount-load false dirty (causing goOnline to skip future refresh because "we have unsaved work") */
   const suppressNextSaveRef=useRef(false);
+  /* PATCH v4.5.4: Per-job baseline. Maps job.id → the job reference we last saved.
+     The autosave effect compares each job's current reference to this baseline; only
+     jobs whose reference has changed are saved. Because setSelJob (and all other
+     setJobs callers) use prev.map(...), unchanged jobs keep their old reference and
+     are correctly identified as not-dirty. This stops one device from uploading its
+     stale view of every other job and overwriting concurrent edits made elsewhere. */
+  const lastSavedRef=useRef(new Map());
 
   /* Load on mount */
   useEffect(()=>{
@@ -3619,34 +3663,63 @@ function App(){
          trust this state. Save paths gate on isFreshRef and become no-ops until a
          successful Supabase load promotes us to fresh. */
       if(!fromCache){
-        setFresh(true);
+        setFresh(true,'mountLoad_fresh_supabase');
         logSaveFailure('diag_load','mountLoad','fresh_from_supabase;jobs='+j.length);
       }else{
-        setFresh(false);
+        setFresh(false,'mountLoad_from_cache');
         logSaveFailure('diag_load','mountLoad','stale_from_cache;jobs='+j.length+';online='+navigator.onLine);
       }
       setPendingCount((lsGet(LS_QUEUE)||[]).length);
-      /* Deep link: #job=JOB_ID&crew=CREW_ID opens that job on Overview tab and logs view */
-      const hash=window.location.hash;
-      const jobMatch=hash.match(/[#&]job=([^&]+)/);
-      const crewMatch=hash.match(/[#&]crew=([^&]+)/);
-      if(jobMatch){
-        const jid=jobMatch[1];
-        const cid=crewMatch?crewMatch[1]:null;
-        const found=j.find(x=>x.id===jid);
-        if(found){setSelJobId(jid);setScreen('job');setDeepLinkTab('overview');}
-        if(jid&&cid){
-          sb.from('job_views').upsert({
-            id:jid+'_'+cid,
-            contractor_slug:CONTRACTOR_SLUG,
-            job_id:jid,
-            crew_id:cid,
-            viewed_at:new Date().toISOString()
-          },{onConflict:'id'}).catch(()=>{});
+      /* Deep link: #job=JOB_ID&crew=CREW_ID opens that job on Overview tab and logs view.
+         FIX v4.5.2: Wrapped in try/catch because on iOS Safari, the Supabase client's
+         .upsert() method has been observed to return a non-Promise value in some code
+         paths, causing .catch() to throw "is not a function". That synchronous throw
+         used to poison mountLoad's .then() and silently flip isFresh back to false in
+         the .catch handler — which was the root cause of the multi-contractor data
+         wipe bug. Wrapping everything in try/catch ensures any error here can't escape
+         this block, and the deep-link logging is non-essential anyway. */
+      try{
+        const hash=window.location.hash;
+        const jobMatch=hash.match(/[#&]job=([^&]+)/);
+        const crewMatch=hash.match(/[#&]crew=([^&]+)/);
+        if(jobMatch){
+          const jid=jobMatch[1];
+          const cid=crewMatch?crewMatch[1]:null;
+          const found=j.find(x=>x.id===jid);
+          if(found){setSelJobId(jid);setScreen('job');setDeepLinkTab('overview');}
+          if(jid&&cid){
+            /* Wrap in Promise.resolve to handle the case where .upsert() returns
+               a non-thenable value on iOS Safari. The fire-and-forget chain still
+               works in Chrome where .upsert() returns a proper promise. */
+            try{
+              const upsertResult=sb.from('job_views').upsert({
+                id:jid+'_'+cid,
+                contractor_slug:CONTRACTOR_SLUG,
+                job_id:jid,
+                crew_id:cid,
+                viewed_at:new Date().toISOString()
+              },{onConflict:'id'});
+              Promise.resolve(upsertResult).catch(()=>{});
+            }catch(viewErr){
+              /* swallow — deep-link tracking is best-effort, never block app boot */
+              try{logSaveFailure('diag_load','job_views_swallowed','err='+(viewErr&&viewErr.message||'unknown'));}catch(e){}
+            }
+          }
+          window.location.hash='';
         }
-        window.location.hash='';
+      }catch(deepLinkErr){
+        /* Final safety net: deep-link processing must never break the app. */
+        try{logSaveFailure('diag_load','deeplink_swallowed','err='+(deepLinkErr&&deepLinkErr.message||'unknown'));}catch(e){}
       }
-    }).catch(()=>{setLoading(false);isLoaded.current=true;setFresh(false);});
+    }).catch(err=>{
+      /* TELEMETRY v4.5.1: Capture WHY mountLoad's .then threw. Previously this catch had no log,
+         which meant if anything inside .then synchronously threw AFTER the fresh log already wrote,
+         we'd silently flip isFresh back to false with no diag trail. */
+      try{logSaveFailure('diag_load','mountLoad_catch','err='+(err&&err.message||err&&err.toString&&err.toString()||'unknown'));}catch(e){}
+      setLoading(false);
+      isLoaded.current=true;
+      setFresh(false,'mountLoad_catch');
+    });
 
     /* PATCH v4.5.0: Data version check.
        On boot, compare stored DATA_VERSION against the version this code build expects.
@@ -3724,11 +3797,20 @@ function App(){
          Pushing it would cause the multi-contractor wipe bug. Instead, try a fresh dbLoad
          to upgrade ourselves to fresh, then queue legitimately-fresh state. */
       if(isFreshRef.current){
-        /* CRITICAL: queue writes from CURRENT REACT STATE, not stale localStorage.
-           The user may have typed tallies that are in React state but haven't yet
-           been written to localStorage by the debounced auto-save. */
+        /* PATCH v4.5.4: Only queue jobs that have changed since last save.
+           The old behaviour queued ALL jobs from React state on every online event,
+           which was a key vector for the multi-device overwrite bug — coming back
+           online would re-upload this device's stale view of every job, even ones
+           another device had just edited. */
         const currentJobs=jobsRef.current;
-        currentJobs.forEach(job=>queueWrite('job',job.id,job));
+        let queued=0;
+        currentJobs.forEach(job=>{
+          if(lastSavedRef.current.get(job.id)!==job){
+            queueWrite('job',job.id,job);
+            queued++;
+          }
+        });
+        logSaveFailure('diag_save','goOnline_queued','total='+currentJobs.length+';queued='+queued);
       }else{
         logSaveFailure('diag_save','goOnline_skipped_queue','not_fresh;jobs='+jobsRef.current.length);
       }
@@ -3762,7 +3844,7 @@ function App(){
           setJobs(migratedJobs);setFarmList(f);setCrewList(c);
           /* PATCH v4.5.0: Promote to fresh if this dbLoad succeeded against Supabase */
           if(!fromCache){
-            setFresh(true);
+            setFresh(true,'goOnline_refetch');
             dirtyRef.current=false; /* state is now fresh from Supabase, not dirty */
             logSaveFailure('diag_load','goOnline_dbLoad','promoted_to_fresh');
           }
@@ -3791,12 +3873,34 @@ function App(){
         stale. Now the effect only fires when jobs actually change. */
   useEffect(()=>{
     if(!isLoaded.current)return;
+    /* TELEMETRY v4.5.1: log every auto-save entry so we can correlate isFresh state with timing.
+       This will reveal exactly when isFreshRef became false relative to mountLoad. */
+    try{
+      logSaveFailure('diag_autosave_enter','effect',
+        'jobs='+jobs.length+
+        ';isFresh='+isFreshRef.current+
+        ';dirty='+dirtyRef.current+
+        ';suppressNext='+suppressNextSaveRef.current+
+        ';online='+navigator.onLine
+      );
+    }catch(e){}
     /* If the most recent state change was from system code (mountLoad, dbLoad, etc),
        don't treat it as user input. Don't mark dirty, don't push to Supabase. */
     if(suppressNextSaveRef.current){
       suppressNextSaveRef.current=false;
+      /* PATCH v4.5.4: System-driven setJobs (mountLoad / goOnline refetch / visibility
+         revalidate) installs Supabase's view as the new baseline. After this point, any
+         job whose reference differs from this baseline is genuinely user-edited. */
+      const m=new Map();
+      jobs.forEach(j=>m.set(j.id,j));
+      lastSavedRef.current=m;
       return;
     }
+    /* PATCH v4.5.4: Identify ONLY the jobs whose reference has changed since last save.
+       setSelJob etc. return new arrays via .map but only the touched job has a new
+       reference. Saving every job on every keystroke (the old behaviour) overwrote
+       concurrent edits made on other devices to OTHER jobs. */
+    const changedJobs=jobs.filter(job=>lastSavedRef.current.get(job.id)!==job);
     /* Mark dirty FIRST — before the isFresh gate. We need this set even when blocking
        Supabase saves so that any subsequent dbLoad refresh won't overwrite user input. */
     dirtyRef.current=true;
@@ -3804,17 +3908,35 @@ function App(){
        when we can't push to Supabase. This is the user's own work; it should
        never be lost just because the cloud is stale. */
     try{lsSet(LS_JOBS,jobs);}catch(e){}
+    if(changedJobs.length===0){
+      /* Nothing actually changed (jobs array reference shifted but every job is
+         reference-equal to the baseline). Bail out — saving would just upload stale
+         state that someone else may have moved past in Supabase. */
+      logSaveFailure('diag_save','autosave_nothing_changed','jobs='+jobs.length);
+      dirtyRef.current=false;
+      return;
+    }
     if(!isFreshRef.current){
-      logSaveFailure('diag_save','autosave_blocked_stale','jobs='+jobs.length+';local_cached');
+      logSaveFailure('diag_save','autosave_blocked_stale','jobs='+jobs.length+';changed='+changedJobs.length+';local_cached');
       return;
     }
     clearTimeout(saveTimer.current);
     setSaveStatus(isOnline?'saving':'offline');
+    /* Capture the IDs we're committing to save in this pass. The actual job object
+       we send is read fresh from jobsRef at save time — state may have moved on
+       during the 400ms debounce, and we want the latest. */
+    const idsToSave=changedJobs.map(j=>j.id);
     saveTimer.current=setTimeout(async()=>{
       try{
-        await Promise.all(jobs.map(job=>dbSaveJob(job)));
-        /* Save complete — clear dirty flag so dbLoad can refresh from Supabase if needed */
-        dirtyRef.current=false;
+        const latest=jobsRef.current;
+        const toSave=latest.filter(j=>idsToSave.includes(j.id));
+        logSaveFailure('diag_save','autosave_firing','total='+latest.length+';saving='+toSave.length+';ids='+idsToSave.join(','));
+        await Promise.all(toSave.map(job=>dbSaveJob(job)));
+        /* Update baseline for jobs we just saved */
+        toSave.forEach(j=>lastSavedRef.current.set(j.id,j));
+        /* Re-check dirty — state may have changed during the await */
+        const stillDirty=jobsRef.current.some(j=>lastSavedRef.current.get(j.id)!==j);
+        if(!stillDirty)dirtyRef.current=false;
         if(isOnline){
           setSaveStatus('saved');
           setPendingCount(0);
@@ -3847,7 +3969,11 @@ function App(){
      localStorage is synchronous and survives unload; Supabase upserts are fire-and-forget
      (they queue via the offline path if they don't complete in time). */
   useEffect(()=>{
-    if(!isLoaded.current)return;
+    /* PATCH v4.5.5: Removed `if(!isLoaded.current)return;` gate. With [] deps, the effect
+       only runs once on mount, and isLoaded.current is still false at that moment
+       (mountLoad's setting of true happens in an async .then). The gate ALWAYS triggered,
+       the effect returned, and no listeners were ever installed. flushNow / onVis self-check
+       isFreshRef internally so they're safe to install before mountLoad finishes. */
     const flushNow=()=>{
       /* Cancel any pending debounce — we're saving now */
       clearTimeout(saveTimer.current);
@@ -3860,10 +3986,14 @@ function App(){
       }
       const currentJobs=jobsRef.current;
       if(!currentJobs||currentJobs.length===0)return;
-      /* dbSaveJob writes localStorage synchronously then returns a promise for Supabase.
-         Even if the page unloads mid-Supabase-call, localStorage is already written. */
+      /* PATCH v4.5.4: Only flush jobs that have changed since last save.
+         Otherwise an unrelated visibility-hide (phone lock during normal use) would
+         re-upload this device's view of every job — same multi-device overwrite vector
+         as the autosave bug. */
       currentJobs.forEach(job=>{
-        try{dbSaveJob(job);}catch(e){}
+        if(lastSavedRef.current.get(job.id)!==job){
+          try{dbSaveJob(job);}catch(e){}
+        }
       });
     };
     /* PATCH v4.5.0: On visibility change, also handle the resume case.
@@ -3872,6 +4002,8 @@ function App(){
        device's React state would otherwise auto-save and overwrite Supabase. */
     const VISIBILITY_REVALIDATE_MS=10*60*1000; /* 10 minutes */
     const onVis=()=>{
+      /* TELEMETRY v4.5.1: Log every visibility change so we can correlate with save blocks. */
+      try{logSaveFailure('diag_visibility','change','state='+document.visibilityState+';lastVis_ago_ms='+(Date.now()-lastVisibleRef.current));}catch(e){}
       if(document.visibilityState==='hidden'){
         lastVisibleRef.current=Date.now();
         flushNow();
@@ -3880,7 +4012,7 @@ function App(){
         if(hiddenFor>VISIBILITY_REVALIDATE_MS){
           /* Long hidden — invalidate freshness and force a fresh dbLoad */
           logSaveFailure('diag_visibility','revalidate_required','hidden_ms='+hiddenFor);
-          setFresh(false);
+          setFresh(false,'visibility_revalidate_invalidate');
           if(navigator.onLine){
             dbLoad().then(({jobs:j,farms:f,crew:c,fromCache})=>{
               if(dirtyRef.current)return;
@@ -3890,7 +4022,7 @@ function App(){
               suppressNextSaveRef.current=true;
               setJobs(migratedJobs);setFarmList(f);setCrewList(c);
               if(!fromCache){
-                setFresh(true);
+                setFresh(true,'visibility_revalidate_recovered');
                 logSaveFailure('diag_load','visibility_revalidate','fresh_after_revalidate');
               }
             }).catch(()=>{});
@@ -3902,9 +4034,23 @@ function App(){
     window.addEventListener('beforeunload',flushNow);
     window.addEventListener('pagehide',flushNow);
     document.addEventListener('visibilitychange',onVis);
+    /* TELEMETRY v4.5.1: pageshow fires on every page display, including BFCache restore.
+       BFCache restores skip the normal mount cycle entirely — refs and state survive,
+       but a long time may have passed. If event.persisted=true, this is a BFCache restore. */
+    const onPageShow=ev=>{
+      try{logSaveFailure('diag_pageshow','event','persisted='+(ev.persisted?'true':'false')+';isFresh='+isFreshRef.current+';isLoaded='+isLoaded.current);}catch(e){}
+    };
+    window.addEventListener('pageshow',onPageShow);
+    /* TELEMETRY v4.5.1: Also log pagehide separately so we can pair with pageshow. */
+    const onPageHide=ev=>{
+      try{logSaveFailure('diag_pagehide','event','persisted='+(ev.persisted?'true':'false')+';isFresh='+isFreshRef.current);}catch(e){}
+    };
+    window.addEventListener('pagehide',onPageHide);
     return()=>{
       window.removeEventListener('beforeunload',flushNow);
       window.removeEventListener('pagehide',flushNow);
+      window.removeEventListener('pagehide',onPageHide);
+      window.removeEventListener('pageshow',onPageShow);
       document.removeEventListener('visibilitychange',onVis);
     };
   },[]);
