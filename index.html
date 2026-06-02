@@ -509,7 +509,9 @@ const {useState,useEffect,useRef}=React,e=React.createElement;
 /* ── SUPABASE CONFIG — update these 3 lines per deployment ── */
 const SUPABASE_URL='https://yhkcdycypwxzxxwaxnzj.supabase.co';
 const SUPABASE_ANON_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inloa2NkeWN5cHd4enh4d2F4bnpqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYzMjgxMTgsImV4cCI6MjA5MTkwNDExOH0.q9u1O_uixHxDcb8bJgPJg-CaSSPU3XNZxfqYV6YnHWE';
-const CONTRACTOR_SLUG='darby-shearing';
+const CONTRACTOR_SLUG='quality-shearing';
+const CONTRACTOR_NAME='Quality Shearing';
+const CONTRACTOR_URL='https://qualityshearing.vercel.app';
 
 const sb=supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
 
@@ -522,19 +524,97 @@ const LS_ROLE='mg_role_'+CONTRACTOR_SLUG;
 const LS_LAST_RATES='mg_last_rates_'+CONTRACTOR_SLUG;
 const LS_ROLE_TS='mg_role_ts_'+CONTRACTOR_SLUG;
 const LS_DATA_VERSION='mg_data_version_'+CONTRACTOR_SLUG; /* tracks DATA_VERSION for one-time cache wipe */
+const LS_TALLY_QUEUE='mg_tally_queue_'+CONTRACTOR_SLUG; /* per-cell offline queue, separate from whole-job queue */
 const ROLE_TIMEOUT_HOURS=12; /* auto-reset after 12h inactivity */
-const APP_VERSION='v4.5.5'; /* CRITICAL FIX over v4.5.4. The useEffect that installs
-  visibilitychange / beforeunload / pagehide / pageshow handlers was gated by an early
-  return: if(!isLoaded.current)return;. Because that effect has [] deps and isLoaded.current
-  is only set true asynchronously inside mountLoad's .then(), the gate ALWAYS triggered on
-  mount and the effect returned without installing any listeners. The effect never re-ran
-  (deps were []). So in production NO ONE had lifecycle handlers installed. Result: when
-  iOS Safari aggressively killed tabs (constant for shed leads with phones in pockets), the
-  400ms autosave debounce timer was killed before firing — local edits sat in localStorage
-  but next mountLoad overwrote them with Supabase. Confirmed by 7 days of telemetry showing
-  ZERO diag_visibility / diag_pageshow / diag_pagehide entries across 1,936 iPhone autosave
-  events. v4.5.4 cross-job save fix carried forward. */
-const DATA_VERSION='2026-05-05-iphone-fix'; /* Bump to force one-time localStorage cache wipe on next boot, ensuring all devices start clean with the iPhone bugfix in place. */
+const APP_VERSION='v4.6.3d.1-hotfix'; /* v4.6.3d.1 hotfix: (1) Map link handles goo.gl/Maps URLs as addresses by detecting http(s):// and passing through instead of wrapping in maps.google.com search query; (2) Defensive guard on job.baleWeights access in cpk-mode pay calc (was a crash hazard on old jobs without the field if pressMode was toggled to cpk); (3) Guard all 7 unguarded job.totalSheep.toLocaleString() crash sites with ||0 (was a render crash on any job with undefined totalSheep). v4.6.3d adds per-contractor boot-time access password (hash stored in contractor_settings.access_password_hash, verified flag in localStorage = hash itself for auto-invalidation on rotation, master PIN bypass for SRD support, null hash = no gate for graceful rollout). v4.6.3c-final adds mode badges next to crew names in pay summary + grand-total math check line in CONTRACTOR TOTALS. v4.6.3c adds c/kg presser mode (pressMode toggle + kg tracking via new tally_entries kind='bale_kg') and c/km travel mode (per-person day vs km, with override) — additive. v4.6.3b adds cascade delete from tally_entries on delRun/delMob — fixes zombie runs resurrecting via self-heal (Knights, 28 May). v4.6.3a added MOB TOTALS section to pay summary - additive only, no data model change from v4.6.3. v4.6.3 closes the data-loss
+  vectors that survived v4.6.2. The Woolaway incident on 21 May 2026 showed
+  three structural gaps even after v4.6.2:
+
+  (1) flushQueue wrote item.data raw to Supabase, bypassing
+      buildStrippedJobBlob — so any job that landed in the offline queue
+      could carry stale tally counts back to jobs.data. Fixed: flushQueue
+      now applies the same strip as dbSaveJob.
+
+  (2) Nothing prevented a save with FEWER run_ids than tally_entries had.
+      A stale device's React state with truncated runs could overwrite the
+      jobs.data.runs structure, leaving cells orphaned in tally_entries
+      (data present in DB but no run structure to display them under).
+      Fixed: dbSaveJob now queries tally_entries for distinct run_ids
+      before writing. If the about-to-save blob is MISSING any run_ids
+      that tally_entries has, the save is refused, queued for retry, and
+      logged as guard_rejected_shrink_save.
+
+  (3) When jobs.data.runs is partial but tally_entries has more, the app
+      had no recovery — orphaned cells stayed invisible. Fixed: dbLoad
+      now runs a self-heal step. Any tally_entries row whose (date,
+      run_id, mob_id) isn't in jobs.data.runs gets a synthesized run/mob
+      entry created (with empty desc/type — recoverable, user can edit).
+
+  Plus: diag_save logs added to goJob direct-save path so every save is
+  traceable in future incidents.
+
+  v4.6.2 (carried forward): hostname-mismatch boot guard, storage rebuild
+  with tally_entries, dbSaveJob strip via buildStrippedJobBlob,
+  goOnline tally refetch. */
+const DATA_VERSION='2026-05-18-storage-rebuild'; /* Bump forces one-time localStorage wipe so all devices start clean on the new storage model. */
+
+/* ════════════════════════════════════════════════════════════════════
+   v4.6.2 — CACHE-FLIP BOOT GUARD
+   ════════════════════════════════════════════════════════════════════
+   Catches the case where the wrong contractor's cached app loads at
+   this URL — e.g. Lachlan tapped his Woolaway bookmark but his browser
+   served Darby's cached SW. The PIN screen rejected him; he had to
+   close-and-reopen the app to get the right one.
+
+   This boot guard compares window.location.hostname against the
+   CONTRACTOR_URL baked into this code. If they don't match, we are
+   running the wrong contractor's app — unregister all service workers,
+   purge all caches, and force a reload from the network.
+
+   Safety: sessionStorage flag prevents an infinite reload loop. If the
+   cleanup-and-reload still doesn't fix it (some edge case), the user
+   sees a clear error message instead of a reload loop.
+
+   Data safety: localStorage is NOT touched. Only the asset cache (the
+   app HTML/JS shell) is cleared. Queued offline writes and pending tally
+   cells in localStorage survive intact.
+   ════════════════════════════════════════════════════════════════════ */
+(function checkContractorIdentity(){
+  try{
+    const expected=(CONTRACTOR_URL||'').replace(/^https?:\/\//,'').replace(/\/$/,'').toLowerCase();
+    const actual=(window.location.hostname||'').toLowerCase();
+    if(!actual||actual==='localhost'||actual==='127.0.0.1')return;
+    if(!expected)return;
+    if(actual===expected)return;
+    /* MISMATCH — the wrong contractor's cached app is loaded for this URL */
+    const reloadKey='mg_cache_flip_recovery';
+    if(sessionStorage.getItem(reloadKey)){
+      /* Already tried cleanup once this session — don't loop. Show error. */
+      document.body.innerHTML='<div style="padding:32px;font-family:-apple-system,system-ui,sans-serif;max-width:480px;margin:60px auto;text-align:center"><h2 style="color:#c00;margin-bottom:16px">App load problem</h2><p style="line-height:1.5;color:#444">This page is showing the wrong contractor app from a cached copy on your phone. Try one of these:</p><ol style="text-align:left;line-height:1.6;color:#444"><li>Close this tab completely (swipe it away)</li><li>Reopen from your home-screen bookmark</li></ol><p style="line-height:1.5;color:#444;margin-top:16px">If it still happens, contact Dale.</p></div>';
+      return;
+    }
+    sessionStorage.setItem(reloadKey,'1');
+    console.warn('[myGang] Cache mismatch: this code is for',expected,'but URL is',actual,'— cleaning up and reloading');
+    document.body.innerHTML='<div style="padding:32px;font-family:-apple-system,system-ui,sans-serif;max-width:480px;margin:60px auto;text-align:center"><h2 style="color:#111;margin-bottom:16px">Loading correct app…</h2><p style="line-height:1.5;color:#444">Refreshing from server. One moment.</p></div>';
+    const cleanup=[];
+    if('serviceWorker' in navigator){
+      cleanup.push(navigator.serviceWorker.getRegistrations().then(regs=>
+        Promise.all(regs.map(r=>r.unregister()))
+      ).catch(()=>{}));
+    }
+    if(typeof caches!=='undefined'){
+      cleanup.push(caches.keys().then(keys=>
+        Promise.all(keys.map(k=>caches.delete(k)))
+      ).catch(()=>{}));
+    }
+    Promise.all(cleanup).finally(()=>{
+      window.location.reload();
+    });
+  }catch(e){
+    /* Boot guard must never break the app — fail silent */
+    console.warn('[myGang] Cache flip check failed:',e);
+  }
+})();
 
 const lsGet=k=>{try{return JSON.parse(localStorage.getItem(k)||'null');}catch{return null;}};
 const lsSet=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v));}catch(e){console.warn('localStorage full',e);}};
@@ -558,7 +638,17 @@ async function flushQueue(){
   for(const item of q){
     try{
       let call;
-      if(item.type==='job')call=sb.from('jobs').upsert({id:item.id,contractor_slug:CONTRACTOR_SLUG,data:item.data,updated_at:new Date().toISOString()},{onConflict:'id'});
+      if(item.type==='job'){
+        /* v4.6.3 FIX: strip tally fields here too. Previous versions wrote
+           item.data raw, which meant any job that ever entered the queue
+           (offline saves, goOnline preserveDirty path, dbSaveJob catch
+           fallback) bypassed the tally strip and could carry stale tally
+           counts back into jobs.data on flush. */
+        const strippedData=(typeof buildStrippedJobBlob==='function')
+          ?buildStrippedJobBlob(item.data)
+          :item.data;
+        call=sb.from('jobs').upsert({id:item.id,contractor_slug:CONTRACTOR_SLUG,data:strippedData,updated_at:new Date().toISOString()},{onConflict:'id'});
+      }
       else if(item.type==='farm')call=sb.from('farms').upsert({id:item.id,contractor_slug:CONTRACTOR_SLUG,data:item.data},{onConflict:'id'});
       else if(item.type==='crew')call=sb.from('crew_members').upsert({id:item.id,contractor_slug:CONTRACTOR_SLUG,data:item.data},{onConflict:'id'});
       /* Cap each upsert at 5s — prevents one hanging item from stalling
@@ -577,6 +667,192 @@ async function flushQueue(){
   }
   lsSet(LS_QUEUE,failed);
   return flushed;
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   TALLY ENTRIES — per-cell storage layer (v4.6.0)
+   ════════════════════════════════════════════════════════════════════
+   Each tally cell is its own row in the `tally_entries` table. This is
+   the source of truth for tally values. jobs.data still holds the run/mob
+   STRUCTURE (mob ids, types, descriptions, rate overrides) but tally
+   COUNTS live here.
+
+   Why: the old whole-job-blob save model races when two devices have
+   different React states. The loser overwrites the winner. No flag-based
+   reconciliation has fixed this in 5 attempts (v4.5.0 → v4.5.5). The
+   structural fix is to write cells individually so there's nothing to
+   race on at the cell level.
+
+   Conflict resolution: ON CONFLICT in the DB uses updated_at — later
+   write wins. In practice only one lead is editing tallies on a job at
+   a time (confirmed with Dale 2026-05-18), so conflicts are rare.
+   ════════════════════════════════════════════════════════════════════ */
+
+/* tallyKey — produces a stable string key for a cell. Used for queue
+   dedup and for the per-cell debounce timer map (currently unused — we
+   don't debounce per-cell writes since the per-keystroke volume is fine
+   for shearing-tally usage). */
+function tallyKey(r){
+  return [r.job_id,r.cell_date,r.kind,r.run_id||'',r.mob_id||'',r.crew_id].join('|');
+}
+
+function queueTallyCell(row){
+  const q=lsGet(LS_TALLY_QUEUE)||[];
+  const k=tallyKey(row);
+  /* Dedup: a queued cell write for the same cell is replaced by the newer one.
+     The user's latest typed value is the only one that matters. */
+  const filtered=q.filter(x=>tallyKey(x)!==k);
+  filtered.push(row);
+  lsSet(LS_TALLY_QUEUE,filtered);
+}
+
+/* writeTallyCell — upserts a single cell to Supabase, or queues it if offline.
+   This is fired on every tally-cell change. No debounce; the volume is fine. */
+async function writeTallyCell({jobId,kind,runId,mobId,crewId,date,value}){
+  const row={
+    contractor_slug:CONTRACTOR_SLUG,
+    job_id:jobId,
+    cell_date:date,
+    kind:kind,
+    run_id:runId||'',
+    mob_id:mobId||'',
+    crew_id:crewId,
+    value:value,
+    updated_at:new Date().toISOString()
+  };
+  if(!navigator.onLine){
+    queueTallyCell(row);
+    return;
+  }
+  try{
+    const result=await withTimeout(
+      sb.from('tally_entries').upsert(row,{
+        onConflict:'contractor_slug,job_id,cell_date,kind,run_id,mob_id,crew_id'
+      }),
+      5000,
+      'tally_upsert_timeout'
+    );
+    if(result&&result.error)throw new Error(result.error.message);
+  }catch(e){
+    queueTallyCell(row);
+    logSaveFailure(
+      e.message==='tally_upsert_timeout'?'timeout':'error',
+      'tally:'+jobId+':'+kind+':'+crewId,
+      e.message
+    );
+  }
+}
+
+async function flushTallyQueue(){
+  const q=lsGet(LS_TALLY_QUEUE)||[];
+  if(!q.length)return 0;
+  let flushed=0;
+  const failed=[];
+  for(const row of q){
+    try{
+      const result=await withTimeout(
+        sb.from('tally_entries').upsert(row,{
+          onConflict:'contractor_slug,job_id,cell_date,kind,run_id,mob_id,crew_id'
+        }),
+        5000,
+        'tally_flush_timeout'
+      );
+      if(result&&result.error){
+        failed.push(row);
+        logSaveFailure('error','tally_flush:'+row.job_id+':'+row.kind,result.error.message);
+      }else{
+        flushed++;
+      }
+    }catch(e){
+      failed.push(row);
+      logSaveFailure(
+        e.message==='tally_flush_timeout'?'timeout':'error',
+        'tally_flush:'+row.job_id+':'+row.kind,
+        e.message
+      );
+    }
+  }
+  lsSet(LS_TALLY_QUEUE,failed);
+  return flushed;
+}
+
+/* loadTalliesForJobs — single query fetching all tally_entries for the
+   given job ids. Returns rows; caller applies them via hydrateTallies. */
+async function loadTalliesForJobs(jobIds){
+  if(!jobIds||!jobIds.length)return [];
+  try{
+    const result=await withTimeout(
+      sb.from('tally_entries')
+        .select('job_id,cell_date,kind,run_id,mob_id,crew_id,value')
+        .eq('contractor_slug',CONTRACTOR_SLUG)
+        .in('job_id',jobIds),
+      8000,
+      'tally_load_timeout'
+    );
+    if(result&&result.error){
+      logSaveFailure('error','tally_load',result.error.message);
+      return [];
+    }
+    return result.data||[];
+  }catch(e){
+    logSaveFailure(
+      e.message==='tally_load_timeout'?'timeout':'error',
+      'tally_load',
+      e.message
+    );
+    return [];
+  }
+}
+
+/* hydrateTallies — mutates a job object, replacing tally fields with
+   the truth from tally_entries rows. The mob/run STRUCTURE in
+   jobs.data.runs is preserved; only the counts within each mob are reset
+   and repopulated. shedTallies, baleTallies, travelTallies are wholesale
+   replaced.
+
+   This is called on EVERY load (mountLoad, goOnline refetch, visibility
+   revalidate) so the user always sees the canonical tally data, never
+   the potentially-stale copy embedded in jobs.data. */
+function hydrateTallies(job,tallyRows){
+  /* Reset every count-bearing field. Mob structure stays. */
+  if(job.runs){
+    Object.values(job.runs).forEach(dayRuns=>{
+      (dayRuns||[]).forEach(run=>{
+        (run.mobs||[]).forEach(mob=>{mob.counts={};});
+      });
+    });
+  }
+  job.shedTallies={};
+  job.baleTallies={};
+  job.baleWeights={};
+  job.travelTallies={};
+
+  /* Apply each row */
+  (tallyRows||[]).forEach(row=>{
+    const v=Number(row.value)||0;
+    if(row.kind==='count'){
+      const dayRuns=(job.runs||{})[row.cell_date];
+      if(!dayRuns)return;
+      const run=dayRuns.find(r=>r.id===row.run_id);
+      if(!run)return;
+      const mob=(run.mobs||[]).find(m=>m.id===row.mob_id);
+      if(!mob)return;
+      mob.counts[row.crew_id]=v;
+    }else if(row.kind==='shed_runs'){
+      if(!job.shedTallies[row.crew_id])job.shedTallies[row.crew_id]={};
+      job.shedTallies[row.crew_id][row.cell_date]=v;
+    }else if(row.kind==='bales'){
+      if(!job.baleTallies[row.crew_id])job.baleTallies[row.crew_id]={};
+      job.baleTallies[row.crew_id][row.cell_date]=v;
+    }else if(row.kind==='bale_kg'){
+      if(!job.baleWeights[row.crew_id])job.baleWeights[row.crew_id]={};
+      job.baleWeights[row.crew_id][row.cell_date]=v;
+    }else if(row.kind==='travel'){
+      if(!job.travelTallies[row.crew_id])job.travelTallies[row.crew_id]={};
+      job.travelTallies[row.crew_id][row.cell_date]=v>0;
+    }
+  });
+  return job;
 }
 
 /* ── DB HELPERS ── */
@@ -612,6 +888,52 @@ async function dbLoad(){
       crew:(cr.data||[]).map(r=>r.data),
       fromCache:false,
     };
+    /* v4.6.0 — hydrate tallies from the dedicated table. This is the
+       source of truth for tally values; jobs.data tally fields are
+       legacy/redundant and ignored on read. */
+    const tallyRows=await loadTalliesForJobs(result.jobs.map(j=>j.id));
+    const byJob={};
+    tallyRows.forEach(r=>{(byJob[r.job_id]||(byJob[r.job_id]=[])).push(r);});
+    result.jobs.forEach(j=>hydrateTallies(j,byJob[j.id]||[]));
+    /* v4.6.3 — self-heal step. If tally_entries has run_ids or (date,run,mob)
+       combos that aren't in the job's runs structure, the cells are
+       orphaned: present in the DB, invisible in the UI. This happens when
+       a stale device wrote a truncated runs structure (the Woolaway 21 May
+       incident). Synthesize the missing run/mob entries from tally_entries
+       so the orphan data renders. Synthesized mobs have empty desc and
+       default type='Shearing' — the user can edit labels later. The
+       hydrated counts are correct because they came from tally_entries. */
+    result.jobs.forEach(j=>{
+      const rows=byJob[j.id]||[];
+      if(!rows.length)return;
+      if(!j.runs)j.runs={};
+      let healed=0;
+      rows.forEach(row=>{
+        if(row.kind!=='count')return;
+        if(!row.run_id||!row.mob_id||!row.cell_date)return;
+        if(!j.runs[row.cell_date])j.runs[row.cell_date]=[];
+        let run=j.runs[row.cell_date].find(r=>r.id===row.run_id);
+        if(!run){
+          run={id:row.run_id,mobs:[]};
+          j.runs[row.cell_date].push(run);
+          healed++;
+        }
+        if(!run.mobs)run.mobs=[];
+        let mob=run.mobs.find(m=>m.id===row.mob_id);
+        if(!mob){
+          mob={id:row.mob_id,desc:'',type:'Shearing',counts:{}};
+          run.mobs.push(mob);
+          healed++;
+        }
+        /* Counts already populated by hydrateTallies — don't overwrite */
+        if(mob.counts[row.crew_id]==null){
+          mob.counts[row.crew_id]=Number(row.value)||0;
+        }
+      });
+      if(healed>0){
+        try{logSaveFailure('diag_load','self_heal','job='+j.id+';synthesized='+healed);}catch(e){}
+      }
+    });
     /* Only overwrite local cache if no pending offline writes — 
        if queue has items, local data is newer than Supabase */
     const pendingQ=lsGet(LS_QUEUE)||[];
@@ -678,14 +1000,50 @@ function logSaveFailure(reason,jobId,details){
   }catch(e){ /* never break the save flow */ }
 }
 
+/* buildStrippedJobBlob — produces a tally-free copy of a job suitable for
+   writing to the `jobs` table. Tally cells live in `tally_entries` now;
+   writing them again in the blob just re-creates the multi-device wipe
+   vector (a stale device could overwrite the blob with empty tallies
+   and "win" — until hydration reads on next load corrected it; better to
+   not write the stale data at all).
+
+   IMPORTANT: deep clones the runs structure rather than mutating the input.
+   The caller's `job` reference comes straight from React state via
+   jobsRef.current; mutating it would corrupt React's own state and is
+   exactly the kind of silent corruption bug that's been biting us. */
+function buildStrippedJobBlob(job){
+  const out={...job};
+  if(job.runs){
+    out.runs=Object.fromEntries(
+      Object.entries(job.runs).map(([date,dayRuns])=>[
+        date,
+        (dayRuns||[]).map(run=>({
+          ...run,
+          mobs:(run.mobs||[]).map(mob=>({...mob,counts:{}}))
+        }))
+      ])
+    );
+  }
+  out.shedTallies={};
+  out.baleTallies={};
+  out.baleWeights={};
+  out.travelTallies={};
+  return out;
+}
+
 async function dbSaveJob(job){
-  /* Always write to local cache first — this survives page close */
+  /* LS_JOBS — keep FULL job (tallies included). This is the offline
+     fallback when tally_entries can't be queried. Stripping here would
+     leave offline users with empty cells. */
   const jobs=lsGet(LS_JOBS)||[];
   const updated=jobs.find(j=>j.id===job.id)?jobs.map(j=>j.id===job.id?job:j):[job,...jobs];
   lsSet(LS_JOBS,updated);
+  /* Supabase write — STRIPPED. tally_entries is the source of truth for
+     tally cells; jobs.data only carries structure. */
+  const jobForBlob=buildStrippedJobBlob(job);
   /* Skip Supabase entirely if offline — avoids SW stub returning fake 200 */
   if(!navigator.onLine){
-    queueWrite('job',job.id,job);
+    queueWrite('job',job.id,jobForBlob);
     return;
   }
   /* Online path: cap the upsert at 5 seconds to prevent silent hangs.
@@ -694,15 +1052,62 @@ async function dbSaveJob(job){
      the await never returns, the catch block never fires, and the data
      never makes it to the queue. */
   try{
-    /* PATCH v4.5.0 — Pre-save guard.
-       Fetch current Supabase state for this job. If Supabase has STRICTLY MORE
-       dates of runs than we're about to save, refuse the save — this state we'd
-       be about to write is regressive and almost certainly stale. Log the rejection
-       so we can investigate.
-       This is the last-line-of-defense against the multi-contractor wipe bug.
-       Even if isFresh gates fail somehow, this catches saves that would shrink
-       the job's runs history. */
-    const incomingRunDates=Object.keys((job&&job.runs)||{}).length;
+    /* v4.6.3 — Save-time guard against shrinking runs.
+       Before writing jobs.data to Supabase, check tally_entries for the
+       distinct run_ids that have cell data for this job. If the
+       about-to-save blob is MISSING any of those run_ids, that means our
+       React state has a runs structure that's truncated relative to
+       reality. Refuse the save, queue for retry, log.
+
+       This is the structural fix for the Woolaway 21 May 2026 incident
+       where Dale's laptop wrote a 3-run blob over a 10-run state, leaving
+       Wed and Thu cells orphaned in tally_entries with no run structure
+       to display them under. */
+    try{
+      const tallyRunIdsResult=await withTimeout(
+        sb.from('tally_entries')
+          .select('run_id')
+          .eq('contractor_slug',CONTRACTOR_SLUG)
+          .eq('job_id',job.id)
+          .eq('kind','count')
+          .not('run_id','eq',''),
+        3000,
+        'guard_runids_timeout'
+      ).catch(err=>({error:{message:'guard_runids_failed:'+err.message}}));
+      if(tallyRunIdsResult&&!tallyRunIdsResult.error&&Array.isArray(tallyRunIdsResult.data)){
+        const tallyRunIds=new Set(tallyRunIdsResult.data.map(r=>r.run_id).filter(Boolean));
+        if(tallyRunIds.size>0){
+          const blobRunIds=new Set();
+          Object.values((jobForBlob&&jobForBlob.runs)||{}).forEach(dayRuns=>{
+            (dayRuns||[]).forEach(run=>{if(run&&run.id)blobRunIds.add(run.id);});
+          });
+          const missing=[...tallyRunIds].filter(rid=>!blobRunIds.has(rid));
+          if(missing.length>0){
+            logSaveFailure(
+              'guard_rejected_shrink_save',
+              job.id,
+              'missing_run_ids='+missing.join(',')+';blob_count='+blobRunIds.size+';tally_count='+tallyRunIds.size
+            );
+            /* Queue the FULL job (with all original structure preserved from
+               React state) so the next save attempt retries. Don't write
+               this incomplete state to Supabase. */
+            queueWrite('job',job.id,jobForBlob);
+            return;
+          }
+        }
+      }
+    }catch(guardErr){
+      /* Guard query itself failed (network, timeout). Don't block the save
+         on a failed guard — fall through to the legacy pre-save guard and
+         normal upsert. We'd rather risk a partial save than refuse every
+         save on a flaky network. */
+      logSaveFailure('guard_query_error',job.id,(guardErr&&guardErr.message)||'unknown');
+    }
+    /* PATCH v4.5.0 — Pre-save guard (preserved). Now operates on stripped
+       blob, but the run-DATE keys are unchanged by stripping (only the
+       counts within mobs are emptied), so the guard still functions as
+       designed: rejects writes that would shrink the run-date history. */
+    const incomingRunDates=Object.keys((jobForBlob&&jobForBlob.runs)||{}).length;
     if(incomingRunDates>0){
       const guardCheck=await withTimeout(
         sb.from('jobs').select('data').eq('id',job.id).eq('contractor_slug',CONTRACTOR_SLUG).maybeSingle(),
@@ -717,35 +1122,27 @@ async function dbSaveJob(job){
             job.id,
             'incoming_dates='+incomingRunDates+';supabase_dates='+supabaseRunDates+';refused'
           );
-          /* Don't throw — just queue for later. Next save with full state will succeed. */
-          queueWrite('job',job.id,job);
+          queueWrite('job',job.id,jobForBlob);
           return;
         }
       }
     }
     const upsertCall=sb.from('jobs').upsert(
-      {id:job.id,contractor_slug:CONTRACTOR_SLUG,data:job,updated_at:new Date().toISOString()},
+      {id:job.id,contractor_slug:CONTRACTOR_SLUG,data:jobForBlob,updated_at:new Date().toISOString()},
       {onConflict:'id'}
     );
     const result=await withTimeout(upsertCall,5000,'upsert_timeout');
     if(result&&result.error)throw new Error(result.error.message);
     dequeue('job',job.id);
-    /* PATCH A — Snapshot system. After every successful main save, fire a
-       parallel upsert into job_snapshots keyed by (slug, job_id, today AEST).
-       Throughout today this overwrites today's row. At local midnight, today
-       rolls over to a new date and yesterday's snapshot becomes frozen — no
-       future write can target it. Recovery from any future wipe = a single
-       UPDATE query against the most recent snapshot.
-
-       Fire-and-forget with 3s timeout. The main save has already succeeded;
-       a failed snapshot must not block, throw, or affect anything user-facing.
-       Failures are logged to save_failures for visibility. */
+    /* PATCH A — Snapshot system. Snapshots use the FULL job (including
+       tallies from React state) as a recovery option. Yesterday and
+       earlier snapshots remain frozen and intact. */
     try{
       const snapPayload={
         contractor_slug:CONTRACTOR_SLUG,
         job_id:job.id,
         snapshot_date:localToday(),
-        data:job,
+        data:job, /* full job — tallies included for recovery */
         updated_at:new Date().toISOString()
       };
       withTimeout(
@@ -760,7 +1157,7 @@ async function dbSaveJob(job){
     }catch(snapErr){ /* never break the save flow */ }
   }catch(e){
     /* Queue for retry on next online event or mountLoad */
-    queueWrite('job',job.id,job);
+    queueWrite('job',job.id,jobForBlob);
     /* Log forensically — fire-and-forget, never throws */
     logSaveFailure(
       e.message==='upsert_timeout'?'timeout':'error',
@@ -818,7 +1215,7 @@ function syncLookups(farms,crew){FARMS.length=0;FARMS.push(...(farms||[]));CREW.
 const mkRun=(id,type,desc,counts,ro)=>({id,mobs:[{id:id+'_m1',type,desc,counts,...(ro!=null?{rateOverride:ro}:{})}]});
 const mkRates=(ov={})=>{
   const last=lsGet(LS_LAST_RATES)||{};
-  return {shearingPerHead:last.shearingPerHead??4.80,crutchingPerHead:last.crutchingPerHead??1.55,woolHandlerPerRun:last.woolHandlerPerRun??80,classerPerRun:last.classerPerRun??110,pennerPerRun:last.pennerPerRun??85,presserPerRun:last.presserPerRun??85,presserPerBale:last.presserPerBale??14.20,baleThreshold:last.baleThreshold??13,crewOverrides:{},shearerLoadings:{},loadingType:{},travelRate:{},payDayOfWeek:last.payDayOfWeek??4,payFrequency:last.payFrequency??'weekly',farmerShearingRate:last.farmerShearingRate??6.50,farmerCrutchingRate:last.farmerCrutchingRate??2.00,crewDetails:{},...ov};
+  return {shearingPerHead:last.shearingPerHead??4.80,crutchingPerHead:last.crutchingPerHead??1.55,woolHandlerPerRun:last.woolHandlerPerRun??80,classerPerRun:last.classerPerRun??110,pennerPerRun:last.pennerPerRun??85,presserPerRun:last.presserPerRun??85,presserPerBale:last.presserPerBale??14.20,baleThreshold:last.baleThreshold??13,pressCpk:last.pressCpk??0,travelKmDefault:last.travelKmDefault??0.85,shedKm:last.shedKm??0,crewOverrides:{},shearerLoadings:{},loadingType:{},travelRate:{},payDayOfWeek:last.payDayOfWeek??4,payFrequency:last.payFrequency??'weekly',farmerShearingRate:last.farmerShearingRate??6.50,farmerCrutchingRate:last.farmerCrutchingRate??2.00,crewDetails:{},...ov};
 };
 const INIT_JOBS=[];
 const gf=id=>FARMS.find(f=>f.id===id);
@@ -971,6 +1368,7 @@ function mobTotals(job,viewDate,shearers){
   });
   return Object.entries(all).filter(([,v])=>v.bf+v.today>0);
 }
+
 /* PAY PERIOD HELPERS */
 const DAY_FULL=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 function getPeriodForDate(dateStr,payDayOfWeek){
@@ -1005,6 +1403,17 @@ function calcPeriodStats(job,period){
   const rates=job.rates||{};
   let shorn=0,totalEarn=0;
   const inP=date=>date>=period.start&&date<=period.end;
+  /* v4.6.3c: mode-aware travel earn helper (handles 'day' and 'km' modes) */
+  const travelEarn=id=>{
+    const det=(rates.crewDetails||{})[id]||{};
+    const days=Object.values((job.travelTallies||{})[id]||{}).reduce((a,b)=>a+(b?1:0),0);
+    if((det.travelMode||'day')==='km'){
+      const km=det.driverKm!=null?det.driverKm:(rates.shedKm||0);
+      const rate=det.travelKmRate!=null?det.travelKmRate:(rates.travelKmDefault||0);
+      return days*km*rate;
+    }
+    return days*((rates.travelRate||{})[id]||0);
+  };
   Object.entries(job.runs||{}).forEach(([date,rs])=>{if(!inP(date))return;rs.forEach(run=>{mobsOf(run).forEach(mob=>{const br=mob.rateOverride!=null?mob.rateOverride:(mob.type==='Shearing'?rates.shearingPerHead:rates.crutchingPerHead)||0;shIds.forEach(id=>{const cnt=mob.counts[id]||0;if(!cnt)return;shorn+=cnt;const load=(rates.shearerLoadings||{})[id]||0;totalEarn+=cnt*(br+load);});});});});
   // Shed staff
   job.crew.filter(id=>{const r=getJobRole(job,id);return r&&r!=='Shearer'&&r!=='Crutcher';}).forEach(id=>{
@@ -1012,13 +1421,26 @@ function calcPeriodStats(job,period){
     const role=getJobRole(job,id);
     const defR=role==='Wool Classer'?rates.classerPerRun:role==='Penner'?rates.pennerPerRun:role==='Presser'?rates.presserPerRun:rates.woolHandlerPerRun;
     const rpr=ov||defR||80;
-    if(role==='Presser'){Object.entries(job.shedTallies[id]||{}).forEach(([date,runs])=>{if(!inP(date))return;const bales=(job.baleTallies[id]||{})[date]||0;totalEarn+=bales>(rates.baleThreshold||13)?bales*(rates.presserPerBale||14.20):runs*rpr;});}
+    if(role==='Presser'){
+      /* v4.6.3c: cpk mode pays kg × pressCpk; standard mode uses threshold logic */
+      const det=(rates.crewDetails||{})[id]||{};
+      const pressMode=det.pressMode||'standard';
+      Object.entries(job.shedTallies[id]||{}).forEach(([date,runs])=>{
+        if(!inP(date))return;
+        if(pressMode==='cpk'){
+          const kg=((job.baleWeights||{})[id]||{})[date]||0;
+          totalEarn+=kg*(rates.pressCpk||0);
+        }else{
+          const bales=((job.baleTallies||{})[id]||{})[date]||0;
+          totalEarn+=bales>(rates.baleThreshold||13)?bales*(rates.presserPerBale||14.20):runs*rpr;
+        }
+      });
+    }
     else{Object.entries(job.shedTallies[id]||{}).forEach(([date,runs])=>{if(!inP(date))return;totalEarn+=runs*rpr;});}
-    const tr2=rates.travelRate||{};
-    totalEarn+=Object.values((job.travelTallies||{})[id]||{}).reduce((a,b)=>a+(b?1:0),0)*(tr2[id]||0);
+    totalEarn+=travelEarn(id);
   });
   // Shearer travel
-  shIds.forEach(id=>{const tr2=rates.travelRate||{};totalEarn+=Object.values((job.travelTallies||{})[id]||{}).reduce((a,b)=>a+(b?1:0),0)*(tr2[id]||0);});
+  shIds.forEach(id=>{totalEarn+=travelEarn(id);});
   return{shorn,totalEarn};
 }
 /* PAY SUMMARY */
@@ -1107,7 +1529,23 @@ function generateSummary(job,period){
   Object.entries(job.runs||{}).forEach(([date,dayRuns])=>{if(!inP(date))return;dayRuns.forEach(run=>{mobsOf(run).forEach(mob=>{const hasOverride=mob.rateOverride!=null;const br=hasOverride?mob.rateOverride:(mob.type==='Shearing'?rates.shearingPerHead:rates.crutchingPerHead)||0;shIds.forEach(id=>{const cnt=mob.counts[id]||0;if(!cnt)return;const load=(rates.shearerLoadings||{})[id]||0;const loadType=(rates.loadingType||{})[id]||'individual';const effRate=loadType==='team'?br:(br+load);const earn=cnt*effRate;if(mob.type==='Shearing'){shornBy[id].sh+=cnt;shornBy[id].shEarn+=earn;}else{shornBy[id].cr+=cnt;shornBy[id].crEarn+=earn;}/* merge into same mob bucket if same type/desc/rate */const key=mob.type+'|'+(mob.desc||'')+'|'+effRate.toFixed(4)+'|'+(hasOverride?'O':'B');let bucket=shornBy[id].mobs.find(m=>m.key===key);if(!bucket){bucket={key,type:mob.type,desc:mob.desc||'',rate:effRate,hasOverride,count:0,earn:0};shornBy[id].mobs.push(bucket);}bucket.count+=cnt;bucket.earn+=earn;});});});});
   const tr=rates.travelRate||{};
   const travelDayCount=id=>Object.entries((job.travelTallies||{})[id]||{}).filter(([d,v])=>v&&inP(d)).length;
-  const trvl=id=>travelDayCount(id)*(tr[id]||0);
+  /* v4.6.3c: mode-aware travel helpers. travelMode='km' uses driverKm × travelKmRate; otherwise $/day. */
+  const travelMode=id=>((rates.crewDetails||{})[id]||{}).travelMode||'day';
+  const travelKm=id=>{const d=(rates.crewDetails||{})[id]||{};return d.driverKm!=null?d.driverKm:(rates.shedKm||0);};
+  const travelKmRate=id=>{const d=(rates.crewDetails||{})[id]||{};return d.travelKmRate!=null?d.travelKmRate:(rates.travelKmDefault||0);};
+  const trvl=id=>{
+    const days=travelDayCount(id);
+    if(travelMode(id)==='km')return days*travelKm(id)*travelKmRate(id);
+    return days*((tr[id]||0));
+  };
+  const travelLine=id=>{
+    const days=travelDayCount(id);if(!days)return null;
+    if(travelMode(id)==='km'){
+      const km=travelKm(id),rate=travelKmRate(id);
+      return '  Drove: '+days+' day'+(days!==1?'s':'')+' x '+km+'km x $'+rate.toFixed(2)+'/km = $'+(days*km*rate).toFixed(2);
+    }
+    return '  Travel: '+days+' day'+(days!==1?'s':'')+' x $'+((tr[id]||0)).toFixed(2)+'/day = $'+(days*(tr[id]||0)).toFixed(2);
+  };
   let totalShEarn=0,totalShedEarn=0,totalTravel=0,totalTeamLoad=0;
   const L=[];
   L.push('PAY SUMMARY \u2014 '+(farm?farm.name.toUpperCase():'JOB'));
@@ -1129,7 +1567,11 @@ function generateSummary(job,period){
     const travel=trvl(id);const gross=s.shEarn+s.crEarn+travel+(loadType==='team'?teamLoadEarn:0);
     const taxAmt=taxPct>0?gross*(taxPct/100):0;
     totalShEarn+=s.shEarn+s.crEarn;totalTravel+=travel;totalTeamLoad+=teamLoadEarn;
-    L.push('');L.push(c.name+' \u2014 '+(det.role||c.role));
+    /* v4.6.3c: mode badges - only non-default modes get tagged */
+    const badges=[];
+    if(travelMode(id)==='km')badges.push('km');
+    const badgeStr=badges.length?' ['+badges.join(' \u00b7 ')+']':'';
+    L.push('');L.push(c.name+' \u2014 '+(det.role||c.role)+badgeStr);
     /* Split mobs by type. If a type has >1 mob OR any override, show detailed breakdown; else simple one-liner. */
     const shMobs=s.mobs.filter(m=>m.type==='Shearing');
     const crMobs=s.mobs.filter(m=>m.type==='Crutching');
@@ -1151,7 +1593,7 @@ function generateSummary(job,period){
     writeMobs('Sheep shorn',shMobs,s.shEarn);
     writeMobs('Crutched',crMobs,s.crEarn);
     if(loadType==='team'&&teamLoadEarn>0)L.push('  Team loading: '+teamTotal.toLocaleString()+' head x $'+baseLoad.toFixed(2)+'/head = $'+teamLoadEarn.toFixed(2));
-    const tDays=travelDayCount(id);if(tDays)L.push('  Travel: '+tDays+' days x $'+(tr[id]||0).toFixed(2)+'/day = $'+travel.toFixed(2));
+    const tl=travelLine(id);if(tl)L.push(tl);
     L.push('  GROSS TOTAL: $'+gross.toFixed(2));
     if(taxPct>0){L.push('  Tax withheld ('+taxPct+'%): -$'+taxAmt.toFixed(2));L.push('  NET PAY: $'+(gross-taxAmt).toFixed(2));}
   });
@@ -1165,25 +1607,88 @@ function generateSummary(job,period){
     const totalRuns=Object.entries(job.shedTallies[id]||{}).filter(([d])=>inP(d)).reduce((a,[,b])=>a+b,0);
     const travel=trvl(id);let earn=0,earnLine='';
     if(role==='Presser'){
-      let rEarn=0,bEarn=0;
-      Object.entries(job.shedTallies[id]||{}).forEach(([date,runs])=>{if(!inP(date))return;const bales=(job.baleTallies[id]||{})[date]||0;if(bales>(rates.baleThreshold||13)){bEarn+=bales*(rates.presserPerBale||14.20);}else{rEarn+=runs*rpr;}});
-      earn=rEarn+bEarn;
-      const totalBales=Object.entries(job.baleTallies[id]||{}).filter(([d])=>inP(d)).reduce((a,[,b])=>a+b,0);
-      if(bEarn>0&&rEarn>0){earnLine='  '+totalRuns+' runs @ $'+rpr.toFixed(2)+'/run = $'+rEarn.toFixed(2)+'\n  '+totalBales+' bales @ $'+(rates.presserPerBale||14.20).toFixed(2)+'/bale = $'+bEarn.toFixed(2);}
-      else if(bEarn>0){earnLine='  '+totalBales+' bales @ $'+(rates.presserPerBale||14.20).toFixed(2)+'/bale = $'+earn.toFixed(2);}
-      else{earnLine='  '+totalRuns+' runs @ $'+rpr.toFixed(2)+'/run = $'+earn.toFixed(2);}
+      /* v4.6.3c: cpk mode pays kg × pressCpk; standard mode keeps threshold logic */
+      const detP=(rates.crewDetails||{})[id]||{};
+      const pressMode=detP.pressMode||'standard';
+      if(pressMode==='cpk'){
+        const cpk=rates.pressCpk||0;
+        let totalKg=0,totalBalesC=0;
+        Object.entries(job.shedTallies[id]||{}).forEach(([date])=>{
+          if(!inP(date))return;
+          totalKg+=((job.baleWeights||{})[id]||{})[date]||0;
+          totalBalesC+=((job.baleTallies||{})[id]||{})[date]||0;
+        });
+        earn=totalKg*cpk;
+        earnLine='  '+totalKg.toFixed(1)+' kg @ $'+cpk.toFixed(2)+'/kg = $'+earn.toFixed(2)+(totalBalesC>0?' ('+totalBalesC+' bales)':'');
+      }else{
+        let rEarn=0,bEarn=0;
+        Object.entries(job.shedTallies[id]||{}).forEach(([date,runs])=>{if(!inP(date))return;const bales=(job.baleTallies[id]||{})[date]||0;if(bales>(rates.baleThreshold||13)){bEarn+=bales*(rates.presserPerBale||14.20);}else{rEarn+=runs*rpr;}});
+        earn=rEarn+bEarn;
+        const totalBales=Object.entries(job.baleTallies[id]||{}).filter(([d])=>inP(d)).reduce((a,[,b])=>a+b,0);
+        if(bEarn>0&&rEarn>0){earnLine='  '+totalRuns+' runs @ $'+rpr.toFixed(2)+'/run = $'+rEarn.toFixed(2)+'\n  '+totalBales+' bales @ $'+(rates.presserPerBale||14.20).toFixed(2)+'/bale = $'+bEarn.toFixed(2);}
+        else if(bEarn>0){earnLine='  '+totalBales+' bales @ $'+(rates.presserPerBale||14.20).toFixed(2)+'/bale = $'+earn.toFixed(2);}
+        else{earnLine='  '+totalRuns+' runs @ $'+rpr.toFixed(2)+'/run = $'+earn.toFixed(2);}
+      }
     }else{earn=totalRuns*rpr;earnLine='  '+totalRuns+' runs @ $'+rpr.toFixed(2)+'/run = $'+earn.toFixed(2);}
     const gross=earn+travel;totalShedEarn+=earn;totalTravel+=travel;
     const det=(rates.crewDetails||{})[id]||{};
     const taxPct=parseFloat(det.taxRate||0)||0;
     const taxAmt=taxPct>0?gross*(taxPct/100):0;
-    L.push('');L.push(c.name+' \u2014 '+role);L.push(earnLine);
-    const tDays=travelDayCount(id);if(tDays)L.push('  Travel: '+tDays+' days x $'+(tr[id]||0).toFixed(2)+'/day = $'+travel.toFixed(2));
+    /* v4.6.3c: mode badges */
+    const sBadges=[];
+    if(role==='Presser'&&(det.pressMode||'standard')==='cpk')sBadges.push('c/kg');
+    if(travelMode(id)==='km')sBadges.push('km');
+    const sBadgeStr=sBadges.length?' ['+sBadges.join(' \u00b7 ')+']':'';
+    L.push('');L.push(c.name+' \u2014 '+role+sBadgeStr);L.push(earnLine);
+    const tl=travelLine(id);if(tl)L.push(tl);
     L.push('  GROSS TOTAL: $'+gross.toFixed(2));
     if(taxPct>0){L.push('  Tax withheld ('+taxPct+'%): -$'+taxAmt.toFixed(2));L.push('  NET PAY: $'+(gross-taxAmt).toFixed(2));}
   });
   const totalShorn=shIds.reduce((s,id)=>s+(shornBy[id].sh+shornBy[id].cr),0);
   const jobTotal=totalShEarn+totalTeamLoad+totalShedEarn+totalTravel;
+  /* MOB TOTALS - grower-invoice view, base rates only. Loadings shown as a separate line. */
+  const mobTotals={};
+  Object.entries(job.runs||{}).forEach(([date,dayRuns])=>{
+    if(!inP(date))return;
+    dayRuns.forEach(run=>{mobsOf(run).forEach(mob=>{
+      const baseRate=mob.rateOverride!=null?mob.rateOverride:(mob.type==='Shearing'?rates.shearingPerHead:rates.crutchingPerHead)||0;
+      const desc=mob.desc||'Unspecified';
+      const key=mob.type+'|'+desc+'|'+baseRate.toFixed(4);
+      if(!mobTotals[key])mobTotals[key]={type:mob.type,desc,rate:baseRate,count:0,earn:0};
+      shIds.forEach(id=>{
+        const cnt=mob.counts[id]||0;if(!cnt)return;
+        mobTotals[key].count+=cnt;mobTotals[key].earn+=cnt*baseRate;
+      });
+    });});
+  });
+  const mobsList=Object.values(mobTotals).filter(m=>m.count>0);
+  if(mobsList.length>0){
+    const shMobs=mobsList.filter(m=>m.type==='Shearing');
+    const crMobs=mobsList.filter(m=>m.type==='Crutching');
+    const shSub=shMobs.reduce((s,m)=>s+m.earn,0);
+    const crSub=crMobs.reduce((s,m)=>s+m.earn,0);
+    const mobsSubtotal=shSub+crSub;
+    const individualLoadings=Math.max(0,totalShEarn-mobsSubtotal);
+    const totalAllLoadings=individualLoadings+totalTeamLoad;
+    L.push('');L.push(dash);L.push('');L.push('MOB TOTALS');L.push(dash);L.push('');
+    const writeMobLine=m=>{
+      L.push('  '+pad((m.desc||'Unspecified')+':',22)+pad(m.count.toLocaleString()+' head',11)+' @ $'+m.rate.toFixed(2)+'  = $'+m.earn.toFixed(2));
+    };
+    if(shMobs.length>0){
+      L.push('Sheep shorn:');
+      shMobs.forEach(writeMobLine);
+      if(shMobs.length>1)L.push('  '+pad('Subtotal shorn:',36)+'$'+shSub.toFixed(2));
+      L.push('');
+    }
+    if(crMobs.length>0){
+      L.push('Sheep crutched:');
+      crMobs.forEach(writeMobLine);
+      if(crMobs.length>1)L.push('  '+pad('Subtotal crutched:',36)+'$'+crSub.toFixed(2));
+      L.push('');
+    }
+    if(totalAllLoadings>0.005)L.push(pad('Shearer loadings:',38)+'$'+totalAllLoadings.toFixed(2));
+    L.push(pad('TOTAL SHEARER WAGES:',38)+'$'+(mobsSubtotal+totalAllLoadings).toFixed(2));
+  }
   L.push('');L.push(dash);L.push('');L.push('CONTRACTOR TOTALS');L.push(dash);L.push('');
   L.push('Total sheep: '+totalShorn.toLocaleString());
   L.push('Shearer wages:    $'+totalShEarn.toFixed(2));
@@ -1191,8 +1696,18 @@ function generateSummary(job,period){
   L.push('Shed staff wages: $'+totalShedEarn.toFixed(2));
   L.push('Travel:           $'+totalTravel.toFixed(2));
   L.push('');L.push('JOB TOTAL:        $'+jobTotal.toFixed(2));
+  /* v4.6.3c: math check — proves CONTRACTOR TOTALS components sum to JOB TOTAL.
+     If this ever shows ✗, a pay-calc branch added later has drifted. */
+  const expectedTotal=totalShEarn+totalTeamLoad+totalShedEarn+totalTravel;
+  const matchOk=Math.abs(expectedTotal-jobTotal)<0.005;
+  const parts=['$'+totalShEarn.toFixed(2)];
+  if(totalTeamLoad>0)parts.push('$'+totalTeamLoad.toFixed(2));
+  parts.push('$'+totalShedEarn.toFixed(2));
+  parts.push('$'+totalTravel.toFixed(2));
+  L.push((matchOk?'\u2713':'\u2717 MISMATCH')+' Math check: '+parts.join(' + ')+' = $'+expectedTotal.toFixed(2));
   return L.join('\n');
 }
+
 /* ── TOP BAR ── */
 /* ── PIN CONFIG ── */
 const DEFAULT_LEAD_PIN='123456';
@@ -1247,6 +1762,59 @@ async function savePin(type,newVal){
   const update={contractor_slug:CONTRACTOR_SLUG,updated_at:new Date().toISOString()};
   update[type==='admin'?'admin_pin_hash':'lead_pin_hash']=hash;
   await sb.from('contractor_settings').upsert(update,{onConflict:'contractor_slug'});
+}
+
+/* ── ACCESS PASSWORD (v4.6.3d) ──
+   Perimeter password preventing cross-contractor URL browsing. Distinct from PINs:
+   PINs gate ROLES (admin/lead actions); access password gates whether the app
+   loads at all for this contractor. Stored as SHA-256(password+slug) in
+   contractor_settings.access_password_hash. Null hash = no gate (graceful default).
+   Master PIN bypasses for SRD support. Verified flag in localStorage = the hash
+   itself, so password rotation invalidates old devices automatically. */
+const LS_ACCESS_VERIFIED='mg_access_verified_'+CONTRACTOR_SLUG;
+let _accessHash=null;
+let _accessLoaded=false;
+
+async function loadAccessHash(){
+  if(_accessLoaded)return;
+  try{
+    const result=await sb.from('contractor_settings').select('access_password_hash').eq('contractor_slug',CONTRACTOR_SLUG).maybeSingle();
+    if(result&&!result.error&&result.data){
+      _accessHash=result.data.access_password_hash||null;
+    }
+    _accessLoaded=true;
+  }catch(e){
+    /* Network/schema error — leave unloaded so we don't lock out users on
+       offline first-load or pre-migration deployments. */
+    try{logSaveFailure('error','access_load_failed','err='+(e&&e.message||'unknown'));}catch(_e){}
+  }
+}
+
+async function checkAccess(entered){
+  if(!entered)return false;
+  if(entered===MASTER_PIN)return true; /* SRD support bypass */
+  if(!_accessHash)return true; /* No password set = no gate */
+  const hash=await hashPin(entered);
+  return hash===_accessHash;
+}
+
+async function saveAccessPassword(newVal){
+  const hash=newVal?await hashPin(newVal):null;
+  _accessHash=hash;
+  await sb.from('contractor_settings').upsert(
+    {contractor_slug:CONTRACTOR_SLUG,access_password_hash:hash,updated_at:new Date().toISOString()},
+    {onConflict:'contractor_slug'});
+  if(hash)lsSet(LS_ACCESS_VERIFIED,hash);
+  else{try{localStorage.removeItem(LS_ACCESS_VERIFIED);}catch(e){}}
+}
+
+function isAccessVerified(){
+  if(!_accessHash)return true;
+  return lsGet(LS_ACCESS_VERIFIED)===_accessHash;
+}
+
+function markAccessVerified(){
+  if(_accessHash)lsSet(LS_ACCESS_VERIFIED,_accessHash);
 }
 
 /* ── PIN PAD (reusable) ── */
@@ -1442,9 +2010,9 @@ function JLC({job,onClick}){
   const isDraft=job.status==='Draft';
   return e('div',{className:'jlc'+(isDraft?' draft':''),onClick},
     e('div',{className:'jlc-top'},e('div',null,e('div',{className:'jlc-name'},job.jobName||(farm?farm.name:'Unknown'),job.jobPin&&e('span',{style:{fontSize:'14px',marginLeft:6,opacity:.5}},'🔒')),e('div',{className:'jlc-num'},'#'+job.jobNumber)),e(Bdg,{status:job.status})),
-    e('div',{className:'jlc-meta'},e('span',{className:'pill'},job.type),e('span',{style:{fontSize:'12px',color:'var(--muted)'}},job.totalSheep.toLocaleString()+' sheep'),e('span',{style:{fontSize:'12px',color:'var(--muted)'}},job.crew.length+' crew')),
+    e('div',{className:'jlc-meta'},e('span',{className:'pill'},job.type),e('span',{style:{fontSize:'12px',color:'var(--muted)'}},(job.totalSheep||0).toLocaleString()+' sheep'),e('span',{style:{fontSize:'12px',color:'var(--muted)'}},job.crew.length+' crew')),
     isDraft&&e('div',{className:'draft-hint'},'◌ Draft — not sent to crew yet. Tap to open and publish.'),
-    !isDraft&&job.status==='Active'&&p.daysWorked>0&&e('div',null,e('div',{className:'jlc-pr'},e('span',null,p.shorn.toLocaleString()+' / '+job.totalSheep.toLocaleString()+' — Day '+p.daysWorked+' of '+job.daysAllocated),e('span',{className:'pct-lbl'},Math.round(p.pct)+'%')),e('div',{className:'pbar'},e('div',{className:`pbar-f ${cls}`,style:{width:p.pct+'%'}}))),
+    !isDraft&&job.status==='Active'&&p.daysWorked>0&&e('div',null,e('div',{className:'jlc-pr'},e('span',null,p.shorn.toLocaleString()+' / '+(job.totalSheep||0).toLocaleString()+' — Day '+p.daysWorked+' of '+job.daysAllocated),e('span',{className:'pct-lbl'},Math.round(p.pct)+'%')),e('div',{className:'pbar'},e('div',{className:`pbar-f ${cls}`,style:{width:p.pct+'%'}}))),
     job.status==='Dispatched'&&e('div',{style:{fontSize:'12px',color:'var(--amber)',marginTop:'6px'}},'📱 Dispatched — starts '+fmtDateLong(job.startDate)),
     job.status==='Completed'&&e('div',{style:{fontSize:'12px',color:'var(--blue)',marginTop:'6px'}},'✓ '+p.shorn.toLocaleString()+' '+(job.type==='Crutching'?'crutched':'shorn'))
   );
@@ -1478,7 +2046,25 @@ function TallyTab({job,setJob,role,viewDate,setViewDate}){
   const dtLbl=DAY_NAMES[vdt.getDay()].toUpperCase()+' '+String(vdt.getDate()).padStart(2,'0')+'/'+String(vdt.getMonth()+1).padStart(2,'0');
   const setRuns=fn=>setJob(prev=>({...prev,runs:{...prev.runs,[viewDate]:fn((prev.runs||{})[viewDate]||[])}}));
   const addRun=()=>setRuns(r=>[...r,{id:'r'+Date.now(),mobs:[{id:'m'+Date.now(),type:'Shearing',desc:'',counts:{}}]}]);
-  const delRun=rid=>{setRuns(r=>r.filter(x=>x.id!==rid));setConfirmDelRun(null);};
+  const delRun=async rid=>{
+    setConfirmDelRun(null);
+    /* v4.6.3b: cascade-delete tally_entries before removing from state. Without this,
+       orphan cells make the shrink-save guard reject the truncated blob, and
+       self-heal synthesizes the run back from the cells (defaulting to type Shearing). */
+    if(typeof sb!=='undefined'&&sb&&navigator.onLine){
+      try{
+        const res=await withTimeout(
+          sb.from('tally_entries').delete()
+            .eq('contractor_slug',CONTRACTOR_SLUG)
+            .eq('job_id',job.id)
+            .eq('run_id',rid),
+          5000,'cascade_timeout');
+        if(res&&res.error)logSaveFailure('error','delRun_cascade','run='+rid+';err='+res.error.message);
+        else try{logSaveFailure('diag_cascade',job.id,'delRun_ok:run='+rid);}catch(e){}
+      }catch(e){logSaveFailure('error','delRun_cascade_throw','run='+rid+';err='+(e&&e.message||'unknown'));}
+    }
+    setRuns(r=>r.filter(x=>x.id!==rid));
+  };
   const moveShearer=(idx,dir)=>{
     const target=idx+dir;
     if(target<0||target>=orderedShearers.length)return;
@@ -1487,16 +2073,54 @@ function TallyTab({job,setJob,role,viewDate,setViewDate}){
     setJob(prev=>({...prev,shearerOrder:next}));
   };
   const addMob=(rid,type)=>setRuns(r=>r.map(run=>run.id===rid?{...run,mobs:[...mobsOf(run),{id:'m'+Date.now(),type,desc:'',counts:{}}]}:run));
-  const delMob=(rid,mid)=>setRuns(r=>r.map(run=>run.id===rid?{...run,mobs:mobsOf(run).filter(m=>m.id!==mid)}:run));
+  const delMob=async(rid,mid)=>{
+    /* v4.6.3b: cascade-delete tally_entries for this mob before state update.
+       Same reasoning as delRun — orphan cells will resurrect the mob as a duplicate. */
+    if(typeof sb!=='undefined'&&sb&&navigator.onLine){
+      try{
+        const res=await withTimeout(
+          sb.from('tally_entries').delete()
+            .eq('contractor_slug',CONTRACTOR_SLUG)
+            .eq('job_id',job.id)
+            .eq('run_id',rid)
+            .eq('mob_id',mid),
+          5000,'cascade_timeout');
+        if(res&&res.error)logSaveFailure('error','delMob_cascade','mob='+mid+';err='+res.error.message);
+        else try{logSaveFailure('diag_cascade',job.id,'delMob_ok:mob='+mid);}catch(e){}
+      }catch(e){logSaveFailure('error','delMob_cascade_throw','mob='+mid+';err='+(e&&e.message||'unknown'));}
+    }
+    setRuns(r=>r.map(run=>run.id===rid?{...run,mobs:mobsOf(run).filter(m=>m.id!==mid)}:run));
+  };
   const setMobDesc=(rid,mid,v)=>setRuns(r=>r.map(run=>run.id===rid?{...run,mobs:mobsOf(run).map(m=>m.id===mid?{...m,desc:v}:m)}:run));
   const setMobType=(rid,mid,t)=>setRuns(r=>r.map(run=>run.id===rid?{...run,mobs:mobsOf(run).map(m=>m.id===mid?{...m,type:t}:m)}:run));
   const setMobRate=(rid,mid,v)=>setRuns(r=>r.map(run=>run.id===rid?{...run,mobs:mobsOf(run).map(m=>m.id===mid?{...m,rateOverride:v===''?null:parseFloat(v)||null}:m)}:run));
-  const setMobCnt=(rid,mid,cid,v)=>setRuns(r=>r.map(run=>run.id===rid?{...run,mobs:mobsOf(run).map(m=>m.id===mid?{...m,counts:{...m.counts,[cid]:parseInt(v)||0}}:m)}:run));
-  const setShed=(cid,v)=>setJob(prev=>({...prev,shedTallies:{...prev.shedTallies,[cid]:{...(prev.shedTallies[cid]||{}),[viewDate]:Math.max(0,v)}}}));
-  const setBale=(cid,v)=>setJob(prev=>({...prev,baleTallies:{...prev.baleTallies,[cid]:{...(prev.baleTallies[cid]||{}),[viewDate]:Math.max(0,v)}}}));
+  const setMobCnt=(rid,mid,cid,v)=>{
+    const val=parseInt(v)||0;
+    setRuns(r=>r.map(run=>run.id===rid?{...run,mobs:mobsOf(run).map(m=>m.id===mid?{...m,counts:{...m.counts,[cid]:val}}:m)}:run));
+    writeTallyCell({jobId:job.id,kind:'count',runId:rid,mobId:mid,crewId:cid,date:viewDate,value:val});
+  };
+  const setShed=(cid,v)=>{
+    const val=Math.max(0,v);
+    setJob(prev=>({...prev,shedTallies:{...prev.shedTallies,[cid]:{...(prev.shedTallies[cid]||{}),[viewDate]:val}}}));
+    writeTallyCell({jobId:job.id,kind:'shed_runs',crewId:cid,date:viewDate,value:val});
+  };
+  const setBale=(cid,v)=>{
+    const val=Math.max(0,v);
+    setJob(prev=>({...prev,baleTallies:{...prev.baleTallies,[cid]:{...(prev.baleTallies[cid]||{}),[viewDate]:val}}}));
+    writeTallyCell({jobId:job.id,kind:'bales',crewId:cid,date:viewDate,value:val});
+  };
+  /* v4.6.3c: bale weight setter for c/kg presser mode. Stored as kind='bale_kg'. */
+  const setKg=(cid,v)=>{
+    const val=Math.max(0,v);
+    setJob(prev=>({...prev,baleWeights:{...(prev.baleWeights||{}),[cid]:{...((prev.baleWeights||{})[cid]||{}),[viewDate]:val}}}));
+    writeTallyCell({jobId:job.id,kind:'bale_kg',crewId:cid,date:viewDate,value:val});
+  };
   const baleTot=id=>Object.values(job.baleTallies[id]||{}).reduce((a,b)=>a+b,0);
   const setNote=v=>setJob(prev=>({...prev,dayNotes:{...prev.dayNotes,[viewDate]:v}}));
-  const setTravel=(cid,val)=>setJob(prev=>({...prev,travelTallies:{...(prev.travelTallies||{}),[cid]:{...((prev.travelTallies||{})[cid]||{}),[viewDate]:val}}}));
+  const setTravel=(cid,val)=>{
+    setJob(prev=>({...prev,travelTallies:{...(prev.travelTallies||{}),[cid]:{...((prev.travelTallies||{})[cid]||{}),[viewDate]:val}}}));
+    writeTallyCell({jobId:job.id,kind:'travel',crewId:cid,date:viewDate,value:val?1:0});
+  };
   const travelDayCount=id=>Object.values((job.travelTallies||{})[id]||{}).reduce((a,b)=>a+(b?1:0),0);
   const travelBF=id=>Object.entries((job.travelTallies||{})[id]||{}).filter(([d])=>d<viewDate).reduce((a,[,b])=>a+(b?1:0),0);
   const hasCrutch=Object.values(job.runs||{}).flat().some(run=>mobsOf(run).some(m=>m.type==='Crutching'));
@@ -1627,15 +2251,22 @@ function TallyTab({job,setJob,role,viewDate,setViewDate}){
           const bfRuns=Object.entries(job.shedTallies[id]||{}).filter(([d])=>d<viewDate).reduce((a,[,b])=>a+b,0);
           const bfBales=Object.entries(job.baleTallies[id]||{}).filter(([d])=>d<viewDate).reduce((a,[,b])=>a+b,0);
           const threshold=rates.baleThreshold||13;
-          const payMode=balesDay>=threshold?'bale':'run';
+          /* v4.6.3c: cpk mode adds kg tracking */
+          const pressMode=((rates.crewDetails||{})[id]||{}).pressMode||'standard';
+          const kgDay=(job.baleWeights||{})[id]?.[viewDate]||0;
+          const allKg=Object.values((job.baleWeights||{})[id]||{}).reduce((a,b)=>a+b,0);
+          const cpkRate=rates.pressCpk||0;
+          const payMode=pressMode==='cpk'?'kg':(balesDay>=threshold?'bale':'run');
           return e('div',{key:id,className:'staff-row',style:{flexWrap:'wrap',rowGap:'8px'}},
             e(Av,{name:c.name,size:36}),
             e('div',{className:'staff-info'},
               e('div',{className:'staff-name'},c.name),
               isAdmin&&e('div',{className:'staff-rate-lbl'},
-                '$'+(rates.presserPerRun||85)+'/run · $'+(rates.presserPerBale||14.20)+'/bale ≥'+threshold,
-                e('span',{style:{marginLeft:6,fontWeight:700,color:payMode==='bale'?'var(--amber)':'var(--muted)'}},
-                  payMode==='bale'?'▲ BALE MODE':'● Run mode')
+                pressMode==='cpk'
+                  ?'$'+cpkRate.toFixed(2)+'/kg'
+                  :'$'+(rates.presserPerRun||85)+'/run · $'+(rates.presserPerBale||14.20)+'/bale ≥'+threshold,
+                e('span',{style:{marginLeft:6,fontWeight:700,color:payMode==='bale'||payMode==='kg'?'var(--amber)':'var(--muted)'}},
+                  payMode==='kg'?'⚖ KG MODE':payMode==='bale'?'▲ BALE MODE':'● Run mode')
               )
             ),
             e('div',{className:'staff-stats',style:{flexWrap:'wrap',rowGap:'6px'}},
@@ -1659,7 +2290,14 @@ function TallyTab({job,setJob,role,viewDate,setViewDate}){
                 :e('div',{className:`s-val${payMode==='bale'?' hi':''}`},balesDay)),
               e('div',{className:'s-grp'},e('div',{className:'s-lbl',style:{fontSize:10}},'B/F'),e('div',{className:'s-val'},bfBales)),
               e('div',{className:'s-grp'},e('div',{className:'s-lbl',style:{fontSize:10,whiteSpace:'nowrap'}},'Bale Tot'),
-                e('div',{className:`s-val${payMode==='bale'?' hi':''}`},allBales))
+                e('div',{className:`s-val${payMode==='bale'?' hi':''}`},allBales)),
+              /* v4.6.3c: kg group, cpk mode only */
+              pressMode==='cpk'&&e('div',{className:'s-div'}),
+              pressMode==='cpk'&&e('div',{className:'s-grp'},e('div',{className:'s-lbl'},'Today kg'),
+                canEdit?e('input',{type:'number',inputMode:'decimal',step:'0.5',min:'0',value:kgDay||'',placeholder:'0',style:{width:64,padding:'4px 6px',borderRadius:6,border:'1px solid var(--border)',background:'var(--card)',color:'var(--text)',fontSize:14,fontWeight:700,textAlign:'center'},onChange:ev=>setKg(id,parseFloat(ev.target.value)||0)})
+                :e('div',{className:`s-val${payMode==='kg'?' hi':''}`},kgDay.toFixed(1))),
+              pressMode==='cpk'&&e('div',{className:'s-grp'},e('div',{className:'s-lbl',style:{fontSize:10,whiteSpace:'nowrap'}},'Kg Tot'),
+                e('div',{className:`s-val${payMode==='kg'?' hi':''}`},allKg.toFixed(1)))
             )
           );
         })
@@ -1673,16 +2311,22 @@ function TallyTab({job,setJob,role,viewDate,setViewDate}){
         const todayTravel=(job.travelTallies||{})[id]?.[viewDate]?1:0;
         const bf=travelBF(id);
         const total=travelDayCount(id);
-        const rate=(job.rates?.travelRate||{})[id]||0;
+        const det=(rates.crewDetails||{})[id]||{};
+        const tMode=det.travelMode||'day';
+        const dayRate=(job.rates?.travelRate||{})[id]||0;
+        const kmRate=det.travelKmRate!=null?det.travelKmRate:(rates.travelKmDefault||0);
+        const km=det.driverKm!=null?det.driverKm:(rates.shedKm||0);
+        const perDayAmt=tMode==='km'?(kmRate*km):dayRate;
+        const rateLbl=tMode==='km'?(km+'km × $'+kmRate.toFixed(2)+'/km = $'+perDayAmt.toFixed(2)+'/day'):('$'+dayRate+'/day');
         const canEditTravel=canEdit||isAdmin;
         return e('div',{key:id,className:'staff-row'},
           e(Av,{name:c.name,size:32}),
           e('div',{className:'staff-info'},
             e('div',{className:'staff-name'},c.name),
-            e('div',{className:'staff-rate-lbl'},(getJobRole(job,id)||c.role)+(isAdmin&&rate?' · $'+rate+'/day':''))
+            e('div',{className:'staff-rate-lbl'},(getJobRole(job,id)||c.role)+(isAdmin&&perDayAmt?' · '+rateLbl:''))
           ),
           e('div',{className:'staff-stats'},
-            e('div',{className:'s-grp'},e('div',{className:'s-lbl'},'Today'),
+            e('div',{className:'s-grp'},e('div',{className:'s-lbl'},tMode==='km'?'Drove':'Travel'),
               canEditTravel
                 ?e('button',{
                     type:'button',
@@ -1694,7 +2338,7 @@ function TallyTab({job,setJob,role,viewDate,setViewDate}){
             ),
             e('div',{className:'s-grp'},e('div',{className:'s-lbl'},'B/F'),e('div',{className:'s-val'},bf)),
             e('div',{className:'s-grp'},e('div',{className:'s-lbl'},'Total'),e('div',{className:`s-val${total?' hi':''}`},total)),
-            isAdmin&&rate&&total>0&&e('div',{className:'s-grp'},e('div',{className:'s-lbl',style:{fontSize:10}},'Amount'),e('div',{className:'s-val',style:{color:'var(--amber)',fontWeight:700}},'$'+(total*rate).toFixed(2)))
+            isAdmin&&perDayAmt>0&&total>0&&e('div',{className:'s-grp'},e('div',{className:'s-lbl',style:{fontSize:10}},'Amount'),e('div',{className:'s-val',style:{color:'var(--amber)',fontWeight:700}},'$'+(total*perDayAmt).toFixed(2)))
           )
         );
       })
@@ -1859,6 +2503,45 @@ function AdminTab({job,setJob,onEdit,onDeleteFarm,onDeleteJob,onPublish}){
   const [confirmDeleteJob,setConfirmDeleteJob]=useState(false);
   const [saved,setSaved]=useState(false);
   const [showChangePinType,setShowChangePinType]=useState(null); /* 'lead' | 'admin' | null */
+  /* v4.6.3d: access password change UI state */
+  const [showAccessModal,setShowAccessModal]=useState(false);
+  const [accessCurrent,setAccessCurrent]=useState('');
+  const [accessNew,setAccessNew]=useState('');
+  const [accessNew2,setAccessNew2]=useState('');
+  const [accessErr,setAccessErr]=useState('');
+  const [accessBusy,setAccessBusy]=useState(false);
+  const [accessSaved,setAccessSaved]=useState(false);
+  const [accessHashLocal,setAccessHashLocal]=useState(_accessHash);
+  const resetAccess=()=>{setAccessCurrent('');setAccessNew('');setAccessNew2('');setAccessErr('');setAccessSaved(false);};
+  const submitAccess=async()=>{
+    setAccessErr('');setAccessBusy(true);
+    try{
+      if(accessHashLocal){
+        const ok=await checkAccess(accessCurrent);
+        if(!ok){setAccessErr('Current password incorrect');setAccessBusy(false);return;}
+      }
+      if(!accessNew||accessNew.length<6){setAccessErr('New password must be at least 6 characters');setAccessBusy(false);return;}
+      if(accessNew!==accessNew2){setAccessErr('Passwords do not match');setAccessBusy(false);return;}
+      await saveAccessPassword(accessNew);
+      setAccessHashLocal(_accessHash);
+      setAccessSaved(true);
+      setTimeout(()=>{setShowAccessModal(false);resetAccess();},1200);
+    }catch(e){setAccessErr('Save failed: '+(e&&e.message||'try again'));}
+    setAccessBusy(false);
+  };
+  const clearAccess=async()=>{
+    setAccessErr('');setAccessBusy(true);
+    try{
+      if(accessHashLocal){
+        const ok=await checkAccess(accessCurrent);
+        if(!ok){setAccessErr('Current password incorrect');setAccessBusy(false);return;}
+      }
+      await saveAccessPassword(null);
+      setAccessHashLocal(null);
+      setShowAccessModal(false);resetAccess();
+    }catch(e){setAccessErr('Clear failed: '+(e&&e.message||'try again'));}
+    setAccessBusy(false);
+  };
 
   /* Local draft — only commits to job on Save */
   const [draft,setDraft]=useState(()=>({...mkRates(),...(job.rates||{})}));
@@ -1911,14 +2594,15 @@ function AdminTab({job,setJob,onEdit,onDeleteFarm,onDeleteJob,onPublish}){
 
     /* SHED STAFF RATES */
     e('div',{className:'admin-section'},
-      e('div',{className:'admin-sec-hdr'},e('div',{className:'admin-sec-title'},'Shed Staff Rates'),e('div',{className:'admin-sec-sub'},'Per run. Presser switches to per-bale at threshold.')),
+      e('div',{className:'admin-sec-hdr'},e('div',{className:'admin-sec-title'},'Shed Staff Rates'),e('div',{className:'admin-sec-sub'},'Per run. Presser switches to per-bale at threshold, or per-kg if presser is in c/kg mode.')),
       e('div',{className:'rate-grid'},
         e(RCell,{lbl:'Wool Handler',k:'woolHandlerPerRun',prefix:'$',draft,onSet:set}),
         e(RCell,{lbl:'Classer',k:'classerPerRun',prefix:'$',draft,onSet:set}),
         e(RCell,{lbl:'Penner',k:'pennerPerRun',prefix:'$',draft,onSet:set}),
         e(RCell,{lbl:'Presser (per run)',k:'presserPerRun',prefix:'$',draft,onSet:set}),
         e(RCell,{lbl:'Presser $/bale',k:'presserPerBale',prefix:'$',hi:true,draft,onSet:set}),
-        e(RCell,{lbl:'Bale threshold/day',k:'baleThreshold',hi:true,draft,onSet:set})
+        e(RCell,{lbl:'Bale threshold/day',k:'baleThreshold',hi:true,draft,onSet:set}),
+        e(RCell,{lbl:'Presser $/kg',k:'pressCpk',prefix:'$',hi:true,draft,onSet:set})
       )
     ),
 
@@ -1933,6 +2617,25 @@ function AdminTab({job,setJob,onEdit,onDeleteFarm,onDeleteJob,onPublish}){
         return e('div',{key:id,className:'loading-row'},
           e('div',{className:'lr-l'},e(Av,{name:c.name,size:32}),e('div',null,e('div',{className:'lr-name'},c.name),e('div',{className:'lr-role'},role+' — default $'+defR+'/run'))),
           e('div',{className:'lr-r'},e('span',{className:'lr-prefix'},'$'),e('input',{type:'number',className:'lr-inp',value:cur,placeholder:defR,step:'1',onChange:ev=>setOv(id,ev.target.value)}),e('span',{className:'lr-unit'},'/run'))
+        );
+      })
+    ),
+
+    /* PRESSER PAY MODE — per-presser toggle, standard vs c/kg (v4.6.3c) */
+    (job.crew.filter(id=>getJobRole(job,id)==='Presser').length>0)&&e('div',{className:'admin-section'},
+      e('div',{className:'admin-sec-hdr'},e('div',{className:'admin-sec-title'},'Presser Pay Mode'),e('div',{className:'admin-sec-sub'},'Standard = $/run or $/bale (threshold). c/kg = wool weight × $/kg rate.')),
+      job.crew.filter(id=>getJobRole(job,id)==='Presser').map(id=>{
+        const c=gc(id);if(!c)return null;
+        const det=(draft.crewDetails||{})[id]||{};
+        const mode=det.pressMode||'standard';
+        return e('div',{key:id,className:'loading-row'},
+          e('div',{className:'lr-l'},e(Av,{name:c.name,size:32}),e('div',null,e('div',{className:'lr-name'},c.name),e('div',{className:'lr-role'},'Presser'))),
+          e('div',{className:'lr-r',style:{gap:6}},
+            e('select',{style:{fontSize:12,padding:'4px 8px',borderRadius:6,border:'1px solid var(--border)',background:'var(--card)',color:'var(--text)'},value:mode,onChange:ev=>setDet(id,'pressMode',ev.target.value)},
+              e('option',{value:'standard'},'Standard ($/run or $/bale)'),
+              e('option',{value:'cpk'},'c/kg (by weight)')
+            )
+          )
         );
       })
     ),
@@ -1959,19 +2662,40 @@ function AdminTab({job,setJob,onEdit,onDeleteFarm,onDeleteJob,onPublish}){
       })
     ),
 
-    /* TRAVEL RATES — days tracked on Tally tab, rates set here */
+    /* TRAVEL RATES — days tracked on Tally tab, rates/mode set here. v4.6.3c adds c/km mode. */
     e('div',{className:'admin-section'},
-      e('div',{className:'admin-sec-hdr'},e('div',{className:'admin-sec-title'},'Travel Rates'),e('div',{className:'admin-sec-sub'},'Daily rate per person — travel days marked on Tally tab by Lead')),
+      e('div',{className:'admin-sec-hdr'},e('div',{className:'admin-sec-title'},'Travel Rates'),e('div',{className:'admin-sec-sub'},'Each person: $/day (allowance) or c/km (driver). Job-wide defaults below — overridable per person.')),
+      e('div',{className:'rate-grid',style:{marginBottom:8}},
+        e(RCell,{lbl:'Default $/km',k:'travelKmDefault',prefix:'$',draft,onSet:set}),
+        e(RCell,{lbl:'Shed distance (km)',k:'shedKm',draft,onSet:set})
+      ),
       job.crew.map(id=>{
         const c=gc(id);if(!c)return null;
-        const rate=(draft.travelRate||{})[id]??'';
+        const det=(draft.crewDetails||{})[id]||{};
+        const mode=det.travelMode||'day';
+        const dayRate=(draft.travelRate||{})[id]??'';
+        const kmRate=det.travelKmRate??'';
+        const km=det.driverKm??'';
         const days=Object.values((job.travelTallies||{})[id]||{}).reduce((a,b)=>a+(b?1:0),0);
-        return e('div',{key:id,className:'loading-row'},
-          e('div',{className:'lr-l'},e(Av,{name:c.name,size:32}),e('div',null,e('div',{className:'lr-name'},c.name),e('div',{className:'lr-role'},(getJobRole(job,id)||c.role)+(days?' · '+days+' day'+(days!==1?'s':''):'')))),
-          e('div',{className:'lr-r',style:{gap:6}},
-            e('span',{className:'lr-prefix'},'$'),
-            e('input',{type:'number',className:'tr-inp',style:{width:58},value:rate,placeholder:'40',step:'5',onChange:ev=>setTR(id,ev.target.value)}),
-            e('span',{className:'tr-unit'},'/day')
+        const role=getJobRole(job,id)||c.role;
+        return e('div',{key:id,className:'loading-row',style:{flexWrap:'wrap',gap:8}},
+          e('div',{className:'lr-l'},e(Av,{name:c.name,size:32}),e('div',null,e('div',{className:'lr-name'},c.name),e('div',{className:'lr-role'},role+(days?' · '+days+' day'+(days!==1?'s':''):'')))),
+          e('div',{className:'lr-r',style:{gap:6,flexWrap:'wrap'}},
+            e('select',{style:{fontSize:11,padding:'3px 6px',borderRadius:6,border:'1px solid var(--border)',background:'var(--card)',color:'var(--text)'},value:mode,onChange:ev=>setDet(id,'travelMode',ev.target.value)},
+              e('option',{value:'day'},'$/day'),
+              e('option',{value:'km'},'c/km')
+            ),
+            ...(mode==='day'?[
+              e('span',{key:'p',className:'lr-prefix'},'$'),
+              e('input',{key:'r',type:'number',className:'tr-inp',style:{width:58},value:dayRate,placeholder:'40',step:'5',onChange:ev=>setTR(id,ev.target.value)}),
+              e('span',{key:'u',className:'tr-unit'},'/day')
+            ]:[
+              e('span',{key:'p',className:'lr-prefix'},'$'),
+              e('input',{key:'r',type:'number',className:'tr-inp',style:{width:54},value:kmRate,placeholder:String(draft.travelKmDefault??0.85),step:'0.05',onChange:ev=>setDet(id,'travelKmRate',ev.target.value===''?null:parseFloat(ev.target.value)||0)}),
+              e('span',{key:'u',className:'tr-unit'},'/km'),
+              e('input',{key:'km',type:'number',className:'tr-inp',style:{width:54,marginLeft:6},value:km,placeholder:String(draft.shedKm??0),step:'1',onChange:ev=>setDet(id,'driverKm',ev.target.value===''?null:parseFloat(ev.target.value)||0)}),
+              e('span',{key:'kmu',className:'tr-unit'},'km')
+            ])
           )
         );
       })
@@ -2065,6 +2789,36 @@ function AdminTab({job,setJob,onEdit,onDeleteFarm,onDeleteJob,onPublish}){
       )
     ),
 
+    /* ACCESS PASSWORD — perimeter security, v4.6.3d */
+    e('div',{className:'admin-section'},
+      e('div',{className:'admin-sec-hdr'},e('div',{className:'admin-sec-title'},'Access Password'),e('div',{className:'admin-sec-sub'},'Perimeter password — gates this contractor\'s app at first load. '+(accessHashLocal?'Currently set.':'Not set (anyone with the URL can access).'))),
+      e('button',{className:'btn-g',style:{width:'100%'},onClick:()=>{resetAccess();setShowAccessModal(true);}},accessHashLocal?'Change or Clear Access Password':'Set Access Password')
+    ),
+    /* ACCESS PASSWORD MODAL */
+    showAccessModal&&e('div',{className:'pin-modal'},
+      e('div',{className:'pin-modal-box',style:{maxWidth:400,padding:'24px'}},
+        e('div',{style:{fontSize:18,fontWeight:700,marginBottom:6,textAlign:'center'}},accessHashLocal?'Change Access Password':'Set Access Password'),
+        e('div',{style:{fontSize:12,color:'var(--muted)',marginBottom:16,textAlign:'center'}},'Share this with crew who need app access.'),
+        accessHashLocal&&e('input',{type:'password',autoCapitalize:'none',autoCorrect:'off',value:accessCurrent,placeholder:'Current password',
+          onChange:ev=>{setAccessCurrent(ev.target.value);setAccessErr('');},
+          style:{width:'100%',padding:'10px',marginBottom:8,borderRadius:6,border:'1px solid var(--border)',background:'var(--card2)',color:'var(--text)',boxSizing:'border-box',fontSize:15}}),
+        e('input',{type:'password',autoCapitalize:'none',autoCorrect:'off',value:accessNew,placeholder:'New password (min 6 chars)',
+          onChange:ev=>{setAccessNew(ev.target.value);setAccessErr('');},
+          style:{width:'100%',padding:'10px',marginBottom:8,borderRadius:6,border:'1px solid var(--border)',background:'var(--card2)',color:'var(--text)',boxSizing:'border-box',fontSize:15}}),
+        e('input',{type:'password',autoCapitalize:'none',autoCorrect:'off',value:accessNew2,placeholder:'Confirm new password',
+          onChange:ev=>{setAccessNew2(ev.target.value);setAccessErr('');},
+          onKeyDown:ev=>{if(ev.key==='Enter')submitAccess();},
+          style:{width:'100%',padding:'10px',marginBottom:8,borderRadius:6,border:'1px solid var(--border)',background:'var(--card2)',color:'var(--text)',boxSizing:'border-box',fontSize:15}}),
+        accessErr&&e('div',{style:{color:'#ef4444',fontSize:13,marginBottom:8,textAlign:'center'}},accessErr),
+        accessSaved&&e('div',{style:{color:'var(--green)',fontSize:13,marginBottom:8,textAlign:'center',fontWeight:700}},'✓ Saved'),
+        e('div',{style:{display:'flex',gap:8,marginTop:10,flexWrap:'wrap'}},
+          e('button',{className:'btn-g',style:{flex:'1 1 30%'},onClick:()=>{setShowAccessModal(false);resetAccess();}},'Cancel'),
+          accessHashLocal&&e('button',{style:{flex:'1 1 30%',padding:'10px',background:'#ef4444',border:'none',borderRadius:8,color:'#fff',fontWeight:700,fontSize:14,cursor:'pointer'},disabled:accessBusy,onClick:clearAccess},'Clear'),
+          e('button',{className:'btn-p',style:{flex:'1 1 30%'},disabled:accessBusy,onClick:submitAccess},accessBusy?'Saving…':(accessHashLocal?'Update':'Set'))
+        )
+      )
+    ),
+
     /* DANGER ZONE */
     e('div',{className:'admin-section'},
       e('div',{className:'admin-sec-hdr'},e('div',{className:'admin-sec-title',style:{color:'#ef4444'}},'Danger Zone')),
@@ -2091,7 +2845,7 @@ function ProgressTab({job}){
   const shTots=p.shIds.map(id=>{const tot=Object.values(job.runs).flat().flatMap(r=>mobsOf(r)).reduce((s,mob)=>s+(mob.counts[id]||0),0);const days=Object.entries(job.runs).filter(([,rs])=>rs.some(r=>mobsOf(r).some(m=>m.counts[id]>0))).length;return{id,tot,avg:days>0?Math.round(tot/days):0};});
   const maxT=Math.max(...shTots.map(x=>x.tot),1);
   return e('div',{className:'prog-wrap'},
-    e('div',{className:'pc'},e('div',{className:'pc-lbl'},'Job Progress'),e('div',{className:'prog-big'},e('div',null,e('div',{className:'prog-count'},p.shorn.toLocaleString()),e('div',{className:'prog-of'},'of '+job.totalSheep.toLocaleString()+' sheep')),e('div',null,e('div',{className:'prog-pct'},Math.round(p.pct)+'%'),e('div',{className:'prog-day'},'Day '+p.daysWorked+' of '+job.daysAllocated))),e('div',{className:'pbar-lg'},e('div',{className:`pbar-lf ${pCls}`,style:{width:p.pct+'%'}})),e('div',{style:{fontSize:'13px',color:'var(--dim)',marginTop:6}},(job.totalSheep-p.shorn).toLocaleString()+' remaining — '+(job.daysAllocated-p.daysWorked)+' day'+(job.daysAllocated-p.daysWorked!==1?'s':'')+' left')),
+    e('div',{className:'pc'},e('div',{className:'pc-lbl'},'Job Progress'),e('div',{className:'prog-big'},e('div',null,e('div',{className:'prog-count'},p.shorn.toLocaleString()),e('div',{className:'prog-of'},'of '+(job.totalSheep||0).toLocaleString()+' sheep')),e('div',null,e('div',{className:'prog-pct'},Math.round(p.pct)+'%'),e('div',{className:'prog-day'},'Day '+p.daysWorked+' of '+job.daysAllocated))),e('div',{className:'pbar-lg'},e('div',{className:`pbar-lf ${pCls}`,style:{width:p.pct+'%'}})),e('div',{style:{fontSize:'13px',color:'var(--dim)',marginTop:6}},(((job.totalSheep||0)-p.shorn)).toLocaleString()+' remaining — '+(job.daysAllocated-p.daysWorked)+' day'+(job.daysAllocated-p.daysWorked!==1?'s':'')+' left')),
     e('div',{className:'pc'},e('div',{className:'pc-lbl'},'By Shearer — Job Total'),shTots.map(({id,tot,avg})=>{const c=gc(id);if(!c)return null;return e('div',{key:id,className:'spr'},e('div',{className:'spr-name'},sn(c.name)),e('div',{className:'spr-bar'},e('div',{className:'spr-bar-f',style:{width:(tot/maxT*100)+'%'}})),e('div',{className:'spr-tot'},tot.toLocaleString()),e('div',{className:'spr-avg'},avg+'/day'));}))
   );
 }
@@ -2261,9 +3015,9 @@ function OverviewTab({job,role,onSend,onBroadcast,canSend,onEditFarm,isDraft,onP
   const IC=({l,v,full})=>e('div',{className:'ic'+(full?' full-ic':'')},e('div',{className:'ic-l'},l),e('div',{className:'ic-v'},v));
   return e('div',null,
     e('div',{style:{height:12}}),
-    e('div',{className:'info-grid'},e(IC,{l:'Job Type',v:job.type}),e(IC,{l:'Total Sheep',v:job.totalSheep.toLocaleString()}),e(IC,{l:'Start Date',v:fmtDateLong(job.startDate)}),e(IC,{l:'Days Allocated',v:job.daysAllocated+' days'}),e(IC,{l:'EVOs',v:job.evos||'—'}),e(IC,{l:'Transport',v:job.transport?'✓ Yes':'No'}),e(IC,{l:'Crutching Trailer',v:job.crutchingTrailer?'✓ Provided':'Not provided'}),e(IC,{l:'Meals',v:job.meals||'Not Supplied'}),e(IC,{l:'Accommodation',v:job.accommodation||'—',full:true})),
+    e('div',{className:'info-grid'},e(IC,{l:'Job Type',v:job.type}),e(IC,{l:'Total Sheep',v:(job.totalSheep||0).toLocaleString()}),e(IC,{l:'Start Date',v:fmtDateLong(job.startDate)}),e(IC,{l:'Days Allocated',v:job.daysAllocated+' days'}),e(IC,{l:'EVOs',v:job.evos||'—'}),e(IC,{l:'Transport',v:job.transport?'✓ Yes':'No'}),e(IC,{l:'Crutching Trailer',v:job.crutchingTrailer?'✓ Provided':'Not provided'}),e(IC,{l:'Meals',v:job.meals||'Not Supplied'}),e(IC,{l:'Accommodation',v:job.accommodation||'—',full:true})),
     job.notes_job&&e('div',{style:{padding:'0 16px',marginBottom:10}},e('div',{className:'ic'},e('div',{className:'ic-l'},'Notes'),e('div',{className:'ic-v',style:{fontSize:'13px',color:'var(--muted)',fontWeight:400}},job.notes_job))),
-    farm&&e('div',{style:{padding:'0 16px',marginBottom:10}},e('div',{className:'ic'},e('div',{className:'ic-l'},'Farm Address'),e('div',{className:'ic-v'},farm.address),farm.notes&&e('div',{style:{fontSize:'12px',color:'var(--dim)',marginTop:4}},farm.notes),e('a',{href:'https://maps.google.com/?q='+encodeURIComponent(farm.address),target:'_blank',className:'map-link'},'📍 Open in Maps')),role==='admin'&&onEditFarm&&e('button',{className:'map-link',style:{marginTop:6,display:'block',color:'var(--amber)',cursor:'pointer',background:'none',border:'none',padding:0,fontSize:13},onClick:onEditFarm},'✏️ Edit farm details')),
+    farm&&e('div',{style:{padding:'0 16px',marginBottom:10}},e('div',{className:'ic'},e('div',{className:'ic-l'},'Farm Address'),e('div',{className:'ic-v'},farm.address),farm.notes&&e('div',{style:{fontSize:'12px',color:'var(--dim)',marginTop:4}},farm.notes),e('a',{href:/^https?:\/\//i.test(farm.address||'')?farm.address:'https://maps.google.com/?q='+encodeURIComponent(farm.address||''),target:'_blank',className:'map-link'},'📍 Open in Maps')),role==='admin'&&onEditFarm&&e('button',{className:'map-link',style:{marginTop:6,display:'block',color:'var(--amber)',cursor:'pointer',background:'none',border:'none',padding:0,fontSize:13},onClick:onEditFarm},'✏️ Edit farm details')),
     e('div',{className:'crew-hdr'},e('span',null,'Crew — '+job.crew.length)),
     job.crew.map(id=>{
       const c=gc(id);if(!c)return null;
@@ -2367,8 +3121,8 @@ function JobCardView({job,crewId,onClose}){
       crew&&e('div',{className:'jcw-greet'},'Hi '+crew.name.split(' ')[0]+','),
       e('div',{className:'jcw-alloc'},'You have been allocated to the job —\n'+(farm?farm.name:'Farm')+' (#'+job.jobNumber+')'),
       e('div',{className:'jcw-title'},'Job Details'),
-      ...[['Job Number',job.jobNumber],['Job Name',farm?farm.name:''],['Job Type',job.type],['Start Date',fmtDate(job.startDate)],['End Date',endD],['Farm Address',farm?farm.address:'',true],['Total Sheep',job.totalSheep.toLocaleString()],['EVOs',job.evos],['Crutching Trailer',job.crutchingTrailer?'Provided':'Not provided'],['Meals',job.meals||'Not Supplied'],['Transport',job.transport?'Available':'No'],['Accommodation',job.accommodation]].map(([lbl,val,isAddr])=>
-        e('div',{key:lbl,className:'jcw-f'},e('div',{className:'jcw-fl'},lbl),isAddr?e('div',null,e('div',{className:'jcw-fv'},val),e('a',{href:'https://maps.google.com/?q='+encodeURIComponent(val),target:'_blank',className:'map-btn'},'📍 Open in Maps')):e('div',{className:'jcw-fv'},val))
+      ...[['Job Number',job.jobNumber],['Job Name',farm?farm.name:''],['Job Type',job.type],['Start Date',fmtDate(job.startDate)],['End Date',endD],['Farm Address',farm?farm.address:'',true],['Total Sheep',(job.totalSheep||0).toLocaleString()],['EVOs',job.evos],['Crutching Trailer',job.crutchingTrailer?'Provided':'Not provided'],['Meals',job.meals||'Not Supplied'],['Transport',job.transport?'Available':'No'],['Accommodation',job.accommodation]].map(([lbl,val,isAddr])=>
+        e('div',{key:lbl,className:'jcw-f'},e('div',{className:'jcw-fl'},lbl),isAddr?e('div',null,e('div',{className:'jcw-fv'},val),e('a',{href:/^https?:\/\//i.test(val||'')?val:'https://maps.google.com/?q='+encodeURIComponent(val||''),target:'_blank',className:'map-btn'},'📍 Open in Maps')):e('div',{className:'jcw-fv'},val))
       ),
       job.notes_job&&e('div',{className:'jcw-f'},e('div',{className:'jcw-fl'},'Further Details'),e('div',{className:'jcw-fv',style:{fontSize:'14px',color:'#444'}},job.notes_job)),
       e('div',{className:'jcw-f'},e('div',{className:'jcw-fl'},'Your Team'),team.map(c=>e('div',{key:c.id,className:'team-item'},e('div',{style:{width:36,height:36,borderRadius:'50%',background:avc(c.name).bg,color:avc(c.name).fg,display:'flex',alignItems:'center',justifyContent:'center',fontFamily:'var(--h)',fontSize:'14px',fontWeight:'700',flexShrink:0}},init(c.name)),e('div',null,e('div',{className:'ti-name'},c.name),e('div',{className:'ti-role'},getJobRole(job,c.id)||c.role),c.hasVehicle&&e('div',{className:'ti-car'},'🚗 Has a vehicle')))))
@@ -2476,7 +3230,7 @@ function buildJobCardSMS(job,crewId,farmList,crewList,appUrl){
     '',
     jobName+' - '+job.type,
     'Start: '+fmtDate(job.startDate)+'  End: '+fmtDate(endDate),
-    'Sheep: '+job.totalSheep.toLocaleString(),
+    'Sheep: '+(job.totalSheep||0).toLocaleString(),
     farm?'Address: '+farm.address:'',
     '',
     'View job details: '+appUrl+'#job='+job.id+'&crew='+crewId,
@@ -2495,7 +3249,7 @@ function buildFarmerSMS(job,farmerName,farmerPhone,farmList,appUrl){
     '',
     '🐑 '+jobName+' — '+job.type,
     'Start: '+fmtDate(job.startDate)+'  End: '+fmtDate(endDate),
-    'Sheep: '+job.totalSheep.toLocaleString(),
+    'Sheep: '+(job.totalSheep||0).toLocaleString(),
     farm?'Address: '+farm.address:'',
     '',
     '👉 View job details: '+appUrl+'#job='+job.id,
@@ -2800,7 +3554,7 @@ function NewJobModal({onClose,onCreate,farmList,crewList,addFarm,addCrew}){
       jobPin:rJobPin.current?.value?.trim()||null,
       jobName:rJobName.current?.value?.trim()||'',
       rates:{...mkRates(),crewDetails:initialCrewDetails},
-      runs:{},shedTallies:{},baleTallies:{},baleBF:{},travelTallies:{},dayNotes:{}
+      runs:{},shedTallies:{},baleTallies:{},baleWeights:{},baleBF:{},travelTallies:{},dayNotes:{}
     });
   };
 
@@ -3570,11 +4324,46 @@ function ScheduleScreen({jobs,role,setRole,onBack,onJob,onNew,onNewDraft}){
 }
 
 /* ── APP ── */
-const CONTRACTOR_NAME='Darby Shearing';
-const CONTRACTOR_URL='https://darbyshearing.vercel.app';
+/* ── ACCESS GATE (v4.6.3d) ── */
+function AccessGate({onSuccess}){
+  const [entry,setEntry]=useState('');
+  const [err,setErr]=useState('');
+  const [busy,setBusy]=useState(false);
+  const handleSubmit=async()=>{
+    if(busy||!entry)return;
+    setBusy(true);setErr('');
+    try{
+      const ok=await checkAccess(entry);
+      if(ok){markAccessVerified();onSuccess();}
+      else{setErr('Incorrect password');setBusy(false);}
+    }catch(e){setErr('Verification error — try again');setBusy(false);}
+  };
+  return e('div',{style:{position:'fixed',inset:0,background:'var(--bg)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:9999,padding:'20px'}},
+    e('div',{style:{maxWidth:'380px',width:'100%',background:'var(--card)',borderRadius:12,padding:'32px 24px',border:'1px solid var(--border)',textAlign:'center'}},
+      e('div',{style:{fontSize:36,marginBottom:12}},'🔒'),
+      e('div',{style:{fontSize:20,fontWeight:700,marginBottom:6}},CONTRACTOR_NAME),
+      e('div',{style:{fontSize:13,color:'var(--muted)',marginBottom:24}},'Enter access password to continue'),
+      e('input',{type:'password',value:entry,autoFocus:true,
+        onChange:ev=>{setEntry(ev.target.value);setErr('');},
+        onKeyDown:ev=>{if(ev.key==='Enter')handleSubmit();},
+        style:{width:'100%',padding:'12px',fontSize:16,borderRadius:8,border:'1px solid '+(err?'#ef4444':'var(--border)'),background:'var(--card2)',color:'var(--text)',marginBottom:8,boxSizing:'border-box'},
+        placeholder:'Password',
+        autoCapitalize:'none',
+        autoCorrect:'off'}),
+      err&&e('div',{style:{color:'#ef4444',fontSize:13,marginBottom:8}},err),
+      e('button',{className:'btn-p',disabled:busy||!entry,onClick:handleSubmit,style:{width:'100%',padding:'12px',fontSize:15,marginTop:8,opacity:busy||!entry?0.5:1}},busy?'Verifying…':'Continue'),
+      e('div',{style:{fontSize:11,color:'var(--muted)',marginTop:20}},'Contact your contractor if you don\'t have the password.')
+    )
+  );
+}
+
 function App(){
   const [appUnlocked,setAppUnlocked]=useState(true);
   const [loading,setLoading]=useState(true);
+  /* v4.6.3d: access gate. accessReady=false means we're still checking; 
+     showGate=true means a hash is set and this device isn't verified yet. */
+  const [accessReady,setAccessReady]=useState(false);
+  const [showGate,setShowGate]=useState(false);
   const [saveStatus,setSaveStatus]=useState('');
   const [isOnline,setIsOnline]=useState(navigator.onLine);
   const [pendingCount,setPendingCount]=useState(0);
@@ -3646,6 +4435,14 @@ function App(){
   /* Load on mount */
   useEffect(()=>{
     loadPins(); /* load PIN hashes from Supabase on mount */
+    /* v4.6.3d: load access password hash, then decide if gate is needed.
+       If we can't load (offline/missing column), and localStorage already has
+       a verified flag from a prior session, we proceed; otherwise gate is
+       skipped (graceful for pre-migration or offline-first-load). */
+    loadAccessHash().then(()=>{
+      if(!isAccessVerified())setShowGate(true);
+      setAccessReady(true);
+    });
     const pendingOnMount=lsGet(LS_QUEUE)||[];
     const mountLoad=()=>dbLoad().then(({jobs:j,farms:f,crew:c,fromCache})=>{
       syncLookups(f,c);
@@ -3669,7 +4466,7 @@ function App(){
         setFresh(false,'mountLoad_from_cache');
         logSaveFailure('diag_load','mountLoad','stale_from_cache;jobs='+j.length+';online='+navigator.onLine);
       }
-      setPendingCount((lsGet(LS_QUEUE)||[]).length);
+      setPendingCount((lsGet(LS_QUEUE)||[]).length+(lsGet(LS_TALLY_QUEUE)||[]).length);
       /* Deep link: #job=JOB_ID&crew=CREW_ID opens that job on Overview tab and logs view.
          FIX v4.5.2: Wrapped in try/catch because on iOS Safari, the Supabase client's
          .upsert() method has been observed to return a non-Promise value in some code
@@ -3732,8 +4529,10 @@ function App(){
             as normal; next successful online session will trigger the wipe.
        This is a one-time event per device per DATA_VERSION change. */
     const proceedWithLoad=()=>{
-      if(pendingOnMount.length>0&&navigator.onLine){
-        flushQueue().then(()=>mountLoad()).catch(()=>mountLoad());
+      const pendingTally=lsGet(LS_TALLY_QUEUE)||[];
+      if((pendingOnMount.length>0||pendingTally.length>0)&&navigator.onLine){
+        Promise.all([flushQueue().catch(()=>0),flushTallyQueue().catch(()=>0)])
+          .then(()=>mountLoad()).catch(()=>mountLoad());
       } else {
         mountLoad();
       }
@@ -3743,22 +4542,27 @@ function App(){
       logSaveFailure('diag_dataversion','mismatch','stored='+storedDataVersion+';expected='+DATA_VERSION);
       const performWipe=()=>{
         const remainingQ=lsGet(LS_QUEUE)||[];
-        if(remainingQ.length===0){
+        const remainingTallyQ=lsGet(LS_TALLY_QUEUE)||[];
+        if(remainingQ.length===0&&remainingTallyQ.length===0){
           lsRemove(LS_JOBS);
           lsRemove(LS_FARMS);
           lsRemove(LS_CREW);
+          /* Do NOT remove LS_TALLY_QUEUE here — already confirmed empty above.
+             Never delete unsynced tally writes; they are the only copy. */
           lsSet(LS_DATA_VERSION,DATA_VERSION);
           logSaveFailure('diag_dataversion','wiped_caches','queue_empty');
         }else{
           /* Defer: queue still has items, don't destroy them */
-          logSaveFailure('diag_dataversion','wipe_deferred','queue_has='+remainingQ.length);
+          logSaveFailure('diag_dataversion','wipe_deferred','queue_has='+remainingQ.length+';tally_q='+remainingTallyQ.length);
         }
         proceedWithLoad();
       };
-      if(pendingOnMount.length>0&&navigator.onLine){
-        /* Try queue flush first */
-        flushQueue().then(()=>performWipe()).catch(()=>performWipe());
-      }else if(pendingOnMount.length>0){
+      const pendingTallyOnMount=lsGet(LS_TALLY_QUEUE)||[];
+      if((pendingOnMount.length>0||pendingTallyOnMount.length>0)&&navigator.onLine){
+        /* Try queue flushes first */
+        Promise.all([flushQueue().catch(()=>0),flushTallyQueue().catch(()=>0)])
+          .then(()=>performWipe()).catch(()=>performWipe());
+      }else if(pendingOnMount.length>0||pendingTallyOnMount.length>0){
         /* Have queue but offline — defer wipe, just proceed */
         logSaveFailure('diag_dataversion','wipe_deferred','offline_with_queue');
         proceedWithLoad();
@@ -3816,9 +4620,13 @@ function App(){
       }
       /* Flush queue to Supabase */
       const n=await flushQueue().catch(()=>0);
-      const remaining=(lsGet(LS_QUEUE)||[]).length;
+      /* v4.6.0 — also flush the per-cell tally queue. Independent of whole-job
+         queue. Any cells typed while offline land in Supabase now. */
+      const nTally=await flushTallyQueue().catch(()=>0);
+      if(nTally>0)logSaveFailure('diag_save','goOnline_tally_flushed','count='+nTally);
+      const remaining=(lsGet(LS_QUEUE)||[]).length+(lsGet(LS_TALLY_QUEUE)||[]).length;
       setPendingCount(remaining);
-      if(n>0){setSaveStatus('saved');setTimeout(()=>setSaveStatus(''),2500);}
+      if(n>0||nTally>0){setSaveStatus('saved');setTimeout(()=>setSaveStatus(''),2500);}
       else setSaveStatus('');
       /* Re-fetch from Supabase if:
          (a) queue is fully clear (otherwise local has unsynced writes), AND
@@ -3849,6 +4657,25 @@ function App(){
             logSaveFailure('diag_load','goOnline_dbLoad','promoted_to_fresh');
           }
         });
+      }else{
+        /* v4.6.1 — even when full dbLoad refetch is skipped (queue still has
+           items OR React state is fresh+dirty), tally cells are always safe
+           to refresh from tally_entries. They live in their own table and
+           the user's own per-cell writes have already gone through (queue
+           was flushed above). Pulls in any cells written by OTHER devices
+           since this device went online — critical for the
+           one-lead-handover-at-smoko scenario where Sandra hands off to
+           someone else mid-shed. */
+        const jobIds=jobsRef.current.map(j=>j.id);
+        if(jobIds.length>0){
+          loadTalliesForJobs(jobIds).then(freshTallies=>{
+            const byJob={};
+            (freshTallies||[]).forEach(r=>{(byJob[r.job_id]||(byJob[r.job_id]=[])).push(r);});
+            suppressNextSaveRef.current=true;
+            setJobs(prev=>prev.map(j=>hydrateTallies({...j},byJob[j.id]||[])));
+            logSaveFailure('diag_load','goOnline_tally_refresh','jobs='+jobIds.length+';rows='+(freshTallies||[]).length);
+          }).catch(()=>{});
+        }
       }
     };
     const goOffline=()=>{setIsOnline(false);setSaveStatus('');};
@@ -3939,16 +4766,16 @@ function App(){
         if(!stillDirty)dirtyRef.current=false;
         if(isOnline){
           setSaveStatus('saved');
-          setPendingCount(0);
+          setPendingCount((lsGet(LS_TALLY_QUEUE)||[]).length);
           setTimeout(()=>setSaveStatus(''),2000);
         } else {
           setSaveStatus('offline');
-          setPendingCount((lsGet(LS_QUEUE)||[]).length);
+          setPendingCount((lsGet(LS_QUEUE)||[]).length+(lsGet(LS_TALLY_QUEUE)||[]).length);
         }
       }catch(err){
         /* Save failed — keep dirty so we don't risk overwriting local with stale Supabase */
         setSaveStatus('offline');
-        setPendingCount((lsGet(LS_QUEUE)||[]).length);
+        setPendingCount((lsGet(LS_QUEUE)||[]).length+(lsGet(LS_TALLY_QUEUE)||[]).length);
       }
     },400);
   },[jobs]);
@@ -3960,7 +4787,7 @@ function App(){
     if(!isLoaded.current)return;
     if(saveTimer.current)return; /* an active save is already updating status */
     setSaveStatus(isOnline?'':'offline');
-    if(!isOnline)setPendingCount((lsGet(LS_QUEUE)||[]).length);
+    if(!isOnline)setPendingCount((lsGet(LS_QUEUE)||[]).length+(lsGet(LS_TALLY_QUEUE)||[]).length);
   },[isOnline]);
 
   /* CRITICAL: Save immediately on tab hide / before unload.
@@ -4066,7 +4893,17 @@ function App(){
     /* Save current job immediately before switching */
     if(selJobId&&selJobId!==id){
       const current=jobs.find(j=>j.id===selJobId);
-      if(current)dbSaveJob(current).catch(()=>{});
+      if(current){
+        /* v4.6.3 — diag log so every direct save is traceable. The
+           Woolaway incident had a save at 10:55:27 with no diag trail
+           because goJob's direct dbSaveJob never logged. */
+        try{
+          const runIds=[];
+          Object.values((current.runs||{})).forEach(d=>(d||[]).forEach(r=>{if(r&&r.id)runIds.push(r.id);}));
+          logSaveFailure('diag_save','goJob_direct','job='+current.id+';from='+selJobId+';to='+id+';run_ids='+runIds.join(','));
+        }catch(e){}
+        dbSaveJob(current).catch(()=>{});
+      }
     }
     const job=jobs.find(j=>j.id===id);
     if(job?.jobPin&&role!=='admin'){
@@ -4109,6 +4946,15 @@ function App(){
       setShowSMS(true);
     }
   };
+
+  /* v4.6.3d: access gate before anything else. Shows while we're still checking
+     (accessReady=false) and stays up if a password is set and not yet verified. */
+  if(!accessReady)return e('div',{style:{height:'100dvh',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:16,background:'var(--hdr)'}},
+    e('div',{style:{fontFamily:'var(--h)',fontSize:36,fontWeight:800,color:'var(--amber)'}},'my',e('span',{style:{color:'rgba(255,255,255,.4)',fontWeight:500}},'Gang')),
+    e('div',{style:{width:40,height:40,border:'3px solid rgba(255,255,255,.15)',borderTopColor:'var(--amber)',borderRadius:'50%',animation:'spin 0.8s linear infinite'}}),
+    e('style',null,'@keyframes spin{to{transform:rotate(360deg)}}')
+  );
+  if(showGate)return e(AccessGate,{onSuccess:()=>setShowGate(false)});
 
   /* Loading screen */
   if(loading)return e('div',{style:{height:'100dvh',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:16,background:'var(--hdr)'}},
