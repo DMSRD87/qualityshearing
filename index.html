@@ -522,13 +522,16 @@ const LS_CREW='mg_crew_'+CONTRACTOR_SLUG;
 const LS_QUEUE='mg_queue_'+CONTRACTOR_SLUG;
 const LS_ROLE='mg_role_'+CONTRACTOR_SLUG;
 const LS_LAST_RATES='mg_last_rates_'+CONTRACTOR_SLUG;
+const LS_WORKER_DEFAULTS='mg_worker_defaults_'+CONTRACTOR_SLUG; /* v4.6.6 - per-worker sticky settings (taxRate/messRate/travel) seeded when a worker joins a job */
 const LS_ROLE_TS='mg_role_ts_'+CONTRACTOR_SLUG;
 const LS_DATA_VERSION='mg_data_version_'+CONTRACTOR_SLUG; /* tracks DATA_VERSION for one-time cache wipe */
 const LS_TALLY_QUEUE='mg_tally_queue_'+CONTRACTOR_SLUG; /* per-cell offline queue, separate from whole-job queue */
 const LS_TALLY_DEAD='mg_tally_dead_'+CONTRACTOR_SLUG; /* v4.6.3g — quarantined cells (permanent rejection). Replayed once on boot in case the server-side blocker (e.g. missing kind constraint) was since fixed. */
 const LS_TALLY_META_QUEUE='mg_tally_meta_queue_'+CONTRACTOR_SLUG; /* v4.6.4 — offline/failed mob metadata (type/desc) updates to existing count cells; flushed alongside the tally queue. */
 const ROLE_TIMEOUT_HOURS=12; /* auto-reset after 12h inactivity */
-const APP_VERSION='v4.6.4d'; /* v4.6.4 STRUCTURAL (16 Jun, after Knights crutching->shearing flip). ROOT CAUSE of the recurring job-type-flip class: mob type/desc lived ONLY in jobs.data (no authoritative store); on a flaky-signal device per-cell writes reached tally_entries but the blob structure desynced, then self-heal rebuilt the missing mobs from cells and INVENTED type=Shearing/desc=blank because it had no metadata to read - silently tripling crutching pay ($1.65->$4.80/head). hydrateTallies corrected counts from the table but never type/desc, so corruption persisted and rode the next save up. FIX (mirrors how counts are already safe): (a) tally_entries gains mob_type/mob_desc; count writes carry them; (b) hydrateTallies is now AUTHORITATIVE for type/desc - a corrupted blob from any device is overwritten from row metadata on load, exactly as counts are; (c) self-heal reconstructs synthesized mobs faithfully from row metadata instead of hardcoded Shearing/blank (legacy-null rows fall back to job type and set _synth to flag the guess); (d) post-hoc type/desc edits back-propagate to existing cells (updateMobMeta + LS_TALLY_META_QUEUE + flushTallyMetaQueue) so an edit after counts exist isn't reverted on next hydrate. PREREQUISITE: run v4.6.4-migration.sql FIRST (two nullable columns + backfill from current/corrected blobs), THEN deploy. Legacy null-metadata rows behave as pre-v4.6.4 until the next entry/edit repopulates them; no regression. v4.6.3g RESILIENCE (16 Jun, from Darby/Chloe stuck-queue incident): (1) periodic 20s background drain — browser 'online' event doesn't fire when a flaky connection silently recovers, so queued cells could sit unflushed until manual reopen; timer retries whenever online+fresh+queue non-empty (no-op when empty). (2) poison-pill quarantine — flushTallyQueue now separates PERMANENT rejections (constraint/validation, will never succeed) from TRANSIENT (timeout/network); permanent rows move to LS_TALLY_DEAD instead of pinning the queue + banner forever. (3) dead-letter replay on boot — quarantined cells get one retry per launch, so a since-fixed server blocker (e.g. the 'mess' kind constraint widened 15 Jun) self-recovers without re-entry. (4) sundries load resilient to missing table — sets a session flag on first 'table not found' and stops re-querying, ending per-load error spam when the migration hasn't run. NOTE: the tally_entries kind_check constraint MUST include every kind the build writes (count,shed_runs,bales,bale_kg,travel,mess) and sundries_entries MUST exist BEFORE deploy — both are hard prerequisites. v4.6.3f FEATURES (builds on v4.6.3e — deploy ONLY after 3e soak is clean): (1) MESS RATE — per-person $/day deduction; 3-state per-day toggle on Tally tab (Off ◯ / Half ½ / Full ●) stored as tally_entries kind='mess' multiplier 0/0.5/1 with run_id=mob_id=''; rate = crewDetails[id].messRate override else role default $35 shearer/crutcher $10 staff (resolveMessRate); Admin tab Mess Rate section; pay summary line 'Mess: N full + M half x $R/day = -$T'. (2) SUNDRIES — itemised per-person deductions in NEW sundries_entries table (run schema SQL BEFORE deploying this file); lead adds, admin edits/deletes via Summary-tab panel; pay summary itemises with subtotal. Both deduct POST-tax: GROSS → tax → mess → sundries → NET TOTAL. CONTRACTOR TOTALS gains conditional deduction lines + NET JOB TOTAL; math check extends through net when deductions exist. REGRESSION GUARANTEE: jobs with zero mess + zero sundries produce byte-identical pay output to v4.6.3e. calcPeriodStats now returns {shorn,totalEarn,messDeduction,sundriesDeduction,netEarn} — totalEarn stays gross. v4.6.3e SAFETY RELEASE (6 Jun 2026, after Knights/Bywong double incident): (1) delRun/delMob cascade deletes now scoped to cell_date=viewDate — run_id-only delete destroyed same-run cells on OTHER dates; (2) dbLoad merge now consults LS_TALLY_QUEUE as well as LS_QUEUE — a day of offline cells + silently-failed flush previously let the server's empty hydration overwrite the local day ("worked all day, lost it at night"); because flushTallyQueue retains only failed rows, post-flush queue state doubles as the flush-success gate; (3) jobDates guarantees today (Active jobs) and every date with existing data appear in the strip regardless of includeWeekends — weekend work was silently landing on the last visible weekday via defDate fallback; (4) new tappable banner when online+fresh but queued entries remain ("N entries not yet on server — tap to retry. Don't clear app data") — closes the silent state that drove users to clear site data and destroy the only copy. NO pay calc changes. v4.6.3d.1b CALC HOTFIX: Presser pay calc was iterating only shedTallies dates, which meant days where the presser pressed bales (or kg) WITHOUT entering shed_runs were skipped entirely from pay calculation. Real money bug — e.g. Whitey on Burragundy had 19 bales on Jun 2 with no shed_runs that day, calc never visited Jun 2 → $269.80 missing from his pay. Fix iterates union of shedTallies, baleTallies, baleWeights date keys so all days with any presser activity are evaluated. Applied to both calcPeriodStats (totals) and generateSummary (pay breakdown). All-runs and all-bales cases unchanged. v4.6.3d.1a hotfix: Presser hybrid-day pay summary display fix — when a presser had BOTH per-bale days AND per-run days in the same job, the displayed breakdown used totalRuns/totalBales summed across all days, producing math that didn't add up (e.g. "23 bales @ $14.20 = $213" when only 15 bales were actually paid per-bale and the other 8 were on a per-run day). Total earn was always correct; only the readable breakdown was wrong. Fix tracks paidRuns/paidBales separately so the line items match the math. All-bale and all-run cases unchanged. v4.6.3d.1 hotfix: (1) Map link handles goo.gl/Maps URLs as addresses by detecting http(s):// and passing through instead of wrapping in maps.google.com search query; (2) Defensive guard on job.baleWeights access in cpk-mode pay calc (was a crash hazard on old jobs without the field if pressMode was toggled to cpk); (3) Guard all 7 unguarded job.totalSheep.toLocaleString() crash sites with ||0 (was a render crash on any job with undefined totalSheep). v4.6.3d adds per-contractor boot-time access password (hash stored in contractor_settings.access_password_hash, verified flag in localStorage = hash itself for auto-invalidation on rotation, master PIN bypass for SRD support, null hash = no gate for graceful rollout). v4.6.3c-final adds mode badges next to crew names in pay summary + grand-total math check line in CONTRACTOR TOTALS. v4.6.3c adds c/kg presser mode (pressMode toggle + kg tracking via new tally_entries kind='bale_kg') and c/km travel mode (per-person day vs km, with override) — additive. v4.6.3b adds cascade delete from tally_entries on delRun/delMob — fixes zombie runs resurrecting via self-heal (Knights, 28 May). v4.6.3a added MOB TOTALS section to pay summary - additive only, no data model change from v4.6.3. v4.6.3 closes the data-loss
+const APP_VERSION='v4.6.9';
+const SUPER_RATE=0.12; /* SG rate, 12% from 1 Jul 2025. One-line change if legislated rate moves. */
+/* v4.6.9 TALLY TRENDS + PAYDAY SOURCE (6 Jul 2026): (1) Pay Week sheet gains a Pay Report / Tally Trends view toggle. Trends = last 4 pay weeks per worker, newest first, HEAD COUNTS ONLY (no dollars): shorn and crutched always separate, days worked and head/day shown so form is comparable across different-length weeks; shearers ordered by 4-week volume, staff (runs + bales + days) alphabetical. Contractor use: balancing sheep allocation and watching form. (2) Pay Week sheet now derives payday/frequency from the LATEST non-draft job's rates (falls back to the device template, then Friday/weekly) - fixes stale-device-template periods (screenshot 6 Jul showed Thu-Wed on a Friday-pays contractor because the device template predated the picker fix). Copy CSV hidden on trends view; Copy copies whichever view is showing. v4.6.8 PER-SHEARER STAND FEE (6 Jul 2026): mixed sheds - on a BYO job only shearers who brought their own machine get the fee (e.g. 4 shearers, 2 paid). crewDetails[id].standFee===false excludes a shearer; DEFAULT is eligible (zero-config when the whole team brings own). Admin Stand Fee section gains a per-shearer Yes/No list when EVOs = BYO. Applied consistently in generateSummary, calcPeriodStats (header parity), generateFarmRecord (farmer charged only for actual own-machine shearer-days), and the pay week report. 'standFee' added to sticky worker settings - owning a machine is a worker attribute, set once and carried to future jobs. v4.6.7 PAY WEEK REPORT (6 Jul 2026): cross-job per-worker pay-week report (payroll officer's 'massive one'). Home screen (admin) 'Pay Week' button opens a sheet: period nav (payday/frequency from LS_LAST_RATES; 'shed' frequency falls back to weekly), per-worker date-by-shed earning lines (piecework per date x type x effective rate incl overrides + individual loadings, team loading line, staff per-day incl presser threshold/cpk day rules with union-of-dates per v4.6.3d.1b, travel, stand fees), per-worker GROSS/Superable/Super/Tax/Mess/Sundries/NET, WEEK TOTALS, and an embedded cross-check reconciling each job's slice against calcPeriodStats (jobs with team loadings are skipped in the check - known team-loading divergence in the header estimator). Copy / Copy CSV / Print. CSV shape (worker,role,date,shed,item,units,rate,amount,superable + per-worker totals rows) = the future Xero/MYOB payload. FARMER BILLING UNCHANGED - farm records stay strictly per job. ADDITIVE ONLY: generateSummary/calcPeriodStats untouched. v4.6.6 PAYROLL QoL (6 Jul 2026, pilot contractor payroll officer wish list): (1) STICKY WORKER SETTINGS - LS_WORKER_DEFAULTS persists per-worker taxRate/messRate/travelMode/driverKm/travelKmRate whenever Admin saves rates; seeded into crewDetails when the worker joins a NEW job or is added to an existing job. Existing jobs untouched - historical pay cannot change. Per-device localStorage (same caveat as LS_LAST_RATES); durable home = contractor_settings in the settings redesign. (2) PAYDAY OFF-BY-ONE FIX - Admin picker listed days Monday-first (Friday=4) but period math uses JS getDay() (Friday=5); picking Friday produced Thu-Wed periods. Fix: picker option values map labels to JS day numbers ((i+1)%7). MIGRATION: contractors who worked around by picking the next day's label (one contractor picked 'Saturday') already store the JS-correct value - their periods are UNCHANGED and the picker now displays the true day; anyone who had picked the real label sees it render one day back and must re-pick once. Default payDayOfWeek now 5 = Friday. (3) FORTNIGHTLY period fix - base.end+(len-7) concatenated a number onto a date string producing invalid dates; now addDays twice. Weekly path untouched. Fortnight anchors to the current week. (4) STAND FEE SUPER TOGGLE - rates.standFeeSuper, DEFAULT TRUE per pilot contractor payroll officer written instruction (stand fee IS included in super; meal deductions never reduce super - already enforced). Toggle to No treats it as equipment hire (excluded). Farmer-side charge, gross, tax, NET unaffected either way. v4.6.5 SUPER + STAND FEE (6 Jul 2026): Pay summary computes Super Guarantee per person and in CONTRACTOR TOTALS. SUPERABLE = piecework earnings (incl individual loadings baked into rate) + team loadings + shed staff runs/bales/kg earnings. NOT SUPERABLE: travel (day or km - reimbursement) and stand fees (equipment hire). Deductions (tax/mess/sundries) NEVER reduce the super base - super is SUPER_RATE x superable GROSS. Super is the employer's obligation ON TOP: it does not change gross, tax, deductions, NET, JOB TOTAL or the math check. STAND FEE: rates.standFeePerDay (Admin tab; rides LS_LAST_RATES carry-forward) x tallied days per shearer/crutcher, ONLY when job.evos==='BYO'; itemised per person, own CONTRACTOR TOTALS line + math-check component, shown on farmer record as a charge, included in calcPeriodStats so header Est. Payroll stays in parity with printed gross. v4.6.4 STRUCTURAL (16 Jun, after Knights crutching->shearing flip). ROOT CAUSE of the recurring job-type-flip class: mob type/desc lived ONLY in jobs.data (no authoritative store); on a flaky-signal device per-cell writes reached tally_entries but the blob structure desynced, then self-heal rebuilt the missing mobs from cells and INVENTED type=Shearing/desc=blank because it had no metadata to read - silently tripling crutching pay ($1.65->$4.80/head). hydrateTallies corrected counts from the table but never type/desc, so corruption persisted and rode the next save up. FIX (mirrors how counts are already safe): (a) tally_entries gains mob_type/mob_desc; count writes carry them; (b) hydrateTallies is now AUTHORITATIVE for type/desc - a corrupted blob from any device is overwritten from row metadata on load, exactly as counts are; (c) self-heal reconstructs synthesized mobs faithfully from row metadata instead of hardcoded Shearing/blank (legacy-null rows fall back to job type and set _synth to flag the guess); (d) post-hoc type/desc edits back-propagate to existing cells (updateMobMeta + LS_TALLY_META_QUEUE + flushTallyMetaQueue) so an edit after counts exist isn't reverted on next hydrate. PREREQUISITE: run v4.6.4-migration.sql FIRST (two nullable columns + backfill from current/corrected blobs), THEN deploy. Legacy null-metadata rows behave as pre-v4.6.4 until the next entry/edit repopulates them; no regression. v4.6.3g RESILIENCE (16 Jun, from Darby/Chloe stuck-queue incident): (1) periodic 20s background drain — browser 'online' event doesn't fire when a flaky connection silently recovers, so queued cells could sit unflushed until manual reopen; timer retries whenever online+fresh+queue non-empty (no-op when empty). (2) poison-pill quarantine — flushTallyQueue now separates PERMANENT rejections (constraint/validation, will never succeed) from TRANSIENT (timeout/network); permanent rows move to LS_TALLY_DEAD instead of pinning the queue + banner forever. (3) dead-letter replay on boot — quarantined cells get one retry per launch, so a since-fixed server blocker (e.g. the 'mess' kind constraint widened 15 Jun) self-recovers without re-entry. (4) sundries load resilient to missing table — sets a session flag on first 'table not found' and stops re-querying, ending per-load error spam when the migration hasn't run. NOTE: the tally_entries kind_check constraint MUST include every kind the build writes (count,shed_runs,bales,bale_kg,travel,mess) and sundries_entries MUST exist BEFORE deploy — both are hard prerequisites. v4.6.3f FEATURES (builds on v4.6.3e — deploy ONLY after 3e soak is clean): (1) MESS RATE — per-person $/day deduction; 3-state per-day toggle on Tally tab (Off ◯ / Half ½ / Full ●) stored as tally_entries kind='mess' multiplier 0/0.5/1 with run_id=mob_id=''; rate = crewDetails[id].messRate override else role default $35 shearer/crutcher $10 staff (resolveMessRate); Admin tab Mess Rate section; pay summary line 'Mess: N full + M half x $R/day = -$T'. (2) SUNDRIES — itemised per-person deductions in NEW sundries_entries table (run schema SQL BEFORE deploying this file); lead adds, admin edits/deletes via Summary-tab panel; pay summary itemises with subtotal. Both deduct POST-tax: GROSS → tax → mess → sundries → NET TOTAL. CONTRACTOR TOTALS gains conditional deduction lines + NET JOB TOTAL; math check extends through net when deductions exist. REGRESSION GUARANTEE: jobs with zero mess + zero sundries produce byte-identical pay output to v4.6.3e. calcPeriodStats now returns {shorn,totalEarn,messDeduction,sundriesDeduction,netEarn} — totalEarn stays gross. v4.6.3e SAFETY RELEASE (6 Jun 2026, after Knights/Bywong double incident): (1) delRun/delMob cascade deletes now scoped to cell_date=viewDate — run_id-only delete destroyed same-run cells on OTHER dates; (2) dbLoad merge now consults LS_TALLY_QUEUE as well as LS_QUEUE — a day of offline cells + silently-failed flush previously let the server's empty hydration overwrite the local day ("worked all day, lost it at night"); because flushTallyQueue retains only failed rows, post-flush queue state doubles as the flush-success gate; (3) jobDates guarantees today (Active jobs) and every date with existing data appear in the strip regardless of includeWeekends — weekend work was silently landing on the last visible weekday via defDate fallback; (4) new tappable banner when online+fresh but queued entries remain ("N entries not yet on server — tap to retry. Don't clear app data") — closes the silent state that drove users to clear site data and destroy the only copy. NO pay calc changes. v4.6.3d.1b CALC HOTFIX: Presser pay calc was iterating only shedTallies dates, which meant days where the presser pressed bales (or kg) WITHOUT entering shed_runs were skipped entirely from pay calculation. Real money bug — e.g. Whitey on Burragundy had 19 bales on Jun 2 with no shed_runs that day, calc never visited Jun 2 → $269.80 missing from his pay. Fix iterates union of shedTallies, baleTallies, baleWeights date keys so all days with any presser activity are evaluated. Applied to both calcPeriodStats (totals) and generateSummary (pay breakdown). All-runs and all-bales cases unchanged. v4.6.3d.1a hotfix: Presser hybrid-day pay summary display fix — when a presser had BOTH per-bale days AND per-run days in the same job, the displayed breakdown used totalRuns/totalBales summed across all days, producing math that didn't add up (e.g. "23 bales @ $14.20 = $213" when only 15 bales were actually paid per-bale and the other 8 were on a per-run day). Total earn was always correct; only the readable breakdown was wrong. Fix tracks paidRuns/paidBales separately so the line items match the math. All-bale and all-run cases unchanged. v4.6.3d.1 hotfix: (1) Map link handles goo.gl/Maps URLs as addresses by detecting http(s):// and passing through instead of wrapping in maps.google.com search query; (2) Defensive guard on job.baleWeights access in cpk-mode pay calc (was a crash hazard on old jobs without the field if pressMode was toggled to cpk); (3) Guard all 7 unguarded job.totalSheep.toLocaleString() crash sites with ||0 (was a render crash on any job with undefined totalSheep). v4.6.3d adds per-contractor boot-time access password (hash stored in contractor_settings.access_password_hash, verified flag in localStorage = hash itself for auto-invalidation on rotation, master PIN bypass for SRD support, null hash = no gate for graceful rollout). v4.6.3c-final adds mode badges next to crew names in pay summary + grand-total math check line in CONTRACTOR TOTALS. v4.6.3c adds c/kg presser mode (pressMode toggle + kg tracking via new tally_entries kind='bale_kg') and c/km travel mode (per-person day vs km, with override) — additive. v4.6.3b adds cascade delete from tally_entries on delRun/delMob — fixes zombie runs resurrecting via self-heal (Knights, 28 May). v4.6.3a added MOB TOTALS section to pay summary - additive only, no data model change from v4.6.3. v4.6.3 closes the data-loss
   vectors that survived v4.6.2. The Woolaway incident on 21 May 2026 showed
   three structural gaps even after v4.6.2:
 
@@ -1422,7 +1425,7 @@ function syncLookups(farms,crew){FARMS.length=0;FARMS.push(...(farms||[]));CREW.
 const mkRun=(id,type,desc,counts,ro)=>({id,mobs:[{id:id+'_m1',type,desc,counts,...(ro!=null?{rateOverride:ro}:{})}]});
 const mkRates=(ov={})=>{
   const last=lsGet(LS_LAST_RATES)||{};
-  return {shearingPerHead:last.shearingPerHead??4.80,crutchingPerHead:last.crutchingPerHead??1.55,woolHandlerPerRun:last.woolHandlerPerRun??80,classerPerRun:last.classerPerRun??110,pennerPerRun:last.pennerPerRun??85,presserPerRun:last.presserPerRun??85,presserPerBale:last.presserPerBale??14.20,baleThreshold:last.baleThreshold??13,pressCpk:last.pressCpk??0,travelKmDefault:last.travelKmDefault??0.85,shedKm:last.shedKm??0,crewOverrides:{},shearerLoadings:{},loadingType:{},travelRate:{},payDayOfWeek:last.payDayOfWeek??4,payFrequency:last.payFrequency??'weekly',farmerShearingRate:last.farmerShearingRate??6.50,farmerCrutchingRate:last.farmerCrutchingRate??2.00,crewDetails:{},...ov};
+  return {shearingPerHead:last.shearingPerHead??4.80,crutchingPerHead:last.crutchingPerHead??1.55,woolHandlerPerRun:last.woolHandlerPerRun??80,classerPerRun:last.classerPerRun??110,pennerPerRun:last.pennerPerRun??85,presserPerRun:last.presserPerRun??85,presserPerBale:last.presserPerBale??14.20,baleThreshold:last.baleThreshold??13,pressCpk:last.pressCpk??0,travelKmDefault:last.travelKmDefault??0.85,shedKm:last.shedKm??0,standFeePerDay:last.standFeePerDay??0,standFeeSuper:last.standFeeSuper??true,crewOverrides:{},shearerLoadings:{},loadingType:{},travelRate:{},payDayOfWeek:last.payDayOfWeek??5,payFrequency:last.payFrequency??'weekly',farmerShearingRate:last.farmerShearingRate??6.50,farmerCrutchingRate:last.farmerCrutchingRate??2.00,crewDetails:{},...ov};
 };
 const INIT_JOBS=[];
 const gf=id=>FARMS.find(f=>f.id===id);
@@ -1619,7 +1622,7 @@ function getPeriodByOffset(todayStr,payDayOfWeek,offset,frequency){
   if(frequency==='fortnightly'){
     // For fortnightly: find which 14-day period we're in by using the base weekly period
     // and adjusting. Odd/even offset from base determines which fortnight.
-    return{start:addDays(base.start,len*offset),end:addDays(base.end+(len-7),len*offset)};
+    return{start:addDays(base.start,len*offset),end:addDays(addDays(base.end,len-7),len*offset)};
   }
   return{start:addDays(base.start,7*offset),end:addDays(base.end,7*offset)};
 }
@@ -1684,6 +1687,12 @@ function calcPeriodStats(job,period){
   });
   // Shearer travel
   shIds.forEach(id=>{totalEarn+=travelEarn(id);});
+  /* v4.6.5 - stand fees (BYO) included so header Est. Payroll matches printed gross */
+  if(job.evos==='BYO'&&(rates.standFeePerDay||0)>0){
+    const sd={};
+    Object.entries(job.runs||{}).forEach(([date,rs])=>{if(!inP(date))return;rs.forEach(run=>{mobsOf(run).forEach(mob=>{shIds.forEach(id=>{if(mob.counts[id])(sd[id]=sd[id]||{})[date]=1;});});});});
+    shIds.forEach(id=>{if((((rates.crewDetails||{})[id])||{}).standFee===false)return;totalEarn+=Object.keys(sd[id]||{}).length*(rates.standFeePerDay||0);});
+  }
   /* v4.6.3f — deductions. Mess: per-day multiplier (0/0.5/1) × resolved
      $/day rate, summed over period days. Sundries: itemised amounts whose
      occurred_date falls in period (undated entries always count). Both are
@@ -1766,6 +1775,14 @@ function generateFarmRecord(job){
   }
   /* Wool baled */
   if(totalBales>0){L.push('Wool baled:'+pad('',25)+pad(totalBales.toLocaleString(),6)+' bales');L.push('');}
+  /* v4.6.5 - stand fees shown to farmer as a charge when shearers bring own machines */
+  if(job.evos==='BYO'&&((job.rates||{}).standFeePerDay||0)>0){
+    const sdF={};
+    Object.entries(job.runs||{}).forEach(([date,rs])=>{rs.forEach(run=>{mobsOf(run).forEach(mob=>{shIds.forEach(id=>{if(mob.counts[id])(sdF[id]=sdF[id]||{})[date]=1;});});});});
+    const sDays=shIds.reduce((a,id)=>a+(((((job.rates||{}).crewDetails||{})[id])||{}).standFee===false?0:Object.keys(sdF[id]||{}).length),0);
+    const sRate=(job.rates||{}).standFeePerDay||0;
+    if(sDays>0){L.push('Stand fees (BYO machines): '+sDays+' shearer-day'+(sDays===1?'':'s')+' x $'+sRate.toFixed(2)+' = $'+(sDays*sRate).toFixed(2));L.push('');}
+  }
   L.push(dash);L.push('CREW ON SITE');L.push(dash);L.push('');
   L.push('Shearers:    '+shIds.length);
   if(shedIds.length>0){
@@ -1784,8 +1801,8 @@ function generateSummary(job,period){
   const shedIds=job.crew.filter(id=>{const r=getJobRole(job,id);return r&&r!=='Shearer'&&r!=='Crutcher';});
   const dash='\u2500'.repeat(52);
   const inP=date=>!period||(date>=period.start&&date<=period.end);
-  const shornBy={};shIds.forEach(id=>{shornBy[id]={sh:0,shEarn:0,cr:0,crEarn:0,mobs:[]};});
-  Object.entries(job.runs||{}).forEach(([date,dayRuns])=>{if(!inP(date))return;dayRuns.forEach(run=>{mobsOf(run).forEach(mob=>{const hasOverride=mob.rateOverride!=null;const br=hasOverride?mob.rateOverride:(mob.type==='Shearing'?rates.shearingPerHead:rates.crutchingPerHead)||0;shIds.forEach(id=>{const cnt=mob.counts[id]||0;if(!cnt)return;const load=(rates.shearerLoadings||{})[id]||0;const loadType=(rates.loadingType||{})[id]||'individual';const effRate=loadType==='team'?br:(br+load);const earn=cnt*effRate;if(mob.type==='Shearing'){shornBy[id].sh+=cnt;shornBy[id].shEarn+=earn;}else{shornBy[id].cr+=cnt;shornBy[id].crEarn+=earn;}/* merge into same mob bucket if same type/desc/rate */const key=mob.type+'|'+(mob.desc||'')+'|'+effRate.toFixed(4)+'|'+(hasOverride?'O':'B');let bucket=shornBy[id].mobs.find(m=>m.key===key);if(!bucket){bucket={key,type:mob.type,desc:mob.desc||'',rate:effRate,hasOverride,count:0,earn:0};shornBy[id].mobs.push(bucket);}bucket.count+=cnt;bucket.earn+=earn;});});});});
+  const shornBy={};shIds.forEach(id=>{shornBy[id]={sh:0,shEarn:0,cr:0,crEarn:0,mobs:[],daysSet:{}};});
+  Object.entries(job.runs||{}).forEach(([date,dayRuns])=>{if(!inP(date))return;dayRuns.forEach(run=>{mobsOf(run).forEach(mob=>{const hasOverride=mob.rateOverride!=null;const br=hasOverride?mob.rateOverride:(mob.type==='Shearing'?rates.shearingPerHead:rates.crutchingPerHead)||0;shIds.forEach(id=>{const cnt=mob.counts[id]||0;if(!cnt)return;shornBy[id].daysSet[date]=1;const load=(rates.shearerLoadings||{})[id]||0;const loadType=(rates.loadingType||{})[id]||'individual';const effRate=loadType==='team'?br:(br+load);const earn=cnt*effRate;if(mob.type==='Shearing'){shornBy[id].sh+=cnt;shornBy[id].shEarn+=earn;}else{shornBy[id].cr+=cnt;shornBy[id].crEarn+=earn;}/* merge into same mob bucket if same type/desc/rate */const key=mob.type+'|'+(mob.desc||'')+'|'+effRate.toFixed(4)+'|'+(hasOverride?'O':'B');let bucket=shornBy[id].mobs.find(m=>m.key===key);if(!bucket){bucket={key,type:mob.type,desc:mob.desc||'',rate:effRate,hasOverride,count:0,earn:0};shornBy[id].mobs.push(bucket);}bucket.count+=cnt;bucket.earn+=earn;});});});});
   const tr=rates.travelRate||{};
   const travelDayCount=id=>Object.entries((job.travelTallies||{})[id]||{}).filter(([d,v])=>v&&inP(d)).length;
   /* v4.6.3c: mode-aware travel helpers. travelMode='km' uses driverKm × travelKmRate; otherwise $/day. */
@@ -1837,7 +1854,7 @@ function generateSummary(job,period){
     return{amount,lines};
   };
   let totalMess=0,totalSundries=0;
-  let totalShEarn=0,totalShedEarn=0,totalTravel=0,totalTeamLoad=0;
+  let totalShEarn=0,totalShedEarn=0,totalTravel=0,totalTeamLoad=0,totalStand=0,totalSuperable=0;
   const L=[];
   L.push('PAY SUMMARY \u2014 '+(farm?farm.name.toUpperCase():'JOB'));
   if(farm)L.push('Address: '+farm.address+'  |  From: '+fmtDate(job.startDate));
@@ -1855,9 +1872,17 @@ function generateSummary(job,period){
       let t=0;Object.entries(job.runs||{}).forEach(([date,rs])=>{if(!inP(date))return;rs.forEach(run=>mobsOf(run).forEach(mob=>{t+=mob.counts[sid]||0;}));});return s+t;
     },0):0;
     const teamLoadEarn=loadType==='team'&&baseLoad>0?baseLoad*teamTotal:0;
-    const travel=trvl(id);const gross=s.shEarn+s.crEarn+travel+(loadType==='team'?teamLoadEarn:0);
+    const travel=trvl(id);
+    /* v4.6.5 - stand fee: equipment hire when shearers bring own machines (job EVOs = BYO). Per tallied day. */
+    const standDays=Object.keys(s.daysSet||{}).length;
+    const standEarn=(job.evos==='BYO'&&((((rates.crewDetails||{})[id])||{}).standFee!==false))?standDays*(rates.standFeePerDay||0):0;
+    const gross=s.shEarn+s.crEarn+travel+standEarn+(loadType==='team'?teamLoadEarn:0);
+    /* v4.6.6 - superable base: piecework + loadings, plus stand fee when rates.standFeeSuper
+       (DEFAULT ON per pilot contractor payroll officer). Travel always excluded (reimbursement).
+       Deductions never reduce this base. */
+    const superable=s.shEarn+s.crEarn+(loadType==='team'?teamLoadEarn:0)+((rates.standFeeSuper!==false)?standEarn:0);
     const taxAmt=taxPct>0?gross*(taxPct/100):0;
-    totalShEarn+=s.shEarn+s.crEarn;totalTravel+=travel;totalTeamLoad+=teamLoadEarn;
+    totalShEarn+=s.shEarn+s.crEarn;totalTravel+=travel;totalTeamLoad+=teamLoadEarn;totalStand+=standEarn;totalSuperable+=superable;
     /* v4.6.3c: mode badges - only non-default modes get tagged */
     const badges=[];
     if(travelMode(id)==='km')badges.push('km');
@@ -1889,7 +1914,9 @@ function generateSummary(job,period){
     writeMobs('Crutched',crMobs,s.crEarn);
     if(loadType==='team'&&teamLoadEarn>0)L.push('  Team loading: '+teamTotal.toLocaleString()+' head x $'+baseLoad.toFixed(2)+'/head = $'+teamLoadEarn.toFixed(2));
     const tl=travelLine(id);if(tl)L.push(tl);
+    if(standEarn>0)L.push('  Stand fee (BYO machine): '+standDays+' day'+(standDays===1?'':'s')+' x $'+(rates.standFeePerDay||0).toFixed(2)+' = $'+standEarn.toFixed(2));
     L.push('  GROSS TOTAL: $'+gross.toFixed(2));
+    if(superable>0.005){L.push('  Superable earnings: $'+superable.toFixed(2));L.push('  Super guarantee ('+(SUPER_RATE*100).toFixed(0)+'%): $'+(superable*SUPER_RATE).toFixed(2));}
     if(taxPct>0)L.push('  Tax withheld ('+taxPct+'%): -$'+taxAmt.toFixed(2));
     /* v4.6.3f — post-tax deductions */
     const mz=messFor(id),sz=sundriesFor(id);
@@ -1952,7 +1979,7 @@ function generateSummary(job,period){
         else{earnLine='  '+paidRuns+' runs @ $'+rpr.toFixed(2)+'/run = $'+earn.toFixed(2);}
       }
     }else{earn=totalRuns*rpr;earnLine='  '+totalRuns+' runs @ $'+rpr.toFixed(2)+'/run = $'+earn.toFixed(2);}
-    const gross=earn+travel;totalShedEarn+=earn;totalTravel+=travel;
+    const gross=earn+travel;totalShedEarn+=earn;totalTravel+=travel;totalSuperable+=earn;
     const det=(rates.crewDetails||{})[id]||{};
     const taxPct=parseFloat(det.taxRate||0)||0;
     const taxAmt=taxPct>0?gross*(taxPct/100):0;
@@ -1964,6 +1991,7 @@ function generateSummary(job,period){
     L.push('');L.push(c.name+' \u2014 '+role+sBadgeStr);L.push(earnLine);
     const tl=travelLine(id);if(tl)L.push(tl);
     L.push('  GROSS TOTAL: $'+gross.toFixed(2));
+    if(earn>0.005){L.push('  Superable earnings: $'+earn.toFixed(2));L.push('  Super guarantee ('+(SUPER_RATE*100).toFixed(0)+'%): $'+(earn*SUPER_RATE).toFixed(2));}
     if(taxPct>0)L.push('  Tax withheld ('+taxPct+'%): -$'+taxAmt.toFixed(2));
     /* v4.6.3f — post-tax deductions */
     const mz=messFor(id),sz=sundriesFor(id);
@@ -1973,7 +2001,7 @@ function generateSummary(job,period){
     if(taxPct>0||mz.amount>0||sz.amount>0)L.push('  NET TOTAL: $'+(gross-taxAmt-mz.amount-sz.amount).toFixed(2));
   });
   const totalShorn=shIds.reduce((s,id)=>s+(shornBy[id].sh+shornBy[id].cr),0);
-  const jobTotal=totalShEarn+totalTeamLoad+totalShedEarn+totalTravel;
+  const jobTotal=totalShEarn+totalTeamLoad+totalShedEarn+totalTravel+totalStand;
   /* MOB TOTALS - grower-invoice view, base rates only. Loadings shown as a separate line. */
   const mobTotals={};
   Object.entries(job.runs||{}).forEach(([date,dayRuns])=>{
@@ -2023,6 +2051,7 @@ function generateSummary(job,period){
   if(totalTeamLoad>0)L.push('Team loading:     $'+totalTeamLoad.toFixed(2));
   L.push('Shed staff wages: $'+totalShedEarn.toFixed(2));
   L.push('Travel:           $'+totalTravel.toFixed(2));
+  if(totalStand>0.005)L.push('Stand fees:       $'+totalStand.toFixed(2));
   L.push('');L.push('JOB TOTAL:        $'+jobTotal.toFixed(2));
   /* v4.6.3f — deduction totals + net. Lines only appear when deductions
      exist, so jobs without mess/sundries produce IDENTICAL output to
@@ -2035,20 +2064,270 @@ function generateSummary(job,period){
   /* v4.6.3c: math check — proves CONTRACTOR TOTALS components sum to JOB TOTAL.
      If this ever shows ✗, a pay-calc branch added later has drifted.
      v4.6.3f: when deductions exist, the check extends through to net. */
-  const expectedTotal=totalShEarn+totalTeamLoad+totalShedEarn+totalTravel;
+  const expectedTotal=totalShEarn+totalTeamLoad+totalShedEarn+totalTravel+totalStand;
   const matchOk=Math.abs(expectedTotal-jobTotal)<0.005;
   const parts=['$'+totalShEarn.toFixed(2)];
   if(totalTeamLoad>0)parts.push('$'+totalTeamLoad.toFixed(2));
   parts.push('$'+totalShedEarn.toFixed(2));
   parts.push('$'+totalTravel.toFixed(2));
+  if(totalStand>0.005)parts.push('$'+totalStand.toFixed(2));
   if(totalMess>0.005||totalSundries>0.005){
     const net=jobTotal-totalMess-totalSundries;
     L.push((matchOk?'\u2713':'\u2717 MISMATCH')+' Math check: '+parts.join(' + ')+' = $'+expectedTotal.toFixed(2)+' gross - $'+totalMess.toFixed(2)+' mess - $'+totalSundries.toFixed(2)+' sundries = $'+net.toFixed(2)+' net');
   }else{
     L.push((matchOk?'\u2713':'\u2717 MISMATCH')+' Math check: '+parts.join(' + ')+' = $'+expectedTotal.toFixed(2));
   }
+  /* v4.6.5 - Super Guarantee summary. Employer obligation on superable gross.
+     Informational: does not change JOB TOTAL, deductions, or NET. */
+  if(totalSuperable>0.005){
+    L.push('');L.push('SUPER GUARANTEE (employer, '+(SUPER_RATE*100).toFixed(0)+'%)');
+    L.push('Total superable earnings: $'+totalSuperable.toFixed(2));
+    L.push('Total super payable:      $'+(totalSuperable*SUPER_RATE).toFixed(2));
+  }
   return L.join('\n');
 }
+
+/* ============ v4.6.7 PAY WEEK REPORT (cross-job, per-worker) ============ */
+function payWeekJobData(job,period){
+  const rates=job.rates||{};
+  const shed=(gf(job.farmId)||{}).name||job.jobName||'Job';
+  const inP=d=>d>=period.start&&d<=period.end;
+  const out={};
+  const W=id=>{if(!out[id]){const c=gc(id);out[id]={id,name:c?c.name:'Unknown',role:getJobRole(job,id)||(c?c.role:'')||'',lines:[],piece:0,teamLoad:0,staffEarn:0,travel:0,stand:0,standSuper:0,tax:0,mess:0,sundries:0,hasTeam:false};}return out[id];};
+  const shIds=job.crew.filter(id=>{const r=getJobRole(job,id);return r==='Shearer'||r==='Crutcher';});
+  const stIds=job.crew.filter(id=>{const r=getJobRole(job,id);return r&&r!=='Shearer'&&r!=='Crutcher';});
+  const dEt=id=>((rates.crewDetails||{})[id])||{};
+  /* piecework: per date x type x effective rate (overrides + individual loadings baked in) */
+  const agg={};const daysSet={};
+  Object.entries(job.runs||{}).forEach(([date,rs])=>{if(!inP(date))return;(rs||[]).forEach(run=>{mobsOf(run).forEach(mob=>{
+    const hasO=mob.rateOverride!=null;
+    const br=hasO?mob.rateOverride:(mob.type==='Shearing'?rates.shearingPerHead:rates.crutchingPerHead)||0;
+    shIds.forEach(id=>{const cnt=(mob.counts||{})[id]||0;if(!cnt)return;
+      (daysSet[id]=daysSet[id]||{})[date]=1;
+      const load=(rates.shearerLoadings||{})[id]||0;
+      const lt=(rates.loadingType||{})[id]||'individual';
+      const eff=lt==='team'?br:(br+load);
+      const k=id+'|'+date+'|'+mob.type+'|'+eff.toFixed(4);
+      if(!agg[k])agg[k]={id,date,type:mob.type,rate:eff,cnt:0};
+      agg[k].cnt+=cnt;});
+  });});});
+  Object.values(agg).sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:b.rate-a.rate).forEach(g=>{
+    const earn=g.cnt*g.rate;const w=W(g.id);w.piece+=earn;
+    w.lines.push({date:g.date,shed,item:g.cnt.toLocaleString()+' '+(g.type==='Shearing'?'shorn':'crutched'),units:g.cnt,rate:g.rate,amount:earn,superable:true});
+  });
+  /* team loading - mirrors generateSummary: base x total team heads in period, per team-loaded shearer */
+  const teamTotal=(()=>{let t=0;Object.entries(job.runs||{}).forEach(([date,rs])=>{if(!inP(date))return;(rs||[]).forEach(run=>mobsOf(run).forEach(mob=>{shIds.forEach(sid=>{t+=(mob.counts||{})[sid]||0;});}));});return t;})();
+  shIds.forEach(id=>{const lt=(rates.loadingType||{})[id];const base=(rates.shearerLoadings||{})[id]||0;
+    if(lt==='team'&&base>0&&teamTotal>0){const earn=base*teamTotal;const w=W(id);w.teamLoad+=earn;w.hasTeam=true;
+      w.lines.push({date:'',shed,item:'Team loading '+teamTotal.toLocaleString()+' head',units:teamTotal,rate:base,amount:earn,superable:true});}});
+  /* shed staff per day - role rate + per-person override; presser day rules (threshold / cpk, union of dates) */
+  stIds.forEach(id=>{const role=getJobRole(job,id);const d=dEt(id);
+    const ov=(rates.crewOverrides||{})[id];
+    const defR=role==='Wool Classer'?rates.classerPerRun:role==='Penner'?rates.pennerPerRun:role==='Presser'?rates.presserPerRun:rates.woolHandlerPerRun;
+    const rpr=ov||defR||80;
+    if(role==='Presser'){
+      const mode=d.pressMode||'standard';
+      const dates=new Set([].concat(Object.keys((job.shedTallies||{})[id]||{}),Object.keys((job.baleTallies||{})[id]||{}),Object.keys(((job.baleWeights||{})[id])||{})));
+      Array.from(dates).filter(inP).sort().forEach(date=>{
+        if(mode==='cpk'){
+          const kg=(((job.baleWeights||{})[id])||{})[date]||0;
+          if(kg>0){const earn=kg*(rates.pressCpk||0);const w=W(id);w.staffEarn+=earn;
+            w.lines.push({date,shed,item:kg.toLocaleString()+' kg',units:kg,rate:rates.pressCpk||0,amount:earn,superable:true});}
+        }else{
+          const bales=((job.baleTallies||{})[id]||{})[date]||0;
+          const runs=((job.shedTallies||{})[id]||{})[date]||0;
+          const thr=rates.baleThreshold||13;
+          if(bales>thr){const pb=rates.presserPerBale||14.20;const earn=bales*pb;const w=W(id);w.staffEarn+=earn;
+            w.lines.push({date,shed,item:bales+' bales',units:bales,rate:pb,amount:earn,superable:true});}
+          else if(runs>0){const earn=runs*rpr;const w=W(id);w.staffEarn+=earn;
+            w.lines.push({date,shed,item:runs+' runs',units:runs,rate:rpr,amount:earn,superable:true});}
+        }
+      });
+    }else{
+      Object.entries((job.shedTallies||{})[id]||{}).filter(x=>inP(x[0])).sort((a,b)=>a[0]<b[0]?-1:1).forEach(x=>{
+        const date=x[0],runs=x[1];
+        if(!runs)return;const earn=runs*rpr;const w=W(id);w.staffEarn+=earn;
+        w.lines.push({date,shed,item:runs+' runs',units:runs,rate:rpr,amount:earn,superable:true});
+      });
+    }
+  });
+  /* travel (mode-aware) */
+  job.crew.forEach(id=>{
+    const d=dEt(id);
+    const tDays=Object.entries((job.travelTallies||{})[id]||{}).filter(x=>x[1]&&inP(x[0])).length;
+    if(tDays>0){
+      let earn,item,rate;
+      if((d.travelMode||'day')==='km'){
+        const km=d.driverKm!=null?d.driverKm:(rates.shedKm||0);
+        rate=d.travelKmRate!=null?d.travelKmRate:(rates.travelKmDefault||0);
+        earn=tDays*km*rate;item='Travel '+tDays+' day'+(tDays===1?'':'s')+' x '+km+'km';
+      }else{
+        rate=((rates.travelRate||{})[id]||0);earn=tDays*rate;item='Travel '+tDays+' day'+(tDays===1?'':'s');
+      }
+      if(earn>0){const w=W(id);w.travel+=earn;w.lines.push({date:'',shed,item,units:tDays,rate,amount:earn,superable:false});}
+    }
+  });
+  /* stand fee (BYO) - superable per rates.standFeeSuper (default ON) */
+  if(job.evos==='BYO'&&(rates.standFeePerDay||0)>0){
+    const superFlag=rates.standFeeSuper!==false;
+    shIds.forEach(id=>{if((((rates.crewDetails||{})[id])||{}).standFee===false)return;const n=Object.keys(daysSet[id]||{}).length;if(!n)return;
+      const earn=n*(rates.standFeePerDay||0);const w=W(id);w.stand+=earn;if(superFlag)w.standSuper+=earn;
+      w.lines.push({date:'',shed,item:'Stand fee (BYO) '+n+' day'+(n===1?'':'s'),units:n,rate:rates.standFeePerDay||0,amount:earn,superable:superFlag});});
+  }
+  /* mess + sundries (deduction-only workers still appear) */
+  job.crew.forEach(id=>{
+    const mult=Object.entries((job.messTallies||{})[id]||{}).filter(x=>x[1]&&inP(x[0])).reduce((a,x)=>a+(Number(x[1])||0),0);
+    if(mult>0)W(id).mess+=mult*resolveMessRate(job,id);
+    let sd=0;(job.sundries||[]).forEach(s=>{if(s.crew_id===id&&(!s.occurred_date||inP(s.occurred_date)))sd+=Number(s.amount)||0;});
+    if(sd>0)W(id).sundries+=sd;
+  });
+  /* tax per job slice */
+  Object.values(out).forEach(w=>{
+    const gross=w.piece+w.teamLoad+w.staffEarn+w.travel+w.stand;
+    const taxPct=parseFloat(dEt(w.id).taxRate||0)||0;
+    if(taxPct>0&&gross>0)w.tax+=gross*(taxPct/100);
+  });
+  return out;
+}
+function generatePayWeekReport(jobs,period,contractorName){
+  const dn=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const fdate=d=>{if(!d)return'         ';const p=d.split('-').map(Number);const dt=new Date(p[0],p[1]-1,p[2]);return dn[dt.getDay()]+' '+String(p[2]).padStart(2,'0')+'/'+String(p[1]).padStart(2,'0');};
+  const per={};const checks=[];const sheds=[];
+  (jobs||[]).forEach(job=>{
+    const data=payWeekJobData(job,period);
+    const ids=Object.keys(data);if(!ids.length)return;
+    let jobGross=0,team=false,any=false;
+    ids.forEach(id=>{const w=data[id];jobGross+=w.piece+w.teamLoad+w.staffEarn+w.travel+w.stand;if(w.hasTeam)team=true;if(w.lines.length)any=true;
+      if(!per[id])per[id]={id,name:w.name,role:w.role,lines:[],piece:0,teamLoad:0,staffEarn:0,travel:0,stand:0,standSuper:0,tax:0,mess:0,sundries:0};
+      const p=per[id];p.lines=p.lines.concat(w.lines);
+      ['piece','teamLoad','staffEarn','travel','stand','standSuper','tax','mess','sundries'].forEach(k=>{p[k]+=w[k]||0;});
+    });
+    const shedName=(gf(job.farmId)||{}).name||job.jobName||'Job';
+    if(any&&sheds.indexOf(shedName)<0)sheds.push(shedName);
+    if(jobGross>0.005){
+      if(team)checks.push({shed:shedName,skip:true});
+      else{const cps=calcPeriodStats(job,period);checks.push({shed:shedName,ok:Math.abs(jobGross-cps.totalEarn)<0.01,a:jobGross,b:cps.totalEarn});}
+    }
+  });
+  const L=[];const dash='\u2500'.repeat(52);
+  L.push((contractorName||CONTRACTOR_NAME).toUpperCase()+' \u2014 PAY WEEK REPORT');
+  L.push(fmtPeriodLabel(period.start,period.end));
+  L.push('Generated: '+localToday());L.push('');
+  const workers=Object.values(per).filter(w=>w.lines.length||w.mess>0||w.sundries>0);
+  const isSh=w=>w.role==='Shearer'||w.role==='Crutcher';
+  const writeSect=(title,list)=>{
+    if(!list.length)return;
+    L.push(dash);L.push(title);L.push(dash);
+    list.sort((a,b)=>a.name.localeCompare(b.name)).forEach(w=>{
+      L.push('');L.push(w.name+' \u2014 '+w.role);
+      w.lines.slice().sort((a,b)=>{const ad=a.date||'9999',bd=b.date||'9999';return ad<bd?-1:ad>bd?1:0;}).forEach(ln=>{
+        L.push('  '+fdate(ln.date)+'  '+pad(ln.shed,14)+' '+ln.item+' @ $'+ln.rate.toFixed(2)+' = $'+ln.amount.toFixed(2));
+      });
+      const gross=w.piece+w.teamLoad+w.staffEarn+w.travel+w.stand;
+      const superable=w.piece+w.teamLoad+w.staffEarn+w.standSuper;
+      L.push('  GROSS: $'+gross.toFixed(2)+'   Superable: $'+superable.toFixed(2)+'   Super ('+(SUPER_RATE*100).toFixed(0)+'%): $'+(superable*SUPER_RATE).toFixed(2));
+      const ded=[];
+      if(w.tax>0)ded.push('Tax -$'+w.tax.toFixed(2));
+      if(w.mess>0)ded.push('Mess -$'+w.mess.toFixed(2));
+      if(w.sundries>0)ded.push('Sundries -$'+w.sundries.toFixed(2));
+      if(ded.length)L.push('  '+ded.join('   '));
+      L.push('  NET: $'+(gross-w.tax-w.mess-w.sundries).toFixed(2));
+    });
+    L.push('');
+  };
+  writeSect('SHEARERS & CRUTCHERS',workers.filter(isSh));
+  writeSect('SHED STAFF',workers.filter(w=>!isSh(w)));
+  let tg=0,ts=0,tt=0,tm=0,tsu=0;
+  workers.forEach(w=>{const g=w.piece+w.teamLoad+w.staffEarn+w.travel+w.stand;tg+=g;ts+=w.piece+w.teamLoad+w.staffEarn+w.standSuper;tt+=w.tax;tm+=w.mess;tsu+=w.sundries;});
+  L.push(dash);L.push('WEEK TOTALS');L.push(dash);
+  L.push('Workers: '+workers.length+'   Sheds: '+(sheds.join(', ')||'none'));
+  L.push('Gross: $'+tg.toFixed(2)+'   Superable: $'+ts.toFixed(2)+'   Super ('+(SUPER_RATE*100).toFixed(0)+'%): $'+(ts*SUPER_RATE).toFixed(2));
+  L.push('Tax: -$'+tt.toFixed(2)+'   Mess: -$'+tm.toFixed(2)+'   Sundries: -$'+tsu.toFixed(2)+'   NET: $'+(tg-tt-tm-tsu).toFixed(2));
+  if(checks.length){
+    const done=checks.filter(c=>!c.skip);
+    const bad=done.filter(c=>!c.ok);
+    const skipped=checks.length-done.length;
+    if(bad.length)bad.forEach(c=>L.push('\u2717 MISMATCH '+c.shed+': report $'+c.a.toFixed(2)+' vs period calc $'+c.b.toFixed(2)));
+    else if(done.length)L.push('\u2713 Cross-check vs per-job period totals ('+done.length+' shed'+(done.length===1?'':'s')+(skipped?'; '+skipped+' skipped: team loading':'')+')');
+  }
+  if(!workers.length){L.push('');L.push('No pay activity in this period.');}
+  return L.join('\n');
+}
+function generatePayWeekCSV(jobs,period){
+  const esc=v=>{v=String(v==null?'':v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;};
+  const rows=[['worker','role','date','shed','item','units','rate','amount','superable']];
+  const per={};
+  (jobs||[]).forEach(job=>{const data=payWeekJobData(job,period);Object.values(data).forEach(w=>{
+    if(!per[w.id])per[w.id]={name:w.name,role:w.role,lines:[],piece:0,teamLoad:0,staffEarn:0,travel:0,stand:0,standSuper:0,tax:0,mess:0,sundries:0};
+    const p=per[w.id];p.lines=p.lines.concat(w.lines);
+    ['piece','teamLoad','staffEarn','travel','stand','standSuper','tax','mess','sundries'].forEach(k=>{p[k]+=w[k]||0;});});});
+  Object.values(per).filter(p=>p.lines.length||p.mess>0||p.sundries>0).sort((a,b)=>a.name.localeCompare(b.name)).forEach(p=>{
+    p.lines.forEach(ln=>rows.push([p.name,p.role,ln.date||'',ln.shed,ln.item,ln.units,Number(ln.rate).toFixed(4),ln.amount.toFixed(2),ln.superable?'Y':'N']));
+    const gross=p.piece+p.teamLoad+p.staffEarn+p.travel+p.stand;
+    const superable=p.piece+p.teamLoad+p.staffEarn+p.standSuper;
+    [['GROSS',gross],['SUPERABLE',superable],['SUPER',superable*SUPER_RATE],['TAX',-p.tax],['MESS',-p.mess],['SUNDRIES',-p.sundries],['NET',gross-p.tax-p.mess-p.sundries]].forEach(kv=>rows.push([p.name,p.role,'','',kv[0],'','',kv[1].toFixed(2),'']));
+  });
+  return rows.map(r=>r.map(esc).join(',')).join('\n');
+}
+/* v4.6.9 - TALLY TRENDS: head counts only, no pay figures. Last N pay weeks per worker. */
+function generateTallyTrends(jobs,endPeriod,fq,weeksN){
+  const N=weeksN||4;const len=(fq==='fortnightly')?14:7;
+  const periods=[];for(let i=0;i<N;i++){periods.push({start:addDays(endPeriod.start,-len*i),end:addDays(endPeriod.end,-len*i)});}
+  const shear={},staff={};
+  (jobs||[]).forEach(job=>{
+    if(!job||!job.crew)return;
+    const shIds=job.crew.filter(id=>{const r=getJobRole(job,id);return r==='Shearer'||r==='Crutcher';});
+    const stIds=job.crew.filter(id=>{const r=getJobRole(job,id);return r&&r!=='Shearer'&&r!=='Crutcher';});
+    periods.forEach((p,pi)=>{
+      const inP=d=>d>=p.start&&d<=p.end;
+      Object.entries(job.runs||{}).forEach(([date,rs])=>{if(!inP(date))return;(rs||[]).forEach(run=>{mobsOf(run).forEach(mob=>{
+        shIds.forEach(id=>{const cnt=(mob.counts||{})[id]||0;if(!cnt)return;
+          const c=gc(id);if(!shear[id])shear[id]={name:c?c.name:'Unknown',w:{}};
+          const w=shear[id].w[pi]=shear[id].w[pi]||{sh:0,cr:0,days:{}};
+          if(mob.type==='Shearing')w.sh+=cnt;else w.cr+=cnt;
+          w.days[date]=1;});
+      });});});
+      stIds.forEach(id=>{
+        const runs=Object.entries((job.shedTallies||{})[id]||{}).filter(x=>inP(x[0]));
+        const bales=Object.entries((job.baleTallies||{})[id]||{}).filter(x=>inP(x[0]));
+        if(!runs.length&&!bales.length)return;
+        const c=gc(id);if(!staff[id])staff[id]={name:c?c.name:'Unknown',role:getJobRole(job,id)||(c?c.role:'')||'',w:{}};
+        const w=staff[id].w[pi]=staff[id].w[pi]||{runs:0,bales:0,days:{}};
+        runs.forEach(x=>{w.runs+=Number(x[1])||0;w.days[x[0]]=1;});
+        bales.forEach(x=>{w.bales+=Number(x[1])||0;w.days[x[0]]=1;});
+      });
+    });
+  });
+  const L=[];const dash='\u2500'.repeat(52);
+  const wkLbl=pi=>{const d=periods[pi].end.split('-');return 'Wk end '+d[2]+'/'+d[1];};
+  L.push(CONTRACTOR_NAME.toUpperCase()+' \u2014 TALLY TRENDS');
+  L.push('Last '+N+' pay weeks to '+fmtPeriodLabel(endPeriod.start,endPeriod.end));
+  L.push('Head counts only \u2014 no pay figures. Shorn and crutched kept separate.');L.push('');
+  L.push(dash);L.push('SHEARERS & CRUTCHERS');L.push(dash);
+  const shList=Object.values(shear).sort((a,b)=>{const t=x=>Object.values(x.w).reduce((s,w)=>s+w.sh+w.cr,0);return t(b)-t(a);});
+  shList.forEach(s=>{
+    L.push('');L.push(s.name);
+    for(let pi=0;pi<N;pi++){const w=s.w[pi];
+      if(!w){L.push('  '+wkLbl(pi)+':  \u2014');continue;}
+      const parts=[];if(w.sh>0)parts.push(w.sh.toLocaleString()+' shorn');if(w.cr>0)parts.push(w.cr.toLocaleString()+' crutched');
+      const days=Object.keys(w.days).length;const tot=w.sh+w.cr;
+      L.push('  '+wkLbl(pi)+':  '+parts.join(' + ')+' \u00b7 '+days+' day'+(days===1?'':'s')+' ('+Math.round(tot/days).toLocaleString()+'/day)');}
+  });
+  if(!shList.length){L.push('');L.push('No shearer tallies in this window.');}
+  L.push('');L.push(dash);L.push('SHED STAFF');L.push(dash);
+  const stList=Object.values(staff).sort((a,b)=>a.name.localeCompare(b.name));
+  stList.forEach(s=>{
+    L.push('');L.push(s.name+' \u2014 '+s.role);
+    for(let pi=0;pi<N;pi++){const w=s.w[pi];
+      if(!w){L.push('  '+wkLbl(pi)+':  \u2014');continue;}
+      const parts=[];if(w.runs>0)parts.push(w.runs+' runs');if(w.bales>0)parts.push(w.bales+' bales');
+      const days=Object.keys(w.days).length;
+      L.push('  '+wkLbl(pi)+':  '+(parts.join(' + ')||'\u2014')+' \u00b7 '+days+' day'+(days===1?'':'s'));}
+  });
+  if(!stList.length){L.push('');L.push('No staff tallies in this window.');}
+  return L.join('\n');
+}
+
 
 /* ── TOP BAR ── */
 /* ── PIN CONFIG ── */
@@ -2889,7 +3168,7 @@ function SundriesPanel({job,setJob,isAdmin}){
 }
 function SummaryTab({job,setJob,role}){
   const rates=job.rates||{};
-  const payDayOfWeek=rates.payDayOfWeek!=null?rates.payDayOfWeek:4;
+  const payDayOfWeek=rates.payDayOfWeek!=null?rates.payDayOfWeek:5;
   const payFrequency=rates.payFrequency||'weekly';
   const todayStr=localToday();
   const periodLen=payFrequency==='fortnightly'?14:7;
@@ -3100,6 +3379,17 @@ function AdminTab({job,setJob,onEdit,onDeleteFarm,onDeleteJob,onPublish}){
        mkRates only reads the scalar rate fields back (per-person overrides/loadings
        are reset for a new job), so a one-off per-person tweak here won't leak. */
     lsSet(LS_LAST_RATES,draft);
+    /* v4.6.6 - harvest per-worker sticky settings so future jobs seed them. Merge-only:
+       never deletes a stored default (safest - no destructive surprises). */
+    try{
+      const wd=lsGet(LS_WORKER_DEFAULTS)||{};
+      Object.entries(draft.crewDetails||{}).forEach(([wid,det])=>{
+        const keep={};
+        ['taxRate','messRate','travelMode','driverKm','travelKmRate','standFee'].forEach(k=>{const v=det?det[k]:null;if(v!==null&&v!==undefined&&v!=='')keep[k]=v;});
+        if(Object.keys(keep).length)wd[wid]={...(wd[wid]||{}),...keep};
+      });
+      lsSet(LS_WORKER_DEFAULTS,wd);
+    }catch(err){}
     setSaved(true);setTimeout(()=>setSaved(false),2000);
   };
 
@@ -3251,6 +3541,42 @@ function AdminTab({job,setJob,onEdit,onDeleteFarm,onDeleteJob,onPublish}){
     /* v4.6.3f — MESS RATE. Per-person $/day deducted from pay. Days toggled
        on the Tally tab (Off/Half/Full). Placeholder shows the role default
        ($35 shearer/crutcher, $10 staff) that applies when blank. */
+    /* v4.6.5 - stand fee (equipment hire). Active only when job EVOs = BYO. */
+    e('div',{className:'admin-section'},
+      e('div',{className:'admin-sec-hdr'},e('div',{className:'admin-sec-title'},'Stand Fee (BYO Machines)'),e('div',{className:'admin-sec-sub'},'$/day per shearer per tallied day when EVOs = BYO. Shown on pay summary and farmer record. Super treatment set below - confirm with your payroll adviser.'+(job.evos==='BYO'?'':' This job: EVOs supplied at shed - fee inactive.'))),
+      e('div',{className:'loading-row'},
+        e('div',{className:'lr-l'},e('div',null,e('div',{className:'lr-name'},'Rate per shearer'),e('div',{className:'lr-role'},job.evos==='BYO'?'Active on this job':'Inactive (EVOs supplied at shed)'))),
+        e('div',{className:'lr-r',style:{gap:6}},
+          e('span',{className:'lr-prefix'},'$'),
+          e('input',{type:'number',className:'tr-inp',style:{width:58},value:draft.standFeePerDay??0,placeholder:'0',step:'5',onChange:ev=>setDraft(d=>({...d,standFeePerDay:ev.target.value===''?0:parseFloat(ev.target.value)||0}))}),
+          e('span',{className:'tr-unit'},'/day')
+        )
+      ),
+      e('div',{className:'loading-row'},
+        e('div',{className:'lr-l'},e('div',null,e('div',{className:'lr-name'},'Include in super base'),e('div',{className:'lr-role'},(draft.standFeeSuper!==false)?'Counted as superable earnings':'Excluded (equipment hire)'))),
+        e('div',{className:'lr-r'},
+          e('div',{className:'tog-row'},
+            e('button',{className:'tog-opt'+((draft.standFeeSuper!==false)?' on':''),onClick:()=>setDraft(d=>({...d,standFeeSuper:true}))},'Yes'),
+            e('button',{className:'tog-opt'+((draft.standFeeSuper===false)?' on':''),onClick:()=>setDraft(d=>({...d,standFeeSuper:false}))},'No')
+          )
+        )
+      ),
+      /* v4.6.8 - per-shearer eligibility: only those who brought their own machine get the fee */
+      job.evos==='BYO'&&(function(){
+        var ids=job.crew.filter(function(id){var r=getJobRole(job,id);return r==='Shearer'||r==='Crutcher';});
+        if(!ids.length)return null;
+        return e('div',null,
+          e('div',{className:'rate-lbl',style:{margin:'12px 0 6px'}},'Who gets the fee (own machine)'),
+          ids.map(function(id){var c=gc(id);if(!c)return null;var on=(((draft.crewDetails||{})[id])||{}).standFee!==false;
+            return e('div',{key:id,className:'loading-row'},
+              e('div',{className:'lr-l'},e('div',null,e('div',{className:'lr-name'},c.name),e('div',{className:'lr-role'},on?'Gets the fee':'No fee (used shed gear)'))),
+              e('div',{className:'lr-r'},e('div',{className:'tog-row'},
+                e('button',{className:'tog-opt'+(on?' on':''),onClick:function(){setDet(id,'standFee',true);}},'Yes'),
+                e('button',{className:'tog-opt'+(!on?' on':''),onClick:function(){setDet(id,'standFee',false);}},'No'))));
+          })
+        );
+      })()
+    ),
     e('div',{className:'admin-section'},
       e('div',{className:'admin-sec-hdr'},e('div',{className:'admin-sec-title'},'Mess Rate'),e('div',{className:'admin-sec-sub'},'$/day per person, deducted from pay. Blank = role default ($35 shearer/crutcher, $10 staff). Days toggled on Tally tab.')),
       job.crew.map(id=>{
@@ -3309,8 +3635,9 @@ function AdminTab({job,setJob,onEdit,onDeleteFarm,onDeleteJob,onPublish}){
         ),
         (draft.payFrequency||'weekly')!=='shed'&&e('div',null,
           e('div',{className:'rate-lbl',style:{marginBottom:8,marginTop:14}},'Pay Day'),
-          e('select',{className:'pay-day-sel',value:draft.payDayOfWeek??4,onChange:ev=>setDraft(p=>({...p,payDayOfWeek:parseInt(ev.target.value)}))},
-            DAY_FULL_.map((day,i)=>e('option',{key:i,value:i},day))
+          e('select',{className:'pay-day-sel',value:draft.payDayOfWeek??5,onChange:ev=>setDraft(p=>({...p,payDayOfWeek:parseInt(ev.target.value)}))},
+            /* v4.6.6 - option VALUES are JS day numbers (Sun=0); labels stay Monday-first. */
+            DAY_FULL_.map((day,i)=>e('option',{key:i,value:(i+1)%7},day))
           )
         ),
         (draft.payFrequency==='shed')&&e('div',{style:{fontSize:'12px',color:'var(--muted)',marginTop:10,padding:'8px 12px',background:'var(--card2)',borderRadius:8}},
@@ -4107,7 +4434,7 @@ function NewJobModal({onClose,onCreate,farmList,crewList,addFarm,addCrew}){
     const initialCrewDetails={};
     selCrew.forEach(id=>{
       const c=crewList.find(cr=>cr.id===id);
-      if(c)initialCrewDetails[id]={role:c.role};
+      if(c)initialCrewDetails[id]={...((lsGet(LS_WORKER_DEFAULTS)||{})[id]||{}),role:c.role}; /* v4.6.6 - seed sticky worker settings */
     });
     onCreate({
       id:'j'+Date.now(),
@@ -4241,7 +4568,7 @@ function EditJobScreen({job,onSave,onClose,farmList,addFarm,crewList,addCrew}){
     selCrew.forEach(id=>{
       if(!newDetails[id]?.role){
         const c=crewList.find(cr=>cr.id===id);
-        if(c)newDetails[id]={...(newDetails[id]||{}),role:c.role};
+        if(c)newDetails[id]={...((lsGet(LS_WORKER_DEFAULTS)||{})[id]||{}),...(newDetails[id]||{}),role:c.role}; /* v4.6.6 - seed sticky worker settings */
       }
     });
     onSave({
@@ -4374,6 +4701,12 @@ function HomeScreen({jobs,role,setRole,onJob,onNew,onDatabase,onSchedule,contrac
   const [sort,setSort]=useState('date'); /* date | name | size | progress */
   const [showArchive,setShowArchive]=useState(false);
   const [archiveMonth,setArchiveMonth]=useState(null); /* null = show all archive months */
+  /* v4.6.7 - pay week report sheet */
+  const [showPayWeek,setShowPayWeek]=useState(false);
+  const [pwOffset,setPwOffset]=useState(0);
+  const [pwCopied,setPwCopied]=useState(false);
+  const [pwCsv,setPwCsv]=useState(false);
+  const [pwView,setPwView]=useState('pay'); /* v4.6.9 - pay | tallies */
 
   const jobName=j=>{const f=gf(j.farmId);return j.jobName||(f?f.name:'Unknown');};
   const jobProg=j=>calcProg(j).pct;
@@ -4492,9 +4825,47 @@ function HomeScreen({jobs,role,setRole,onJob,onNew,onDatabase,onSchedule,contrac
       )
     ),
     e('div',{style:{position:'fixed',bottom:24,right:20,display:'flex',flexDirection:'column',gap:10,alignItems:'flex-end'}},
+      role==='admin'&&e('button',{onClick:()=>{setPwOffset(0);setShowPayWeek(true);},style:{background:'var(--hdr)',border:'1px solid rgba(255,255,255,.2)',borderRadius:24,padding:'10px 18px',color:'#ffffff',fontWeight:700,fontSize:13,cursor:'pointer',boxShadow:'0 4px 14px rgba(0,0,0,.3)'}},'💰 Pay Week'),
       role==='admin'&&e('button',{onClick:onDatabase,style:{background:'var(--hdr)',border:'1px solid rgba(255,255,255,.2)',borderRadius:24,padding:'10px 18px',color:'#ffffff',fontWeight:700,fontSize:13,cursor:'pointer',boxShadow:'0 4px 14px rgba(0,0,0,.3)'}},'📂 My Database'),
       (role==='admin'||role==='shed_lead')&&e('button',{className:'fab',onClick:onNew},'+')
     ),
+    /* v4.6.7 - Pay Week Report sheet (admin) */
+    showPayWeek&&(function(){
+      var last=lsGet(LS_LAST_RATES)||{};
+      /* v4.6.9 - derive payday from the latest job so the report never depends on a stale device template */
+      var srcJob=(jobs||[]).filter(function(j){return j&&j.rates&&j.rates.payDayOfWeek!=null&&j.status!=='Draft';})
+        .sort(function(a,b){return String(b.startDate||'').localeCompare(String(a.startDate||''));})[0];
+      var srcRates=srcJob?srcJob.rates:{};
+      var pd=srcRates.payDayOfWeek!=null?srcRates.payDayOfWeek:(last.payDayOfWeek!=null?last.payDayOfWeek:5);
+      var fq=(srcRates.payFrequency&&srcRates.payFrequency!=='shed')?srcRates.payFrequency
+        :((last.payFrequency&&last.payFrequency!=='shed')?last.payFrequency:'weekly');
+      var period=getPeriodByOffset(localToday(),pd,pwOffset,fq);
+      var txt=(pwView==='tallies')?generateTallyTrends(jobs,period,fq,4):generatePayWeekReport(jobs,period,contractorName);
+      var doCopy=function(t,set){navigator.clipboard.writeText(t).then(function(){set(true);setTimeout(function(){set(false);},2000);}).catch(function(){});};
+      var doPrint=function(){var w=window.open('','_blank','width=800,height=900');if(!w){alert('Pop-up blocked. Please allow pop-ups to print.');return;}
+        var safe=txt.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        w.document.write('<!DOCTYPE html><html><head><title>Pay Week Report</title><style>body{font-family:"Courier New",monospace;font-size:12px;padding:24px;color:#1a1e2e;background:#fff}pre{white-space:pre-wrap;word-wrap:break-word;margin:0}</style></head><body><pre>'+safe+'</pre></body></html>');
+        w.document.close();setTimeout(function(){try{w.focus();w.print();}catch(err){}},300);};
+      var navBtn={background:'var(--card)',border:'1px solid var(--border)',borderRadius:8,padding:'8px 14px',color:'var(--muted)',fontWeight:700,cursor:'pointer',fontSize:13};
+      var ftBtn={flex:1,background:'var(--amber)',border:'none',borderRadius:10,padding:'12px',color:'#000',fontWeight:800,cursor:'pointer',fontSize:13};
+      return e('div',{style:{position:'fixed',inset:0,background:'var(--bg)',zIndex:300,overflowY:'auto',WebkitOverflowScrolling:'touch'}},
+        e('div',{style:{padding:'14px 16px',display:'flex',alignItems:'center',gap:10,borderBottom:'1px solid var(--border)',position:'sticky',top:0,background:'var(--bg)',zIndex:2}},
+          e('button',{onClick:function(){setShowPayWeek(false);},style:navBtn},'\u2190 Close'),
+          e('div',{style:{fontWeight:800,fontSize:15}},'💰 Pay Week Report'),
+          e('div',{style:{marginLeft:'auto',fontSize:12,color:'var(--muted)'}},(fq==='fortnightly'?'Fortnightly':'Weekly')+' \u00b7 '+DAY_FULL[pd]+' pays')),
+        e('div',{style:{display:'flex',gap:8,justifyContent:'center',paddingTop:12}},
+          e('button',{onClick:function(){setPwView('pay');},style:Object.assign({},navBtn,{background:pwView==='pay'?'var(--amber)':'var(--card)',color:pwView==='pay'?'#000':'var(--muted)'})},'Pay Report'),
+          e('button',{onClick:function(){setPwView('tallies');},style:Object.assign({},navBtn,{background:pwView==='tallies'?'var(--amber)':'var(--card)',color:pwView==='tallies'?'#000':'var(--muted)'})},'Tally Trends')),
+        e('div',{style:{display:'flex',alignItems:'center',justifyContent:'center',gap:12,padding:'12px'}},
+          e('button',{onClick:function(){setPwOffset(function(o){return o-1;});},style:navBtn},'\u2039 Prev'),
+          e('div',{style:{fontWeight:700,fontSize:13}},fmtPeriodLabel(period.start,period.end)+(pwOffset===0?' \u00b7 current':'')),
+          e('button',{onClick:function(){setPwOffset(function(o){return o+1;});},disabled:pwOffset>=0,style:Object.assign({},navBtn,{opacity:pwOffset>=0?0.4:1})},'Next \u203a')),
+        e('pre',{style:{fontFamily:'var(--m)',fontSize:11.5,whiteSpace:'pre-wrap',wordWrap:'break-word',padding:'0 16px 96px',lineHeight:1.55}},txt),
+        e('div',{style:{position:'fixed',bottom:0,left:0,right:0,display:'flex',gap:8,padding:'12px 16px',background:'var(--card)',borderTop:'1px solid var(--border)'}},
+          e('button',{onClick:function(){doCopy(txt,setPwCopied);},style:ftBtn},pwCopied?'\u2713 Copied':'Copy'),
+          pwView==='pay'&&e('button',{onClick:function(){doCopy(generatePayWeekCSV(jobs,period),setPwCsv);},style:ftBtn},pwCsv?'\u2713 CSV copied':'Copy CSV'),
+          e('button',{onClick:doPrint,style:ftBtn},'Print')));
+    })(),
     e('div',{style:{position:'fixed',bottom:8,left:0,right:0,textAlign:'center',fontSize:11,color:'var(--muted)',fontFamily:'var(--m)',letterSpacing:'.5px',pointerEvents:'none',fontWeight:600,opacity:.7}},'myGang '+APP_VERSION)
   );
 }
