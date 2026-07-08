@@ -414,7 +414,7 @@ textarea.fi{resize:none;line-height:1.5}
 .btn-draft:active{background:var(--redD)}
 .jd-draft-strip{background:rgba(220,38,38,.15);border-bottom:1px solid rgba(220,38,38,.3);padding:7px 16px;font-size:12px;color:#fff;font-weight:700;letter-spacing:.5px;text-transform:uppercase;display:flex;align-items:center;gap:6px}
 /* ── SCHEDULE SCREEN ── */
-.sched-wrap{height:calc(100dvh - 58px);display:flex;flex-direction:column;background:var(--bg);overflow:hidden}
+.sched-wrap{min-height:calc(100dvh - 58px);display:block;background:var(--bg)} /* v4.6.10 - natural page scroll */
 .sched-controls{padding:12px 14px;background:var(--card);border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:10px;flex-shrink:0}
 .sched-hdr-row{display:flex;align-items:center;justify-content:space-between;gap:10px}
 .sched-range{font-family:var(--h);font-size:17px;font-weight:800;color:var(--text);letter-spacing:.2px;line-height:1.1;flex:1;min-width:0}
@@ -437,7 +437,7 @@ textarea.fi{resize:none;line-height:1.5}
 .ss-num{font-family:var(--h);font-size:19px;font-weight:800;color:var(--text);line-height:1.1}
 .ss-lbl{font-size:10px;color:var(--muted);margin-top:2px;text-transform:uppercase;letter-spacing:.4px}
 /* Week view */
-.week-board{flex:1;overflow-y:auto;padding:0}
+.week-board{overflow:visible;padding:0}
 .week-scroll{overflow-x:auto;padding:10px 0 14px;scrollbar-width:none}
 .week-scroll::-webkit-scrollbar{display:none}
 .week-grid{display:grid;grid-template-columns:repeat(7,minmax(150px,1fr));gap:7px;padding:0 10px;min-width:max-content}
@@ -468,7 +468,7 @@ textarea.fi{resize:none;line-height:1.5}
 .wk-tile.draft .wk-tile-pbarf{background:var(--red)}
 .wk-tile-draft-tag{font-size:9px;font-weight:800;color:var(--red);text-transform:uppercase;letter-spacing:.8px;margin-top:1px}
 /* Month view */
-.month-board{flex:1;overflow-y:auto;padding:10px 10px 20px}
+.month-board{overflow:visible;padding:0 0 20px}
 .month-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;background:var(--border);border:1px solid var(--border);border-radius:10px;overflow:hidden}
 .month-day-hdr{padding:8px 4px;background:var(--hdr);color:rgba(255,255,255,.8);text-align:center;font-family:var(--h);font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase}
 .month-cell{min-height:82px;background:var(--card);padding:5px 5px 4px;display:flex;flex-direction:column;gap:2px;cursor:pointer;transition:.12s}
@@ -522,16 +522,18 @@ const LS_CREW='mg_crew_'+CONTRACTOR_SLUG;
 const LS_QUEUE='mg_queue_'+CONTRACTOR_SLUG;
 const LS_ROLE='mg_role_'+CONTRACTOR_SLUG;
 const LS_LAST_RATES='mg_last_rates_'+CONTRACTOR_SLUG;
-const LS_WORKER_DEFAULTS='mg_worker_defaults_'+CONTRACTOR_SLUG; /* v4.6.6 - per-worker sticky settings (taxRate/messRate/travel) seeded when a worker joins a job */
+const LS_WORKER_DEFAULTS='mg_worker_defaults_'+CONTRACTOR_SLUG;
+const LS_MY_ID='mg_my_id_'+CONTRACTOR_SLUG; /* v4.6.10 - crew identity per device (visibility filter, not auth) */
+const LS_WB_SEEN='mg_wb_seen_'+CONTRACTOR_SLUG; /* v4.6.10 - per-device whiteboard last-seen map {jobId:iso} */ /* v4.6.6 - per-worker sticky settings (taxRate/messRate/travel) seeded when a worker joins a job */
 const LS_ROLE_TS='mg_role_ts_'+CONTRACTOR_SLUG;
 const LS_DATA_VERSION='mg_data_version_'+CONTRACTOR_SLUG; /* tracks DATA_VERSION for one-time cache wipe */
 const LS_TALLY_QUEUE='mg_tally_queue_'+CONTRACTOR_SLUG; /* per-cell offline queue, separate from whole-job queue */
 const LS_TALLY_DEAD='mg_tally_dead_'+CONTRACTOR_SLUG; /* v4.6.3g — quarantined cells (permanent rejection). Replayed once on boot in case the server-side blocker (e.g. missing kind constraint) was since fixed. */
 const LS_TALLY_META_QUEUE='mg_tally_meta_queue_'+CONTRACTOR_SLUG; /* v4.6.4 — offline/failed mob metadata (type/desc) updates to existing count cells; flushed alongside the tally queue. */
 const ROLE_TIMEOUT_HOURS=12; /* auto-reset after 12h inactivity */
-const APP_VERSION='v4.6.9';
+const APP_VERSION='v4.6.10';
 const SUPER_RATE=0.12; /* SG rate, 12% from 1 Jul 2025. One-line change if legislated rate moves. */
-/* v4.6.9 TALLY TRENDS + PAYDAY SOURCE (6 Jul 2026): (1) Pay Week sheet gains a Pay Report / Tally Trends view toggle. Trends = last 4 pay weeks per worker, newest first, HEAD COUNTS ONLY (no dollars): shorn and crutched always separate, days worked and head/day shown so form is comparable across different-length weeks; shearers ordered by 4-week volume, staff (runs + bales + days) alphabetical. Contractor use: balancing sheep allocation and watching form. (2) Pay Week sheet now derives payday/frequency from the LATEST non-draft job's rates (falls back to the device template, then Friday/weekly) - fixes stale-device-template periods (screenshot 6 Jul showed Thu-Wed on a Friday-pays contractor because the device template predated the picker fix). Copy CSV hidden on trends view; Copy copies whichever view is showing. v4.6.8 PER-SHEARER STAND FEE (6 Jul 2026): mixed sheds - on a BYO job only shearers who brought their own machine get the fee (e.g. 4 shearers, 2 paid). crewDetails[id].standFee===false excludes a shearer; DEFAULT is eligible (zero-config when the whole team brings own). Admin Stand Fee section gains a per-shearer Yes/No list when EVOs = BYO. Applied consistently in generateSummary, calcPeriodStats (header parity), generateFarmRecord (farmer charged only for actual own-machine shearer-days), and the pay week report. 'standFee' added to sticky worker settings - owning a machine is a worker attribute, set once and carried to future jobs. v4.6.7 PAY WEEK REPORT (6 Jul 2026): cross-job per-worker pay-week report (payroll officer's 'massive one'). Home screen (admin) 'Pay Week' button opens a sheet: period nav (payday/frequency from LS_LAST_RATES; 'shed' frequency falls back to weekly), per-worker date-by-shed earning lines (piecework per date x type x effective rate incl overrides + individual loadings, team loading line, staff per-day incl presser threshold/cpk day rules with union-of-dates per v4.6.3d.1b, travel, stand fees), per-worker GROSS/Superable/Super/Tax/Mess/Sundries/NET, WEEK TOTALS, and an embedded cross-check reconciling each job's slice against calcPeriodStats (jobs with team loadings are skipped in the check - known team-loading divergence in the header estimator). Copy / Copy CSV / Print. CSV shape (worker,role,date,shed,item,units,rate,amount,superable + per-worker totals rows) = the future Xero/MYOB payload. FARMER BILLING UNCHANGED - farm records stay strictly per job. ADDITIVE ONLY: generateSummary/calcPeriodStats untouched. v4.6.6 PAYROLL QoL (6 Jul 2026, pilot contractor payroll officer wish list): (1) STICKY WORKER SETTINGS - LS_WORKER_DEFAULTS persists per-worker taxRate/messRate/travelMode/driverKm/travelKmRate whenever Admin saves rates; seeded into crewDetails when the worker joins a NEW job or is added to an existing job. Existing jobs untouched - historical pay cannot change. Per-device localStorage (same caveat as LS_LAST_RATES); durable home = contractor_settings in the settings redesign. (2) PAYDAY OFF-BY-ONE FIX - Admin picker listed days Monday-first (Friday=4) but period math uses JS getDay() (Friday=5); picking Friday produced Thu-Wed periods. Fix: picker option values map labels to JS day numbers ((i+1)%7). MIGRATION: contractors who worked around by picking the next day's label (one contractor picked 'Saturday') already store the JS-correct value - their periods are UNCHANGED and the picker now displays the true day; anyone who had picked the real label sees it render one day back and must re-pick once. Default payDayOfWeek now 5 = Friday. (3) FORTNIGHTLY period fix - base.end+(len-7) concatenated a number onto a date string producing invalid dates; now addDays twice. Weekly path untouched. Fortnight anchors to the current week. (4) STAND FEE SUPER TOGGLE - rates.standFeeSuper, DEFAULT TRUE per pilot contractor payroll officer written instruction (stand fee IS included in super; meal deductions never reduce super - already enforced). Toggle to No treats it as equipment hire (excluded). Farmer-side charge, gross, tax, NET unaffected either way. v4.6.5 SUPER + STAND FEE (6 Jul 2026): Pay summary computes Super Guarantee per person and in CONTRACTOR TOTALS. SUPERABLE = piecework earnings (incl individual loadings baked into rate) + team loadings + shed staff runs/bales/kg earnings. NOT SUPERABLE: travel (day or km - reimbursement) and stand fees (equipment hire). Deductions (tax/mess/sundries) NEVER reduce the super base - super is SUPER_RATE x superable GROSS. Super is the employer's obligation ON TOP: it does not change gross, tax, deductions, NET, JOB TOTAL or the math check. STAND FEE: rates.standFeePerDay (Admin tab; rides LS_LAST_RATES carry-forward) x tallied days per shearer/crutcher, ONLY when job.evos==='BYO'; itemised per person, own CONTRACTOR TOTALS line + math-check component, shown on farmer record as a charge, included in calcPeriodStats so header Est. Payroll stays in parity with printed gross. v4.6.4 STRUCTURAL (16 Jun, after Knights crutching->shearing flip). ROOT CAUSE of the recurring job-type-flip class: mob type/desc lived ONLY in jobs.data (no authoritative store); on a flaky-signal device per-cell writes reached tally_entries but the blob structure desynced, then self-heal rebuilt the missing mobs from cells and INVENTED type=Shearing/desc=blank because it had no metadata to read - silently tripling crutching pay ($1.65->$4.80/head). hydrateTallies corrected counts from the table but never type/desc, so corruption persisted and rode the next save up. FIX (mirrors how counts are already safe): (a) tally_entries gains mob_type/mob_desc; count writes carry them; (b) hydrateTallies is now AUTHORITATIVE for type/desc - a corrupted blob from any device is overwritten from row metadata on load, exactly as counts are; (c) self-heal reconstructs synthesized mobs faithfully from row metadata instead of hardcoded Shearing/blank (legacy-null rows fall back to job type and set _synth to flag the guess); (d) post-hoc type/desc edits back-propagate to existing cells (updateMobMeta + LS_TALLY_META_QUEUE + flushTallyMetaQueue) so an edit after counts exist isn't reverted on next hydrate. PREREQUISITE: run v4.6.4-migration.sql FIRST (two nullable columns + backfill from current/corrected blobs), THEN deploy. Legacy null-metadata rows behave as pre-v4.6.4 until the next entry/edit repopulates them; no regression. v4.6.3g RESILIENCE (16 Jun, from Darby/Chloe stuck-queue incident): (1) periodic 20s background drain — browser 'online' event doesn't fire when a flaky connection silently recovers, so queued cells could sit unflushed until manual reopen; timer retries whenever online+fresh+queue non-empty (no-op when empty). (2) poison-pill quarantine — flushTallyQueue now separates PERMANENT rejections (constraint/validation, will never succeed) from TRANSIENT (timeout/network); permanent rows move to LS_TALLY_DEAD instead of pinning the queue + banner forever. (3) dead-letter replay on boot — quarantined cells get one retry per launch, so a since-fixed server blocker (e.g. the 'mess' kind constraint widened 15 Jun) self-recovers without re-entry. (4) sundries load resilient to missing table — sets a session flag on first 'table not found' and stops re-querying, ending per-load error spam when the migration hasn't run. NOTE: the tally_entries kind_check constraint MUST include every kind the build writes (count,shed_runs,bales,bale_kg,travel,mess) and sundries_entries MUST exist BEFORE deploy — both are hard prerequisites. v4.6.3f FEATURES (builds on v4.6.3e — deploy ONLY after 3e soak is clean): (1) MESS RATE — per-person $/day deduction; 3-state per-day toggle on Tally tab (Off ◯ / Half ½ / Full ●) stored as tally_entries kind='mess' multiplier 0/0.5/1 with run_id=mob_id=''; rate = crewDetails[id].messRate override else role default $35 shearer/crutcher $10 staff (resolveMessRate); Admin tab Mess Rate section; pay summary line 'Mess: N full + M half x $R/day = -$T'. (2) SUNDRIES — itemised per-person deductions in NEW sundries_entries table (run schema SQL BEFORE deploying this file); lead adds, admin edits/deletes via Summary-tab panel; pay summary itemises with subtotal. Both deduct POST-tax: GROSS → tax → mess → sundries → NET TOTAL. CONTRACTOR TOTALS gains conditional deduction lines + NET JOB TOTAL; math check extends through net when deductions exist. REGRESSION GUARANTEE: jobs with zero mess + zero sundries produce byte-identical pay output to v4.6.3e. calcPeriodStats now returns {shorn,totalEarn,messDeduction,sundriesDeduction,netEarn} — totalEarn stays gross. v4.6.3e SAFETY RELEASE (6 Jun 2026, after Knights/Bywong double incident): (1) delRun/delMob cascade deletes now scoped to cell_date=viewDate — run_id-only delete destroyed same-run cells on OTHER dates; (2) dbLoad merge now consults LS_TALLY_QUEUE as well as LS_QUEUE — a day of offline cells + silently-failed flush previously let the server's empty hydration overwrite the local day ("worked all day, lost it at night"); because flushTallyQueue retains only failed rows, post-flush queue state doubles as the flush-success gate; (3) jobDates guarantees today (Active jobs) and every date with existing data appear in the strip regardless of includeWeekends — weekend work was silently landing on the last visible weekday via defDate fallback; (4) new tappable banner when online+fresh but queued entries remain ("N entries not yet on server — tap to retry. Don't clear app data") — closes the silent state that drove users to clear site data and destroy the only copy. NO pay calc changes. v4.6.3d.1b CALC HOTFIX: Presser pay calc was iterating only shedTallies dates, which meant days where the presser pressed bales (or kg) WITHOUT entering shed_runs were skipped entirely from pay calculation. Real money bug — e.g. Whitey on Burragundy had 19 bales on Jun 2 with no shed_runs that day, calc never visited Jun 2 → $269.80 missing from his pay. Fix iterates union of shedTallies, baleTallies, baleWeights date keys so all days with any presser activity are evaluated. Applied to both calcPeriodStats (totals) and generateSummary (pay breakdown). All-runs and all-bales cases unchanged. v4.6.3d.1a hotfix: Presser hybrid-day pay summary display fix — when a presser had BOTH per-bale days AND per-run days in the same job, the displayed breakdown used totalRuns/totalBales summed across all days, producing math that didn't add up (e.g. "23 bales @ $14.20 = $213" when only 15 bales were actually paid per-bale and the other 8 were on a per-run day). Total earn was always correct; only the readable breakdown was wrong. Fix tracks paidRuns/paidBales separately so the line items match the math. All-bale and all-run cases unchanged. v4.6.3d.1 hotfix: (1) Map link handles goo.gl/Maps URLs as addresses by detecting http(s):// and passing through instead of wrapping in maps.google.com search query; (2) Defensive guard on job.baleWeights access in cpk-mode pay calc (was a crash hazard on old jobs without the field if pressMode was toggled to cpk); (3) Guard all 7 unguarded job.totalSheep.toLocaleString() crash sites with ||0 (was a render crash on any job with undefined totalSheep). v4.6.3d adds per-contractor boot-time access password (hash stored in contractor_settings.access_password_hash, verified flag in localStorage = hash itself for auto-invalidation on rotation, master PIN bypass for SRD support, null hash = no gate for graceful rollout). v4.6.3c-final adds mode badges next to crew names in pay summary + grand-total math check line in CONTRACTOR TOTALS. v4.6.3c adds c/kg presser mode (pressMode toggle + kg tracking via new tally_entries kind='bale_kg') and c/km travel mode (per-person day vs km, with override) — additive. v4.6.3b adds cascade delete from tally_entries on delRun/delMob — fixes zombie runs resurrecting via self-heal (Knights, 28 May). v4.6.3a added MOB TOTALS section to pay summary - additive only, no data model change from v4.6.3. v4.6.3 closes the data-loss
+/* v4.6.10 FIELD FIXES + CREW VIEW (7 Jul 2026, Kimba field report): (1) INPUT DRIFT KILLED - proven live (Kimba Nottles totalSheep saved 319 for entered 320; desktop mouse-wheel over focused number inputs changes values). Integer fields (tally counts, sheep, days, km, tax %, stands, PINs) now type='text' inputMode='numeric' (also fixes PIN maxLength ignored by number inputs). Decimal money fields keep type='number' but blur on wheel. (2) JOB NUMBERS format A - suggestJobNumber(): FARM 4-letter prefix + per-contractor sequence (NOTT-0042); replaces the RANDOM generator that collided live (Kimba 002113 twice, 002115 twice). Editable at creation with duplicate guard; legacy numbers untouched and ignored by the sequence so the first new job is PREF-0001. (3) SCHEDULE - natural page scroll (fixed-height nested scroll clipped week columns and died in in-app webviews e.g. Facebook browser); date-independent Drafts panel (two Kimba drafts sat invisible in w/c 22 Jun); filter bar (status/type/farm) + month jump. (4) CREW VIEW - read_only devices pick 'Who are you?' once (LS_MY_ID; per-device visibility filter, NOT authentication - real logins are v5); they see ONLY their own jobs, rolling today-2..today+7, on Home AND Schedule. Lead/Admin unchanged. (5) WHITEBOARD BADGES - red unread counts on job-view tab and job cards; per-device LS_WB_SEEN; fresh devices treat only last-48h posts as new; opening the tab marks seen. v4.6.9 TALLY TRENDS + PAYDAY SOURCE (6 Jul 2026): (1) Pay Week sheet gains a Pay Report / Tally Trends view toggle. Trends = last 4 pay weeks per worker, newest first, HEAD COUNTS ONLY (no dollars): shorn and crutched always separate, days worked and head/day shown so form is comparable across different-length weeks; shearers ordered by 4-week volume, staff (runs + bales + days) alphabetical. Contractor use: balancing sheep allocation and watching form. (2) Pay Week sheet now derives payday/frequency from the LATEST non-draft job's rates (falls back to the device template, then Friday/weekly) - fixes stale-device-template periods (screenshot 6 Jul showed Thu-Wed on a Friday-pays contractor because the device template predated the picker fix). Copy CSV hidden on trends view; Copy copies whichever view is showing. v4.6.8 PER-SHEARER STAND FEE (6 Jul 2026): mixed sheds - on a BYO job only shearers who brought their own machine get the fee (e.g. 4 shearers, 2 paid). crewDetails[id].standFee===false excludes a shearer; DEFAULT is eligible (zero-config when the whole team brings own). Admin Stand Fee section gains a per-shearer Yes/No list when EVOs = BYO. Applied consistently in generateSummary, calcPeriodStats (header parity), generateFarmRecord (farmer charged only for actual own-machine shearer-days), and the pay week report. 'standFee' added to sticky worker settings - owning a machine is a worker attribute, set once and carried to future jobs. v4.6.7 PAY WEEK REPORT (6 Jul 2026): cross-job per-worker pay-week report (payroll officer's 'massive one'). Home screen (admin) 'Pay Week' button opens a sheet: period nav (payday/frequency from LS_LAST_RATES; 'shed' frequency falls back to weekly), per-worker date-by-shed earning lines (piecework per date x type x effective rate incl overrides + individual loadings, team loading line, staff per-day incl presser threshold/cpk day rules with union-of-dates per v4.6.3d.1b, travel, stand fees), per-worker GROSS/Superable/Super/Tax/Mess/Sundries/NET, WEEK TOTALS, and an embedded cross-check reconciling each job's slice against calcPeriodStats (jobs with team loadings are skipped in the check - known team-loading divergence in the header estimator). Copy / Copy CSV / Print. CSV shape (worker,role,date,shed,item,units,rate,amount,superable + per-worker totals rows) = the future Xero/MYOB payload. FARMER BILLING UNCHANGED - farm records stay strictly per job. ADDITIVE ONLY: generateSummary/calcPeriodStats untouched. v4.6.6 PAYROLL QoL (6 Jul 2026, pilot contractor payroll officer wish list): (1) STICKY WORKER SETTINGS - LS_WORKER_DEFAULTS persists per-worker taxRate/messRate/travelMode/driverKm/travelKmRate whenever Admin saves rates; seeded into crewDetails when the worker joins a NEW job or is added to an existing job. Existing jobs untouched - historical pay cannot change. Per-device localStorage (same caveat as LS_LAST_RATES); durable home = contractor_settings in the settings redesign. (2) PAYDAY OFF-BY-ONE FIX - Admin picker listed days Monday-first (Friday=4) but period math uses JS getDay() (Friday=5); picking Friday produced Thu-Wed periods. Fix: picker option values map labels to JS day numbers ((i+1)%7). MIGRATION: contractors who worked around by picking the next day's label (one contractor picked 'Saturday') already store the JS-correct value - their periods are UNCHANGED and the picker now displays the true day; anyone who had picked the real label sees it render one day back and must re-pick once. Default payDayOfWeek now 5 = Friday. (3) FORTNIGHTLY period fix - base.end+(len-7) concatenated a number onto a date string producing invalid dates; now addDays twice. Weekly path untouched. Fortnight anchors to the current week. (4) STAND FEE SUPER TOGGLE - rates.standFeeSuper, DEFAULT TRUE per pilot contractor payroll officer written instruction (stand fee IS included in super; meal deductions never reduce super - already enforced). Toggle to No treats it as equipment hire (excluded). Farmer-side charge, gross, tax, NET unaffected either way. v4.6.5 SUPER + STAND FEE (6 Jul 2026): Pay summary computes Super Guarantee per person and in CONTRACTOR TOTALS. SUPERABLE = piecework earnings (incl individual loadings baked into rate) + team loadings + shed staff runs/bales/kg earnings. NOT SUPERABLE: travel (day or km - reimbursement) and stand fees (equipment hire). Deductions (tax/mess/sundries) NEVER reduce the super base - super is SUPER_RATE x superable GROSS. Super is the employer's obligation ON TOP: it does not change gross, tax, deductions, NET, JOB TOTAL or the math check. STAND FEE: rates.standFeePerDay (Admin tab; rides LS_LAST_RATES carry-forward) x tallied days per shearer/crutcher, ONLY when job.evos==='BYO'; itemised per person, own CONTRACTOR TOTALS line + math-check component, shown on farmer record as a charge, included in calcPeriodStats so header Est. Payroll stays in parity with printed gross. v4.6.4 STRUCTURAL (16 Jun, after Knights crutching->shearing flip). ROOT CAUSE of the recurring job-type-flip class: mob type/desc lived ONLY in jobs.data (no authoritative store); on a flaky-signal device per-cell writes reached tally_entries but the blob structure desynced, then self-heal rebuilt the missing mobs from cells and INVENTED type=Shearing/desc=blank because it had no metadata to read - silently tripling crutching pay ($1.65->$4.80/head). hydrateTallies corrected counts from the table but never type/desc, so corruption persisted and rode the next save up. FIX (mirrors how counts are already safe): (a) tally_entries gains mob_type/mob_desc; count writes carry them; (b) hydrateTallies is now AUTHORITATIVE for type/desc - a corrupted blob from any device is overwritten from row metadata on load, exactly as counts are; (c) self-heal reconstructs synthesized mobs faithfully from row metadata instead of hardcoded Shearing/blank (legacy-null rows fall back to job type and set _synth to flag the guess); (d) post-hoc type/desc edits back-propagate to existing cells (updateMobMeta + LS_TALLY_META_QUEUE + flushTallyMetaQueue) so an edit after counts exist isn't reverted on next hydrate. PREREQUISITE: run v4.6.4-migration.sql FIRST (two nullable columns + backfill from current/corrected blobs), THEN deploy. Legacy null-metadata rows behave as pre-v4.6.4 until the next entry/edit repopulates them; no regression. v4.6.3g RESILIENCE (16 Jun, from Darby/Chloe stuck-queue incident): (1) periodic 20s background drain — browser 'online' event doesn't fire when a flaky connection silently recovers, so queued cells could sit unflushed until manual reopen; timer retries whenever online+fresh+queue non-empty (no-op when empty). (2) poison-pill quarantine — flushTallyQueue now separates PERMANENT rejections (constraint/validation, will never succeed) from TRANSIENT (timeout/network); permanent rows move to LS_TALLY_DEAD instead of pinning the queue + banner forever. (3) dead-letter replay on boot — quarantined cells get one retry per launch, so a since-fixed server blocker (e.g. the 'mess' kind constraint widened 15 Jun) self-recovers without re-entry. (4) sundries load resilient to missing table — sets a session flag on first 'table not found' and stops re-querying, ending per-load error spam when the migration hasn't run. NOTE: the tally_entries kind_check constraint MUST include every kind the build writes (count,shed_runs,bales,bale_kg,travel,mess) and sundries_entries MUST exist BEFORE deploy — both are hard prerequisites. v4.6.3f FEATURES (builds on v4.6.3e — deploy ONLY after 3e soak is clean): (1) MESS RATE — per-person $/day deduction; 3-state per-day toggle on Tally tab (Off ◯ / Half ½ / Full ●) stored as tally_entries kind='mess' multiplier 0/0.5/1 with run_id=mob_id=''; rate = crewDetails[id].messRate override else role default $35 shearer/crutcher $10 staff (resolveMessRate); Admin tab Mess Rate section; pay summary line 'Mess: N full + M half x $R/day = -$T'. (2) SUNDRIES — itemised per-person deductions in NEW sundries_entries table (run schema SQL BEFORE deploying this file); lead adds, admin edits/deletes via Summary-tab panel; pay summary itemises with subtotal. Both deduct POST-tax: GROSS → tax → mess → sundries → NET TOTAL. CONTRACTOR TOTALS gains conditional deduction lines + NET JOB TOTAL; math check extends through net when deductions exist. REGRESSION GUARANTEE: jobs with zero mess + zero sundries produce byte-identical pay output to v4.6.3e. calcPeriodStats now returns {shorn,totalEarn,messDeduction,sundriesDeduction,netEarn} — totalEarn stays gross. v4.6.3e SAFETY RELEASE (6 Jun 2026, after Knights/Bywong double incident): (1) delRun/delMob cascade deletes now scoped to cell_date=viewDate — run_id-only delete destroyed same-run cells on OTHER dates; (2) dbLoad merge now consults LS_TALLY_QUEUE as well as LS_QUEUE — a day of offline cells + silently-failed flush previously let the server's empty hydration overwrite the local day ("worked all day, lost it at night"); because flushTallyQueue retains only failed rows, post-flush queue state doubles as the flush-success gate; (3) jobDates guarantees today (Active jobs) and every date with existing data appear in the strip regardless of includeWeekends — weekend work was silently landing on the last visible weekday via defDate fallback; (4) new tappable banner when online+fresh but queued entries remain ("N entries not yet on server — tap to retry. Don't clear app data") — closes the silent state that drove users to clear site data and destroy the only copy. NO pay calc changes. v4.6.3d.1b CALC HOTFIX: Presser pay calc was iterating only shedTallies dates, which meant days where the presser pressed bales (or kg) WITHOUT entering shed_runs were skipped entirely from pay calculation. Real money bug — e.g. Whitey on Burragundy had 19 bales on Jun 2 with no shed_runs that day, calc never visited Jun 2 → $269.80 missing from his pay. Fix iterates union of shedTallies, baleTallies, baleWeights date keys so all days with any presser activity are evaluated. Applied to both calcPeriodStats (totals) and generateSummary (pay breakdown). All-runs and all-bales cases unchanged. v4.6.3d.1a hotfix: Presser hybrid-day pay summary display fix — when a presser had BOTH per-bale days AND per-run days in the same job, the displayed breakdown used totalRuns/totalBales summed across all days, producing math that didn't add up (e.g. "23 bales @ $14.20 = $213" when only 15 bales were actually paid per-bale and the other 8 were on a per-run day). Total earn was always correct; only the readable breakdown was wrong. Fix tracks paidRuns/paidBales separately so the line items match the math. All-bale and all-run cases unchanged. v4.6.3d.1 hotfix: (1) Map link handles goo.gl/Maps URLs as addresses by detecting http(s):// and passing through instead of wrapping in maps.google.com search query; (2) Defensive guard on job.baleWeights access in cpk-mode pay calc (was a crash hazard on old jobs without the field if pressMode was toggled to cpk); (3) Guard all 7 unguarded job.totalSheep.toLocaleString() crash sites with ||0 (was a render crash on any job with undefined totalSheep). v4.6.3d adds per-contractor boot-time access password (hash stored in contractor_settings.access_password_hash, verified flag in localStorage = hash itself for auto-invalidation on rotation, master PIN bypass for SRD support, null hash = no gate for graceful rollout). v4.6.3c-final adds mode badges next to crew names in pay summary + grand-total math check line in CONTRACTOR TOTALS. v4.6.3c adds c/kg presser mode (pressMode toggle + kg tracking via new tally_entries kind='bale_kg') and c/km travel mode (per-person day vs km, with override) — additive. v4.6.3b adds cascade delete from tally_entries on delRun/delMob — fixes zombie runs resurrecting via self-heal (Knights, 28 May). v4.6.3a added MOB TOTALS section to pay summary - additive only, no data model change from v4.6.3. v4.6.3 closes the data-loss
   vectors that survived v4.6.2. The Woolaway incident on 21 May 2026 showed
   three structural gaps even after v4.6.2:
 
@@ -2269,6 +2271,32 @@ function generatePayWeekCSV(jobs,period){
   });
   return rows.map(r=>r.map(esc).join(',')).join('\n');
 }
+/* v4.6.10 - job number suggestion: FARM prefix + per-contractor sequence. Legacy 6-digit numbers
+   (no '-NNNN' tail) are ignored, so the first new-format job is PREF-0001. */
+function suggestJobNumber(jobs,farmName){
+  const prefix=(String(farmName||'').replace(/[^A-Za-z]/g,'').slice(0,4).toUpperCase())||'JOB';
+  let maxSeq=0;
+  (jobs||[]).forEach(j=>{const m=String(j.jobNumber||'').match(/-(\d+)$/);if(m)maxSeq=Math.max(maxSeq,parseInt(m[1],10)||0);});
+  return prefix+'-'+String(maxSeq+1).padStart(4,'0');
+}
+/* v4.6.10 - does a job's PLANNED span touch the date window? Computes the span directly:
+   jobDates() appends today for the Tally tab, which would make every job 'touch' today
+   and break the crew rolling window - caught in the v4.6.10 audit harness. */
+function jobInWindow(job,from,to){
+  try{
+    if(!job||!job.startDate||!job.daysAllocated)return false;
+    const inc=job.includeWeekends!==false;
+    let i=0,added=0;
+    while(added<job.daysAllocated&&i<job.daysAllocated*3+7){
+      const d=addDays(job.startDate,i);
+      const p=d.split('-').map(Number);
+      const dow=new Date(p[0],p[1]-1,p[2]).getDay();
+      if(inc||(dow!==0&&dow!==6)){added++;if(d>=from&&d<=to)return true;}
+      i++;
+    }
+    return false;
+  }catch(err){return false;}
+}
 /* v4.6.9 - TALLY TRENDS: head counts only, no pay figures. Last N pay weeks per worker. */
 function generateTallyTrends(jobs,endPeriod,fq,weeksN){
   const N=weeksN||4;const len=(fq==='fortnightly')?14:7;
@@ -2625,12 +2653,12 @@ function WeekBanner({jobs,contractorName}){
   );
 }
 /* ── JOB LIST CARD ── */
-function JLC({job,onClick}){
+function JLC({job,onClick,wb}){
   const farm=gf(job.farmId),p=calcProg(job);
   const cls=p.pct>=80?'fg':p.pct>=40?'fa':'fr';
   const isDraft=job.status==='Draft';
   return e('div',{className:'jlc'+(isDraft?' draft':''),onClick},
-    e('div',{className:'jlc-top'},e('div',null,e('div',{className:'jlc-name'},job.jobName||(farm?farm.name:'Unknown'),job.jobPin&&e('span',{style:{fontSize:'14px',marginLeft:6,opacity:.5}},'🔒')),e('div',{className:'jlc-num'},'#'+job.jobNumber)),e(Bdg,{status:job.status})),
+    e('div',{className:'jlc-top'},e('div',null,e('div',{className:'jlc-name'},job.jobName||(farm?farm.name:'Unknown'),job.jobPin&&e('span',{style:{fontSize:'14px',marginLeft:6,opacity:.5}},'🔒'),(wb||0)>0&&e('span',{style:{marginLeft:6,background:'#e53e3e',color:'#fff',borderRadius:10,fontSize:'10px',padding:'1px 6px',fontWeight:800,verticalAlign:'middle'}},'📋'+(wb>9?'9+':wb))),e('div',{className:'jlc-num'},'#'+job.jobNumber)),e(Bdg,{status:job.status})),
     e('div',{className:'jlc-meta'},e('span',{className:'pill'},job.type),e('span',{style:{fontSize:'12px',color:'var(--muted)'}},(job.totalSheep||0).toLocaleString()+' sheep'),e('span',{style:{fontSize:'12px',color:'var(--muted)'}},job.crew.length+' crew')),
     isDraft&&e('div',{className:'draft-hint'},'◌ Draft — not sent to crew yet. Tap to open and publish.'),
     !isDraft&&job.status==='Active'&&p.daysWorked>0&&e('div',null,e('div',{className:'jlc-pr'},e('span',null,p.shorn.toLocaleString()+' / '+(job.totalSheep||0).toLocaleString()+' — Day '+p.daysWorked+' of '+job.daysAllocated),e('span',{className:'pct-lbl'},Math.round(p.pct)+'%')),e('div',{className:'pbar'},e('div',{className:`pbar-f ${cls}`,style:{width:p.pct+'%'}}))),
@@ -2855,7 +2883,7 @@ function TallyTab({job,setJob,role,viewDate,setViewDate}){
             ),
             isAdmin&&e('div',{className:'rate-override-row'},
               e('span',{className:'ro-lbl'},'Rate override $/head:'),
-              e('input',{type:'number',className:'ro-inp',placeholder:String(effRate||''),value:mob.rateOverride!=null?mob.rateOverride:'',onChange:ev=>setMobRate(run.id,mob.id,ev.target.value),step:'0.05'}),
+              e('input',{type:'number',onWheel:ev=>ev.currentTarget.blur(),className:'ro-inp',placeholder:String(effRate||''),value:mob.rateOverride!=null?mob.rateOverride:'',onChange:ev=>setMobRate(run.id,mob.id,ev.target.value),step:'0.05'}),
               e('span',{className:'ro-eff'},'Effective: $'+effRate.toFixed(2)+'/head')
             ),
             e('div',{className:'sh-grid'},
@@ -2869,7 +2897,7 @@ function TallyTab({job,setJob,role,viewDate,setViewDate}){
                     reorderMode&&e('span',{style:{fontFamily:'var(--m)',fontSize:9,fontWeight:800,color:'var(--amber)',marginRight:3}},(idx+1)+'.'),
                     sn(c.name)
                   ),
-                  e('input',{type:'number',className:'sh-col-inp',placeholder:'—',value:mob.counts[id]||'',disabled:!canEdit||reorderMode,inputMode:'numeric',onChange:ev=>setMobCnt(run.id,mob.id,id,ev.target.value),onFocus:ev=>ev.target.select()})
+                  e('input',{type:'text',inputMode:'numeric',pattern:'[0-9]*',className:'sh-col-inp',placeholder:'—',value:mob.counts[id]||'',disabled:!canEdit||reorderMode,inputMode:'numeric',onChange:ev=>setMobCnt(run.id,mob.id,id,ev.target.value),onFocus:ev=>ev.target.select()})
                 );}),
                 e('div',{className:'sh-col-tot'},e('div',{className:'sh-col-tot-lbl'},'Mob\nTotal'),e('div',{className:'sh-col-tot-val'},mt>0?mt:'—'))
               )
@@ -2966,7 +2994,7 @@ function TallyTab({job,setJob,role,viewDate,setViewDate}){
               /* v4.6.3c: kg group, cpk mode only */
               pressMode==='cpk'&&e('div',{className:'s-div'}),
               pressMode==='cpk'&&e('div',{className:'s-grp'},e('div',{className:'s-lbl'},'Today kg'),
-                canEdit?e('input',{type:'number',inputMode:'decimal',step:'0.5',min:'0',value:kgDay||'',placeholder:'0',style:{width:64,padding:'4px 6px',borderRadius:6,border:'1px solid var(--border)',background:'var(--card)',color:'var(--text)',fontSize:14,fontWeight:700,textAlign:'center'},onChange:ev=>setKg(id,parseFloat(ev.target.value)||0)})
+                canEdit?e('input',{type:'number',onWheel:ev=>ev.currentTarget.blur(),inputMode:'decimal',step:'0.5',min:'0',value:kgDay||'',placeholder:'0',style:{width:64,padding:'4px 6px',borderRadius:6,border:'1px solid var(--border)',background:'var(--card)',color:'var(--text)',fontSize:14,fontWeight:700,textAlign:'center'},onChange:ev=>setKg(id,parseFloat(ev.target.value)||0)})
                 :e('div',{className:`s-val${payMode==='kg'?' hi':''}`},kgDay.toFixed(1))),
               pressMode==='cpk'&&e('div',{className:'s-grp'},e('div',{className:'s-lbl',style:{fontSize:10,whiteSpace:'nowrap'}},'Kg Tot'),
                 e('div',{className:`s-val${payMode==='kg'?' hi':''}`},allKg.toFixed(1)))
@@ -3155,7 +3183,7 @@ function SundriesPanel({job,setJob,isAdmin}){
         ),
         e('div',{style:{margin:'10px 0'}},
           e('div',{style:{fontSize:12,color:'var(--dim)',marginBottom:4}},'Amount ($)'),
-          e('input',{type:'number',style:inpStyle,placeholder:'0.00',step:'5',value:modal.amount,onChange:ev=>upd('amount',ev.target.value)})
+          e('input',{type:'number',onWheel:ev=>ev.currentTarget.blur(),style:inpStyle,placeholder:'0.00',step:'5',value:modal.amount,onChange:ev=>upd('amount',ev.target.value)})
         ),
         e('div',{style:{display:'flex',gap:8,marginTop:14}},
           e('button',{className:'btn-copy',style:{background:'var(--card2)',color:'var(--text)',flex:1},disabled:busy,onClick:close},'Cancel'),
@@ -3307,7 +3335,7 @@ function SummaryTab({job,setJob,role}){
 function RInp({k,draft,onSet,placeholder,step,prefix,suffix,hi}){
   return e('div',{className:'rate-inp-row'},
     prefix&&e('span',{className:'rate-prefix'},prefix),
-    e('input',{type:'number',className:`rate-inp${hi?' hi':''}`,value:draft[k]??'',placeholder,step:step||'0.05',
+    e('input',{type:'number',onWheel:ev=>ev.currentTarget.blur(),className:`rate-inp${hi?' hi':''}`,value:draft[k]??'',placeholder,step:step||'0.05',
       onChange:ev=>onSet(k,ev.target.value===''?0:parseFloat(ev.target.value)||0)}),
     suffix&&e('span',{style:{fontSize:11,color:'var(--muted)',marginLeft:4}},suffix)
   );
@@ -3453,7 +3481,7 @@ function AdminTab({job,setJob,onEdit,onDeleteFarm,onDeleteJob,onPublish}){
         const defR=role==='Wool Classer'?draft.classerPerRun:role==='Penner'?draft.pennerPerRun:role==='Presser'?draft.presserPerRun:draft.woolHandlerPerRun;
         return e('div',{key:id,className:'loading-row'},
           e('div',{className:'lr-l'},e(Av,{name:c.name,size:32}),e('div',null,e('div',{className:'lr-name'},c.name),e('div',{className:'lr-role'},role+' — default $'+defR+'/run'))),
-          e('div',{className:'lr-r'},e('span',{className:'lr-prefix'},'$'),e('input',{type:'number',className:'lr-inp',value:cur,placeholder:defR,step:'1',onChange:ev=>setOv(id,ev.target.value)}),e('span',{className:'lr-unit'},'/run'))
+          e('div',{className:'lr-r'},e('span',{className:'lr-prefix'},'$'),e('input',{type:'number',onWheel:ev=>ev.currentTarget.blur(),className:'lr-inp',value:cur,placeholder:defR,step:'1',onChange:ev=>setOv(id,ev.target.value)}),e('span',{className:'lr-unit'},'/run'))
         );
       })
     ),
@@ -3488,7 +3516,7 @@ function AdminTab({job,setJob,onEdit,onDeleteFarm,onDeleteJob,onPublish}){
           e('div',{className:'lr-l'},e(Av,{name:c.name,size:32}),e('div',null,e('div',{className:'lr-name'},c.name),e('div',{className:'lr-role'},getJobRole(job,id)||c.role))),
           e('div',{className:'lr-r',style:{gap:6}},
             e('span',{className:'lr-prefix'},'+$'),
-            e('input',{type:'number',className:'lr-inp',value:cur,placeholder:'0',step:'0.05',onChange:ev=>setLoad(id,ev.target.value)}),
+            e('input',{type:'number',onWheel:ev=>ev.currentTarget.blur(),className:'lr-inp',value:cur,placeholder:'0',step:'0.05',onChange:ev=>setLoad(id,ev.target.value)}),
             e('span',{className:'lr-unit'},'/head'),
             e('select',{style:{fontSize:11,padding:'3px 6px',borderRadius:6,border:'1px solid var(--border)',background:'var(--card)',color:'var(--text)',marginLeft:4},value:ltype,onChange:ev=>setDraft(p=>({...p,loadingType:{...(p.loadingType||{}),[id]:ev.target.value}}))},
               e('option',{value:'individual'},'Individual total'),
@@ -3524,13 +3552,13 @@ function AdminTab({job,setJob,onEdit,onDeleteFarm,onDeleteJob,onPublish}){
             ),
             ...(mode==='day'?[
               e('span',{key:'p',className:'lr-prefix'},'$'),
-              e('input',{key:'r',type:'number',className:'tr-inp',style:{width:58},value:dayRate,placeholder:'40',step:'5',onChange:ev=>setTR(id,ev.target.value)}),
+              e('input',{key:'r',type:'number',onWheel:ev=>ev.currentTarget.blur(),className:'tr-inp',style:{width:58},value:dayRate,placeholder:'40',step:'5',onChange:ev=>setTR(id,ev.target.value)}),
               e('span',{key:'u',className:'tr-unit'},'/day')
             ]:[
               e('span',{key:'p',className:'lr-prefix'},'$'),
-              e('input',{key:'r',type:'number',className:'tr-inp',style:{width:54},value:kmRate,placeholder:String(draft.travelKmDefault??0.85),step:'0.05',onChange:ev=>setDet(id,'travelKmRate',ev.target.value===''?null:parseFloat(ev.target.value)||0)}),
+              e('input',{key:'r',type:'number',onWheel:ev=>ev.currentTarget.blur(),className:'tr-inp',style:{width:54},value:kmRate,placeholder:String(draft.travelKmDefault??0.85),step:'0.05',onChange:ev=>setDet(id,'travelKmRate',ev.target.value===''?null:parseFloat(ev.target.value)||0)}),
               e('span',{key:'u',className:'tr-unit'},'/km'),
-              e('input',{key:'km',type:'number',className:'tr-inp',style:{width:54,marginLeft:6},value:km,placeholder:String(draft.shedKm??0),step:'1',onChange:ev=>setDet(id,'driverKm',ev.target.value===''?null:parseFloat(ev.target.value)||0)}),
+              e('input',{key:'km',type:'text',inputMode:'numeric',pattern:'[0-9]*',className:'tr-inp',style:{width:54,marginLeft:6},value:km,placeholder:String(draft.shedKm??0),step:'1',onChange:ev=>setDet(id,'driverKm',ev.target.value===''?null:parseFloat(ev.target.value)||0)}),
               e('span',{key:'kmu',className:'tr-unit'},'km')
             ])
           )
@@ -3548,7 +3576,7 @@ function AdminTab({job,setJob,onEdit,onDeleteFarm,onDeleteJob,onPublish}){
         e('div',{className:'lr-l'},e('div',null,e('div',{className:'lr-name'},'Rate per shearer'),e('div',{className:'lr-role'},job.evos==='BYO'?'Active on this job':'Inactive (EVOs supplied at shed)'))),
         e('div',{className:'lr-r',style:{gap:6}},
           e('span',{className:'lr-prefix'},'$'),
-          e('input',{type:'number',className:'tr-inp',style:{width:58},value:draft.standFeePerDay??0,placeholder:'0',step:'5',onChange:ev=>setDraft(d=>({...d,standFeePerDay:ev.target.value===''?0:parseFloat(ev.target.value)||0}))}),
+          e('input',{type:'number',onWheel:ev=>ev.currentTarget.blur(),className:'tr-inp',style:{width:58},value:draft.standFeePerDay??0,placeholder:'0',step:'5',onChange:ev=>setDraft(d=>({...d,standFeePerDay:ev.target.value===''?0:parseFloat(ev.target.value)||0}))}),
           e('span',{className:'tr-unit'},'/day')
         )
       ),
@@ -3590,7 +3618,7 @@ function AdminTab({job,setJob,onEdit,onDeleteFarm,onDeleteJob,onPublish}){
           e('div',{className:'lr-l'},e(Av,{name:c.name,size:32}),e('div',null,e('div',{className:'lr-name'},c.name),e('div',{className:'lr-role'},role+(days?' \u00b7 '+fmtD(days)+' day'+(days!==1?'s':''):'')))),
           e('div',{className:'lr-r',style:{gap:6}},
             e('span',{className:'lr-prefix'},'$'),
-            e('input',{type:'number',className:'tr-inp',style:{width:58},value:mr,placeholder:String(defaultMessRate(role)),step:'5',onChange:ev=>setDet(id,'messRate',ev.target.value===''?null:parseFloat(ev.target.value)||0)}),
+            e('input',{type:'number',onWheel:ev=>ev.currentTarget.blur(),className:'tr-inp',style:{width:58},value:mr,placeholder:String(defaultMessRate(role)),step:'5',onChange:ev=>setDet(id,'messRate',ev.target.value===''?null:parseFloat(ev.target.value)||0)}),
             e('span',{className:'tr-unit'},'/day')
           )
         );
@@ -3615,7 +3643,7 @@ function AdminTab({job,setJob,onEdit,onDeleteFarm,onDeleteJob,onPublish}){
             e('div',{className:'cd-field'},e('div',{className:'cd-lbl'},'Role'),e('select',{className:'cd-role-sel',value:role,onChange:ev=>setDet(id,'role',ev.target.value)},ROLES.map(r=>e('option',{key:r,value:r},r)))),
             e('div',{className:'cd-field'},
               e('div',{className:'cd-lbl'},'Tax Withholding %'),
-              e('input',{type:'number',className:'cd-inp',placeholder:'e.g. 19',value:taxRate,min:0,max:47,step:1,onChange:ev=>setDet(id,'taxRate',ev.target.value)}),
+              e('input',{type:'text',inputMode:'numeric',pattern:'[0-9]*',className:'cd-inp',placeholder:'e.g. 19',value:taxRate,min:0,max:47,step:1,onChange:ev=>setDet(id,'taxRate',ev.target.value)}),
               taxRate&&e('div',{className:'tax-note'},'Net ≈ '+(100-parseFloat(taxRate||0)).toFixed(0)+'% of gross')
             )
           )
@@ -3878,7 +3906,7 @@ function EditFarmModal({farm,onSave,onClose}){
     e('div',{className:'sheet-scroll'},
       e(FF,{label:'Farm Name'},e('input',{type:'text',className:'fi',defaultValue:farm.name,ref:rName})),
       e(FF,{label:'Address'},e('input',{type:'text',className:'fi',defaultValue:farm.address,ref:rAddr})),
-      e(FF,{label:'Stands'},e('input',{type:'number',className:'fi',defaultValue:farm.stands||4,min:1,ref:rStands,inputMode:'numeric'})),
+      e(FF,{label:'Stands'},e('input',{type:'text',className:'fi',defaultValue:farm.stands||4,min:1,ref:rStands,inputMode:'numeric'})),
       e(FF,{label:'Notes (optional)'},e('input',{type:'text',className:'fi',defaultValue:farm.notes||'',placeholder:'e.g. Gate code 1234',ref:rNotes}))
     ),
     e('div',{className:'sheet-footer'},
@@ -3970,6 +3998,18 @@ function JobDetailScreen({job,setJob,role,setRole,onBack,onSend,onBroadcast,onEd
     return {...prev,status:STATUS_SEQ[(STATUS_SEQ.indexOf(prev.status)+1)%STATUS_SEQ.length]};
   });
   const isDraft=job.status==='Draft';
+  /* v4.6.10 - whiteboard unread badge (per-device seen; opening the tab marks seen) */
+  const [wbCount,setWbCount]=useState(0);
+  useEffect(()=>{let alive=true;(async()=>{try{
+    const seen=(lsGet(LS_WB_SEEN)||{})[job.id]||new Date(Date.now()-48*3600*1000).toISOString();
+    const {data}=await sb.from('job_whiteboard').select('created_at').eq('contractor_slug',CONTRACTOR_SLUG).eq('job_id',job.id).gt('created_at',seen).limit(10);
+    if(alive&&data)setWbCount(data.length);
+  }catch(err){}})();return()=>{alive=false;};},[job.id]);
+  useEffect(()=>{
+    if(tab!=='whiteboard')return;
+    try{const m=lsGet(LS_WB_SEEN)||{};m[job.id]=new Date().toISOString();lsSet(LS_WB_SEEN,m);}catch(err){}
+    setWbCount(0);
+  },[tab,job.id]);
   const tabs=[['tallies','Tallies'],['progress','Progress'],['overview','Overview'],['whiteboard','📋'],['summary','Summary']];
   if(role==='admin')tabs.push(['admin','Admin']);
   const canSend=(role==='admin'||role==='shed_lead')&&job.status!=='Completed'&&job.status!=='Charged Out'&&!isDraft;
@@ -3995,7 +4035,8 @@ function JobDetailScreen({job,setJob,role,setRole,onBack,onSend,onBroadcast,onEd
         ),
         e('button',{className:'draft-publish-btn',onClick:onPublish},'🚀 Publish')
       ),
-      e('div',{className:'tabs'},tabs.map(([k,l])=>e('button',{key:k,className:`tab-btn${tab===k?' on':''}`,onClick:()=>setTab(k)},l))),
+      e('div',{className:'tabs'},tabs.map(([k,l])=>e('button',{key:k,className:`tab-btn${tab===k?' on':''}`,onClick:()=>setTab(k)},
+        (k==='whiteboard'&&wbCount>0)?e('span',null,l,e('span',{style:{marginLeft:4,background:'#e53e3e',color:'#fff',borderRadius:10,fontSize:'10px',padding:'1px 6px',fontWeight:800,verticalAlign:'middle'}},wbCount>9?'9+':wbCount)):l))),
       tab==='tallies'&&e(TallyTab,{job,setJob,role,viewDate,setViewDate}),
       tab==='progress'&&e(ProgressTab,{job}),
       tab==='overview'&&e(OverviewTab,{job,role,onSend,onBroadcast,canSend,onEditFarm:role==='admin'?()=>setShowEditFarm(true):null,isDraft,onPublish}),
@@ -4339,7 +4380,7 @@ function AddFarmForm({onAdd,onCancel}){
       e('div',{className:'inline-form-full'},e(IField,{lbl:'Address'},
         e('input',{type:'text',className:'if-inp',placeholder:'e.g. 12 Station Rd, Naracoorte SA 5271',value:addr,onChange:ev=>setAddr(ev.target.value)}))),
       e('div',null,e(IField,{lbl:'Stands'},
-        e('input',{type:'number',className:'if-inp',placeholder:'4',min:1,value:stands,onChange:ev=>setStands(ev.target.value)}))),
+        e('input',{type:'text',inputMode:'numeric',pattern:'[0-9]*',className:'if-inp',placeholder:'4',min:1,value:stands,onChange:ev=>setStands(ev.target.value)}))),
       e('div',null,e(IField,{lbl:'Notes (optional)'},
         e('input',{type:'text',className:'if-inp',placeholder:'e.g. Gate code 1234',value:notes,onChange:ev=>setNotes(ev.target.value)})))
     ),
@@ -4384,10 +4425,17 @@ function AddCrewForm({onAdd,onCancel}){
   );
 }
 
-function NewJobModal({onClose,onCreate,farmList,crewList,addFarm,addCrew}){
+function NewJobModal({onClose,onCreate,farmList,crewList,addFarm,addCrew,jobs}){
   /* Only UI-driving state — NO controlled text inputs */
   const [type,setType]=useState('Shearing');
   const [farmId,setFarmId]=useState('');
+  /* v4.6.10 - suggested job number, editable; suggestion tracks farm until user types */
+  const rJobNum=useRef(null);const jnTouched=useRef(false);
+  useEffect(()=>{
+    if(jnTouched.current||!rJobNum.current)return;
+    const f=(farmList||[]).find(x=>x.id===farmId);
+    rJobNum.current.value=suggestJobNumber(jobs,f?f.name:'');
+  },[farmId]);
   const [evos,setEvos]=useState('Supplied at shed');
   const [transport,setTransport]=useState(false);
   const [meals,setMeals]=useState('Not Supplied');
@@ -4436,9 +4484,16 @@ function NewJobModal({onClose,onCreate,farmList,crewList,addFarm,addCrew}){
       const c=crewList.find(cr=>cr.id===id);
       if(c)initialCrewDetails[id]={...((lsGet(LS_WORKER_DEFAULTS)||{})[id]||{}),role:c.role}; /* v4.6.6 - seed sticky worker settings */
     });
+    /* v4.6.10 - job number: editable, duplicate-guarded; random generator retired (live collisions at Kimba) */
+    const _farmNm=(((farmList||[]).find(f=>f.id===farmId))||{}).name||'';
+    const jnFinal=((((rJobNum.current&&rJobNum.current.value)||'').trim().toUpperCase())||suggestJobNumber(jobs,_farmNm));
+    if((jobs||[]).some(j=>String(j.jobNumber||'').trim().toUpperCase()===jnFinal)){
+      setSubmitErr('Job number '+jnFinal+' already exists — edit it to something unique.');
+      return;
+    }
     onCreate({
       id:'j'+Date.now(),
-      jobNumber:String(Math.floor(2104+Math.random()*50)).padStart(6,'0'),
+      jobNumber:jnFinal,
       farmId,type,
       notes_job:rNotes.current?.value||'',
       startDate,
@@ -4489,7 +4544,7 @@ function NewJobModal({onClose,onCreate,farmList,crewList,addFarm,addCrew}){
       e(FF,{label:'Start Date'},e('input',{type:'date',className:'fi',defaultValue:localToday(),ref:rStartDate})),
       e(FF,{label:'Days Allocated'},
         e('div',null,
-          e('input',{type:'number',className:'fi',placeholder:'e.g. 5',min:1,ref:rDays,inputMode:'numeric'}),
+          e('input',{type:'text',className:'fi',placeholder:'e.g. 5',ref:rDays,inputMode:'numeric',pattern:'[0-9]*'}),
           e('label',{style:{display:'flex',alignItems:'center',gap:8,marginTop:10,fontSize:13,cursor:'pointer',color:'var(--text)',fontWeight:500}},
             e('input',{type:'checkbox',checked:includeWeekends,onChange:ev=>setIncludeWeekends(ev.target.checked),style:{width:17,height:17,cursor:'pointer',accentColor:'#f59e0b'}}),
             e('span',null,'Include Sat/Sun')
@@ -4499,7 +4554,8 @@ function NewJobModal({onClose,onCreate,farmList,crewList,addFarm,addCrew}){
           )
         )
       ),
-      e(FF,{label:'Total Sheep'},e('input',{type:'number',className:'fi',placeholder:'e.g. 3000',min:1,ref:rSheep,inputMode:'numeric'})),
+      e(FF,{label:'Job Number'},e('input',{type:'text',className:'fi',ref:rJobNum,onInput:()=>{jnTouched.current=true;},placeholder:'auto e.g. NOTT-0001',maxLength:16,style:{textTransform:'uppercase'}})),
+      e(FF,{label:'Total Sheep'},e('input',{type:'text',className:'fi',placeholder:'e.g. 3000',ref:rSheep,inputMode:'numeric',pattern:'[0-9]*'})),
       e(FF,{label:'EVOs'},e('div',{className:'tog-row'},...['BYO','Supplied at shed'].map(o=>e('button',{key:o,className:`tog-opt${evos===o?' on':''}`,onClick:()=>setEvos(o)},o)))),
       e(FF,{label:'Transport'},e('div',{className:'tog-row'},...[['Yes',true],['No',false]].map(([l,v])=>e('button',{key:l,className:`tog-opt${transport===v?' on':''}`,onClick:()=>setTransport(v)},l)))),
       e(FF,{label:'Crutching Trailer'},e('div',{className:'tog-row'},...[['Provided',true],['Not Provided',false]].map(([l,v])=>e('button',{key:l,className:`tog-opt${crutchingTrailer===v?' on':''}`,onClick:()=>setCrutchingTrailer(v)},l)))),
@@ -4508,7 +4564,7 @@ function NewJobModal({onClose,onCreate,farmList,crewList,addFarm,addCrew}){
       e(FF,{label:'Notes'},e('textarea',{className:'fi',rows:3,placeholder:'e.g. Merino full CRT and wig.',ref:rNotes})),
       e(FF,{label:'Job PIN (optional)'},
         e('div',null,
-          e('input',{type:'number',className:'fi',placeholder:'4-6 digits, leave blank for no PIN',ref:rJobPin,maxLength:6,inputMode:'numeric'}),
+          e('input',{type:'text',className:'fi',placeholder:'4-6 digits, leave blank for no PIN',ref:rJobPin,maxLength:6,inputMode:'numeric'}),
           e('div',{style:{fontSize:'11px',color:'var(--muted)',marginTop:5}},'🔒 If set, crew must enter this PIN to open the job.')
         )
       ),
@@ -4629,7 +4685,7 @@ function EditJobScreen({job,onSave,onClose,farmList,addFarm,crewList,addCrew}){
         e('input',{type:'date',className:'fi',defaultValue:job.startDate,ref:rStartDate})),
       e(FF,{label:'Days Allocated'},
         e('div',null,
-          e('input',{type:'number',className:'fi',defaultValue:job.daysAllocated,min:1,ref:rDays,inputMode:'numeric'}),
+          e('input',{type:'text',className:'fi',defaultValue:job.daysAllocated,min:1,ref:rDays,inputMode:'numeric'}),
           e('label',{style:{display:'flex',alignItems:'center',gap:8,marginTop:10,fontSize:13,cursor:'pointer',color:'var(--text)',fontWeight:500}},
             e('input',{type:'checkbox',checked:includeWeekends,onChange:ev=>setIncludeWeekends(ev.target.checked),style:{width:17,height:17,cursor:'pointer',accentColor:'#f59e0b'}}),
             e('span',null,'Include Sat/Sun')
@@ -4640,7 +4696,7 @@ function EditJobScreen({job,onSave,onClose,farmList,addFarm,crewList,addCrew}){
         )
       ),
       e(FF,{label:'Total Sheep'},
-        e('input',{type:'number',className:'fi',defaultValue:job.totalSheep,min:1,ref:rSheep,inputMode:'numeric'})),
+        e('input',{type:'text',className:'fi',defaultValue:job.totalSheep,min:1,ref:rSheep,inputMode:'numeric'})),
       e(FF,{label:'EVOs'},
         e('div',{className:'tog-row'},...['BYO','Supplied at shed'].map(o=>
           e('button',{key:o,className:`tog-opt${evos===o?' on':''}`,onClick:()=>setEvos(o)},o)
@@ -4667,7 +4723,7 @@ function EditJobScreen({job,onSave,onClose,farmList,addFarm,crewList,addCrew}){
         e('textarea',{className:'fi',rows:3,defaultValue:job.notes_job||'',placeholder:'e.g. Merino full CRT and wig.',ref:rNotes})),
       e(FF,{label:'Job PIN (optional)'},
         e('div',null,
-          e('input',{type:'number',className:'fi',defaultValue:job.jobPin||'',placeholder:'4-6 digits, leave blank for no PIN',ref:rJobPin,inputMode:'numeric'}),
+          e('input',{type:'text',className:'fi',defaultValue:job.jobPin||'',placeholder:'4-6 digits, leave blank for no PIN',ref:rJobPin,inputMode:'numeric'}),
           e('div',{style:{fontSize:'11px',color:'var(--muted)',marginTop:5}},'🔒 If set, crew must enter this PIN to open the job.')
         )
       ),
@@ -4707,6 +4763,19 @@ function HomeScreen({jobs,role,setRole,onJob,onNew,onDatabase,onSchedule,contrac
   const [pwCopied,setPwCopied]=useState(false);
   const [pwCsv,setPwCsv]=useState(false);
   const [pwView,setPwView]=useState('pay'); /* v4.6.9 - pay | tallies */
+  /* v4.6.10 - whiteboard unread counts for job cards (per-device seen) */
+  const [wbCounts,setWbCounts]=useState({});
+  useEffect(()=>{let alive=true;(async()=>{try{
+    const since=new Date(Date.now()-14*24*3600*1000).toISOString();
+    const {data}=await sb.from('job_whiteboard').select('job_id,created_at').eq('contractor_slug',CONTRACTOR_SLUG).gt('created_at',since).limit(500);
+    if(!alive||!data)return;
+    const seen=lsGet(LS_WB_SEEN)||{};const cutoff=new Date(Date.now()-48*3600*1000).toISOString();
+    const m={};data.forEach(r=>{const s=seen[r.job_id]||cutoff;if(r.created_at>s)m[r.job_id]=(m[r.job_id]||0)+1;});
+    setWbCounts(m);
+  }catch(err){}})();return()=>{alive=false;};},[]);
+  /* v4.6.10 - crew identity (read_only devices): visibility filter, not authentication */
+  const [myId,setMyId]=useState(lsGet(LS_MY_ID)||null);
+  const [crewSearch,setCrewSearch]=useState('');
 
   const jobName=j=>{const f=gf(j.farmId);return j.jobName||(f?f.name:'Unknown');};
   const jobProg=j=>calcProg(j).pct;
@@ -4744,11 +4813,35 @@ function HomeScreen({jobs,role,setRole,onJob,onNew,onDatabase,onSchedule,contrac
       title,
       badge&&e('span',{style:{background:'var(--amber)',color:'#000',borderRadius:10,padding:'1px 7px',fontSize:11,fontWeight:700}},badge)
     ),
-    items.map(j=>e(JLC,{key:j.id,job:j,onClick:()=>onJob(j.id)}))
+    items.map(j=>e(JLC,{key:j.id,job:j,wb:wbCounts[j.id]||0,onClick:()=>onJob(j.id)}))
   );
 
   return e('div',null,
     e(TopBar,{role,setRole,onSchedule}),
+    /* v4.6.10 - CREW VIEW: read_only devices see only their own jobs. Lead/Admin via role switch unlock the full app. */
+    role==='read_only'&&e('div',{style:{position:'fixed',top:58,left:0,right:0,bottom:0,background:'var(--bg)',zIndex:150,overflowY:'auto',WebkitOverflowScrolling:'touch',padding:'16px'}},
+      !myId?e('div',null,
+        e('div',{style:{fontFamily:'var(--h)',fontSize:20,fontWeight:800,margin:'8px 0 4px'}},'Who are you?'),
+        e('div',{style:{color:'var(--muted)',fontSize:13,marginBottom:12}},'Pick your name to see your jobs. Leads and admins: use the role switch top-right.'),
+        e('input',{type:'text',placeholder:'Search name…',value:crewSearch,onChange:ev=>setCrewSearch(ev.target.value),className:'fi',style:{marginBottom:10}}),
+        (CREW||[]).filter(c=>!crewSearch.trim()||(c.name||'').toLowerCase().includes(crewSearch.trim().toLowerCase())).map(c=>
+          e('button',{key:c.id,onClick:()=>{lsSet(LS_MY_ID,c.id);setMyId(c.id);},style:{display:'block',width:'100%',textAlign:'left',background:'var(--card)',border:'1px solid var(--border)',borderRadius:10,padding:'12px 14px',color:'inherit',fontWeight:700,marginBottom:8,cursor:'pointer'}},c.name,e('span',{style:{color:'var(--muted)',fontWeight:400,marginLeft:8,fontSize:12}},c.role||''))
+        )
+      ):(function(){
+        const me=(CREW||[]).find(c=>c.id===myId);
+        const from=addDays(localToday(),-2),to=addDays(localToday(),7);
+        const mine=jobs.filter(j=>j.status!=='Draft'&&(j.crew||[]).includes(myId)&&jobInWindow(j,from,to))
+          .sort((a,b)=>String(a.startDate||'').localeCompare(String(b.startDate||'')));
+        return e('div',null,
+          e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',margin:'6px 0 2px'}},
+            e('div',{style:{fontFamily:'var(--h)',fontSize:20,fontWeight:800}},"G'day "+((me&&me.name.split(' ')[0])||'')),
+            e('button',{onClick:()=>{lsSet(LS_MY_ID,'');setMyId(null);},style:{background:'none',border:'none',color:'var(--muted)',fontSize:12,cursor:'pointer',textDecoration:'underline'}},'Not you?')),
+          e('div',{style:{color:'var(--muted)',fontSize:13,marginBottom:12}},'Your jobs — recent and the week ahead'),
+          mine.length===0?e('div',{style:{textAlign:'center',color:'var(--muted)',padding:'40px 0'}},'No jobs on your board for this window.'):
+          mine.map(j=>e(JLC,{key:j.id,job:j,wb:wbCounts[j.id]||0,onClick:()=>onJob(j.id),wb:wbCounts[j.id]||0}))
+        );
+      })()
+    ),
     e('div',{className:'screen'},
       e(WeekBanner,{jobs,contractorName}),
 
@@ -4813,7 +4906,7 @@ function HomeScreen({jobs,role,setRole,onJob,onNew,onDatabase,onSchedule,contrac
           archiveMonth&&e('div',null,
             e('div',{style:{padding:'8px 16px'},
               },e('button',{onClick:()=>setArchiveMonth(null),style:{background:'none',border:'none',color:'var(--amber)',fontWeight:700,fontSize:13,cursor:'pointer'}},'← All months')),
-            (archiveByMonth[archiveMonth]?.jobs||[]).map(j=>e(JLC,{key:j.id,job:j,onClick:()=>onJob(j.id)}))
+            (archiveByMonth[archiveMonth]?.jobs||[]).map(j=>e(JLC,{key:j.id,job:j,wb:wbCounts[j.id]||0,onClick:()=>onJob(j.id)}))
           )
         )
       ),
@@ -5046,13 +5139,26 @@ function DatabaseScreen({farmList,crewList,addFarm,addCrew,onClose,setFarmList,s
 ═══════════════════════ */
 function ScheduleScreen({jobs,role,setRole,onBack,onJob,onNew,onNewDraft}){
   const today=localToday();
+  /* v4.6.10 - crew view: read_only devices with an identity see only their own jobs */
+  const myIdSched=(role==='read_only')?(lsGet(LS_MY_ID)||null):null;
+  const visJobs=myIdSched?jobs.filter(j=>j.status!=='Draft'&&(j.crew||[]).includes(myIdSched)):jobs;
+  /* v4.6.10 - filter bar */
+  const [fStatus,setFStatus]=useState('All');
+  const [fType,setFType]=useState('All');
+  const [fFarm,setFFarm]=useState('');
+  const filtJobs=visJobs.filter(j=>{
+    if(fStatus!=='All'&&j.status!==fStatus)return false;
+    if(fType!=='All'&&j.type!==fType)return false;
+    if(fFarm.trim()){const q=fFarm.trim().toLowerCase();const f=gf(j.farmId);const nm=((j.jobName||'')+' '+(f?f.name:'')).toLowerCase();if(!nm.includes(q))return false;}
+    return true;
+  });
   const [view,setView]=useState('week'); /* 'week' | 'month' */
   const [anchor,setAnchor]=useState(today); /* anchor date → determines visible window */
 
   /* Build a map: date → list of jobs overlapping that date (with isStart flag) */
   const jobsByDate=(()=>{
     const map={};
-    jobs.forEach(job=>{
+    filtJobs.forEach(job=>{
       if(!job.startDate||!job.daysAllocated)return;
       const days=jobDates(job);
       days.forEach((d,idx)=>{
@@ -5072,7 +5178,7 @@ function ScheduleScreen({jobs,role,setRole,onBack,onJob,onNew,onNewDraft}){
   /* Range-wide jobs for stats strip */
   const rangeStart=view==='week'?mondayStr:monthCells[0].date;
   const rangeEnd=view==='week'?weekDays[6]:monthCells[monthCells.length-1].date;
-  const jobsInRange=jobs.filter(j=>{
+  const jobsInRange=filtJobs.filter(j=>{
     if(!j.startDate||!j.daysAllocated)return false;
     /* Use actual jobDates so includeWeekends=false jobs get the real end */
     const jds=jobDates(j);
@@ -5164,6 +5270,13 @@ function ScheduleScreen({jobs,role,setRole,onBack,onJob,onNew,onNewDraft}){
           e('button',{className:'sched-nav-btn',onClick:prev},'‹ Prev'),
           e('button',{className:'sched-nav-btn today',onClick:goToday},'Today'),
           e('button',{className:'sched-nav-btn',onClick:next},'Next ›')
+        ),
+        /* v4.6.10 - filter bar + month jump */
+        e('div',{style:{display:'flex',gap:8,flexWrap:'wrap',paddingTop:8,alignItems:'center'}},
+          e('select',{value:fStatus,onChange:ev=>setFStatus(ev.target.value),className:'pay-day-sel',style:{flex:'0 0 auto'}},['All','Active','Draft','Completed','Charged Out','Dispatched'].map(s=>e('option',{key:s,value:s},s==='All'?'All statuses':s))),
+          e('select',{value:fType,onChange:ev=>setFType(ev.target.value),className:'pay-day-sel',style:{flex:'0 0 auto'}},['All','Shearing','Crutching'].map(s=>e('option',{key:s,value:s},s==='All'?'All types':s))),
+          e('input',{type:'text',placeholder:'Search farm…',value:fFarm,onChange:ev=>setFFarm(ev.target.value),className:'fi',style:{flex:'1 1 120px',minWidth:110,padding:'8px 10px'}}),
+          view==='month'&&e('select',{value:ay+'-'+String(am).padStart(2,'0'),onChange:ev=>setAnchor(ev.target.value+'-01'),className:'pay-day-sel',style:{flex:'0 0 auto'}},(function(){const o=[];const n=new Date();n.setDate(1);n.setMonth(n.getMonth()-6);for(let i=0;i<19;i++){const v=n.getFullYear()+'-'+String(n.getMonth()+1).padStart(2,'0');o.push(e('option',{key:v,value:v},n.toLocaleDateString('en-AU',{month:'short',year:'numeric'})));n.setMonth(n.getMonth()+1);}return o;})())
         )
       ),
 
@@ -5182,6 +5295,18 @@ function ScheduleScreen({jobs,role,setRole,onBack,onJob,onNew,onNewDraft}){
         e('div',{className:'sl-item'},e('span',{className:'sl-dot ch'}),'Charged'),
         e('div',{className:'sl-item'},e('span',{className:'sl-dot di'}),'Dispatched')
       ),
+      /* v4.6.10 - drafts are date-independent */
+      role!=='read_only'&&(function(){
+        const dr=visJobs.filter(j=>j.status==='Draft');
+        if(!dr.length)return null;
+        return e('div',{style:{margin:'10px 12px 0',background:'var(--card)',border:'1px dashed var(--border)',borderRadius:10,padding:'10px 12px'}},
+          e('div',{style:{fontWeight:800,fontSize:13,marginBottom:4}},'◌ Drafts ('+dr.length+') — tap to open & publish'),
+          dr.map(j=>{const f=gf(j.farmId);
+            return e('div',{key:j.id,onClick:()=>onJob(j.id),style:{display:'flex',justifyContent:'space-between',padding:'8px 4px',borderTop:'1px solid var(--border)',cursor:'pointer',fontSize:13}},
+              e('span',null,(j.jobName||(f?f.name:'Unnamed'))+' · '+(j.type||'')),
+              e('span',{style:{color:'var(--muted)'}},fmtDate(j.startDate)));})
+        );
+      })(),
 
       /* WEEK VIEW */
       view==='week'&&e('div',{className:'week-board'},
@@ -6010,7 +6135,7 @@ function App(){
     showBroadcast&&selJob&&e(BroadcastModal,{job:selJob,onClose:()=>setShowBroadcast(false),farmList,crewList}),
     previewId&&selJob&&e(JobCardView,{job:selJob,crewId:previewId,onClose:()=>setPreviewId(null),gfl,gcl}),
     showDatabase&&e(DatabaseScreen,{farmList,crewList,addFarm,addCrew,setFarmList,setCrewList,onClose:()=>setShowDatabase(false)}),
-    showNew&&e('div',{style:{position:'fixed',inset:0,background:'var(--bg)',zIndex:200,overflowY:'auto',WebkitOverflowScrolling:'touch'}},e(NewJobModal,{onClose:()=>setShowNew(false),onCreate:doCreate,farmList,crewList,addFarm,addCrew})),
+    showNew&&e('div',{style:{position:'fixed',inset:0,background:'var(--bg)',zIndex:200,overflowY:'auto',WebkitOverflowScrolling:'touch'}},e(NewJobModal,{onClose:()=>setShowNew(false),onCreate:doCreate,farmList,crewList,addFarm,addCrew,jobs})),
     showEdit&&selJob&&e('div',{style:{position:'fixed',inset:0,background:'var(--bg)',zIndex:200,overflowY:'auto',WebkitOverflowScrolling:'touch'}},e(EditJobScreen,{job:selJob,onClose:()=>setShowEdit(false),onSave:async updated=>{setJobs(p=>p.map(j=>j.id===updated.id?updated:j));await dbSaveJob(updated).catch(()=>{});setShowEdit(false);},farmList,addFarm,crewList,addCrew})),
     /* Job PIN gate */
     jobPinPending&&e('div',{className:'pin-modal'},
@@ -6041,3 +6166,4 @@ if('serviceWorker' in navigator){
 </script>
 </body>
 </html>
+
