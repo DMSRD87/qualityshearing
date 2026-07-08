@@ -525,15 +525,17 @@ const LS_LAST_RATES='mg_last_rates_'+CONTRACTOR_SLUG;
 const LS_WORKER_DEFAULTS='mg_worker_defaults_'+CONTRACTOR_SLUG;
 const LS_MY_ID='mg_my_id_'+CONTRACTOR_SLUG; /* v4.6.10 - crew identity per device (visibility filter, not auth) */
 const LS_WB_SEEN='mg_wb_seen_'+CONTRACTOR_SLUG; /* v4.6.10 - per-device whiteboard last-seen map {jobId:iso} */ /* v4.6.6 - per-worker sticky settings (taxRate/messRate/travel) seeded when a worker joins a job */
+const LS_FARMER_ID='mg_farmer_id_'+CONTRACTOR_SLUG; /* v4.6.11 - farmer device farm binding (PIN-gated visibility, not auth) */
 const LS_ROLE_TS='mg_role_ts_'+CONTRACTOR_SLUG;
 const LS_DATA_VERSION='mg_data_version_'+CONTRACTOR_SLUG; /* tracks DATA_VERSION for one-time cache wipe */
 const LS_TALLY_QUEUE='mg_tally_queue_'+CONTRACTOR_SLUG; /* per-cell offline queue, separate from whole-job queue */
 const LS_TALLY_DEAD='mg_tally_dead_'+CONTRACTOR_SLUG; /* v4.6.3g — quarantined cells (permanent rejection). Replayed once on boot in case the server-side blocker (e.g. missing kind constraint) was since fixed. */
 const LS_TALLY_META_QUEUE='mg_tally_meta_queue_'+CONTRACTOR_SLUG; /* v4.6.4 — offline/failed mob metadata (type/desc) updates to existing count cells; flushed alongside the tally queue. */
 const ROLE_TIMEOUT_HOURS=12; /* auto-reset after 12h inactivity */
-const APP_VERSION='v4.6.10';
+const APP_VERSION='v4.6.11';
 const SUPER_RATE=0.12; /* SG rate, 12% from 1 Jul 2025. One-line change if legislated rate moves. */
-/* v4.6.10 FIELD FIXES + CREW VIEW (7 Jul 2026, Kimba field report): (1) INPUT DRIFT KILLED - proven live (Kimba Nottles totalSheep saved 319 for entered 320; desktop mouse-wheel over focused number inputs changes values). Integer fields (tally counts, sheep, days, km, tax %, stands, PINs) now type='text' inputMode='numeric' (also fixes PIN maxLength ignored by number inputs). Decimal money fields keep type='number' but blur on wheel. (2) JOB NUMBERS format A - suggestJobNumber(): FARM 4-letter prefix + per-contractor sequence (NOTT-0042); replaces the RANDOM generator that collided live (Kimba 002113 twice, 002115 twice). Editable at creation with duplicate guard; legacy numbers untouched and ignored by the sequence so the first new job is PREF-0001. (3) SCHEDULE - natural page scroll (fixed-height nested scroll clipped week columns and died in in-app webviews e.g. Facebook browser); date-independent Drafts panel (two Kimba drafts sat invisible in w/c 22 Jun); filter bar (status/type/farm) + month jump. (4) CREW VIEW - read_only devices pick 'Who are you?' once (LS_MY_ID; per-device visibility filter, NOT authentication - real logins are v5); they see ONLY their own jobs, rolling today-2..today+7, on Home AND Schedule. Lead/Admin unchanged. (5) WHITEBOARD BADGES - red unread counts on job-view tab and job cards; per-device LS_WB_SEEN; fresh devices treat only last-48h posts as new; opening the tab marks seen. v4.6.9 TALLY TRENDS + PAYDAY SOURCE (6 Jul 2026): (1) Pay Week sheet gains a Pay Report / Tally Trends view toggle. Trends = last 4 pay weeks per worker, newest first, HEAD COUNTS ONLY (no dollars): shorn and crutched always separate, days worked and head/day shown so form is comparable across different-length weeks; shearers ordered by 4-week volume, staff (runs + bales + days) alphabetical. Contractor use: balancing sheep allocation and watching form. (2) Pay Week sheet now derives payday/frequency from the LATEST non-draft job's rates (falls back to the device template, then Friday/weekly) - fixes stale-device-template periods (screenshot 6 Jul showed Thu-Wed on a Friday-pays contractor because the device template predated the picker fix). Copy CSV hidden on trends view; Copy copies whichever view is showing. v4.6.8 PER-SHEARER STAND FEE (6 Jul 2026): mixed sheds - on a BYO job only shearers who brought their own machine get the fee (e.g. 4 shearers, 2 paid). crewDetails[id].standFee===false excludes a shearer; DEFAULT is eligible (zero-config when the whole team brings own). Admin Stand Fee section gains a per-shearer Yes/No list when EVOs = BYO. Applied consistently in generateSummary, calcPeriodStats (header parity), generateFarmRecord (farmer charged only for actual own-machine shearer-days), and the pay week report. 'standFee' added to sticky worker settings - owning a machine is a worker attribute, set once and carried to future jobs. v4.6.7 PAY WEEK REPORT (6 Jul 2026): cross-job per-worker pay-week report (payroll officer's 'massive one'). Home screen (admin) 'Pay Week' button opens a sheet: period nav (payday/frequency from LS_LAST_RATES; 'shed' frequency falls back to weekly), per-worker date-by-shed earning lines (piecework per date x type x effective rate incl overrides + individual loadings, team loading line, staff per-day incl presser threshold/cpk day rules with union-of-dates per v4.6.3d.1b, travel, stand fees), per-worker GROSS/Superable/Super/Tax/Mess/Sundries/NET, WEEK TOTALS, and an embedded cross-check reconciling each job's slice against calcPeriodStats (jobs with team loadings are skipped in the check - known team-loading divergence in the header estimator). Copy / Copy CSV / Print. CSV shape (worker,role,date,shed,item,units,rate,amount,superable + per-worker totals rows) = the future Xero/MYOB payload. FARMER BILLING UNCHANGED - farm records stay strictly per job. ADDITIVE ONLY: generateSummary/calcPeriodStats untouched. v4.6.6 PAYROLL QoL (6 Jul 2026, pilot contractor payroll officer wish list): (1) STICKY WORKER SETTINGS - LS_WORKER_DEFAULTS persists per-worker taxRate/messRate/travelMode/driverKm/travelKmRate whenever Admin saves rates; seeded into crewDetails when the worker joins a NEW job or is added to an existing job. Existing jobs untouched - historical pay cannot change. Per-device localStorage (same caveat as LS_LAST_RATES); durable home = contractor_settings in the settings redesign. (2) PAYDAY OFF-BY-ONE FIX - Admin picker listed days Monday-first (Friday=4) but period math uses JS getDay() (Friday=5); picking Friday produced Thu-Wed periods. Fix: picker option values map labels to JS day numbers ((i+1)%7). MIGRATION: contractors who worked around by picking the next day's label (one contractor picked 'Saturday') already store the JS-correct value - their periods are UNCHANGED and the picker now displays the true day; anyone who had picked the real label sees it render one day back and must re-pick once. Default payDayOfWeek now 5 = Friday. (3) FORTNIGHTLY period fix - base.end+(len-7) concatenated a number onto a date string producing invalid dates; now addDays twice. Weekly path untouched. Fortnight anchors to the current week. (4) STAND FEE SUPER TOGGLE - rates.standFeeSuper, DEFAULT TRUE per pilot contractor payroll officer written instruction (stand fee IS included in super; meal deductions never reduce super - already enforced). Toggle to No treats it as equipment hire (excluded). Farmer-side charge, gross, tax, NET unaffected either way. v4.6.5 SUPER + STAND FEE (6 Jul 2026): Pay summary computes Super Guarantee per person and in CONTRACTOR TOTALS. SUPERABLE = piecework earnings (incl individual loadings baked into rate) + team loadings + shed staff runs/bales/kg earnings. NOT SUPERABLE: travel (day or km - reimbursement) and stand fees (equipment hire). Deductions (tax/mess/sundries) NEVER reduce the super base - super is SUPER_RATE x superable GROSS. Super is the employer's obligation ON TOP: it does not change gross, tax, deductions, NET, JOB TOTAL or the math check. STAND FEE: rates.standFeePerDay (Admin tab; rides LS_LAST_RATES carry-forward) x tallied days per shearer/crutcher, ONLY when job.evos==='BYO'; itemised per person, own CONTRACTOR TOTALS line + math-check component, shown on farmer record as a charge, included in calcPeriodStats so header Est. Payroll stays in parity with printed gross. v4.6.4 STRUCTURAL (16 Jun, after Knights crutching->shearing flip). ROOT CAUSE of the recurring job-type-flip class: mob type/desc lived ONLY in jobs.data (no authoritative store); on a flaky-signal device per-cell writes reached tally_entries but the blob structure desynced, then self-heal rebuilt the missing mobs from cells and INVENTED type=Shearing/desc=blank because it had no metadata to read - silently tripling crutching pay ($1.65->$4.80/head). hydrateTallies corrected counts from the table but never type/desc, so corruption persisted and rode the next save up. FIX (mirrors how counts are already safe): (a) tally_entries gains mob_type/mob_desc; count writes carry them; (b) hydrateTallies is now AUTHORITATIVE for type/desc - a corrupted blob from any device is overwritten from row metadata on load, exactly as counts are; (c) self-heal reconstructs synthesized mobs faithfully from row metadata instead of hardcoded Shearing/blank (legacy-null rows fall back to job type and set _synth to flag the guess); (d) post-hoc type/desc edits back-propagate to existing cells (updateMobMeta + LS_TALLY_META_QUEUE + flushTallyMetaQueue) so an edit after counts exist isn't reverted on next hydrate. PREREQUISITE: run v4.6.4-migration.sql FIRST (two nullable columns + backfill from current/corrected blobs), THEN deploy. Legacy null-metadata rows behave as pre-v4.6.4 until the next entry/edit repopulates them; no regression. v4.6.3g RESILIENCE (16 Jun, from Darby/Chloe stuck-queue incident): (1) periodic 20s background drain — browser 'online' event doesn't fire when a flaky connection silently recovers, so queued cells could sit unflushed until manual reopen; timer retries whenever online+fresh+queue non-empty (no-op when empty). (2) poison-pill quarantine — flushTallyQueue now separates PERMANENT rejections (constraint/validation, will never succeed) from TRANSIENT (timeout/network); permanent rows move to LS_TALLY_DEAD instead of pinning the queue + banner forever. (3) dead-letter replay on boot — quarantined cells get one retry per launch, so a since-fixed server blocker (e.g. the 'mess' kind constraint widened 15 Jun) self-recovers without re-entry. (4) sundries load resilient to missing table — sets a session flag on first 'table not found' and stops re-querying, ending per-load error spam when the migration hasn't run. NOTE: the tally_entries kind_check constraint MUST include every kind the build writes (count,shed_runs,bales,bale_kg,travel,mess) and sundries_entries MUST exist BEFORE deploy — both are hard prerequisites. v4.6.3f FEATURES (builds on v4.6.3e — deploy ONLY after 3e soak is clean): (1) MESS RATE — per-person $/day deduction; 3-state per-day toggle on Tally tab (Off ◯ / Half ½ / Full ●) stored as tally_entries kind='mess' multiplier 0/0.5/1 with run_id=mob_id=''; rate = crewDetails[id].messRate override else role default $35 shearer/crutcher $10 staff (resolveMessRate); Admin tab Mess Rate section; pay summary line 'Mess: N full + M half x $R/day = -$T'. (2) SUNDRIES — itemised per-person deductions in NEW sundries_entries table (run schema SQL BEFORE deploying this file); lead adds, admin edits/deletes via Summary-tab panel; pay summary itemises with subtotal. Both deduct POST-tax: GROSS → tax → mess → sundries → NET TOTAL. CONTRACTOR TOTALS gains conditional deduction lines + NET JOB TOTAL; math check extends through net when deductions exist. REGRESSION GUARANTEE: jobs with zero mess + zero sundries produce byte-identical pay output to v4.6.3e. calcPeriodStats now returns {shorn,totalEarn,messDeduction,sundriesDeduction,netEarn} — totalEarn stays gross. v4.6.3e SAFETY RELEASE (6 Jun 2026, after Knights/Bywong double incident): (1) delRun/delMob cascade deletes now scoped to cell_date=viewDate — run_id-only delete destroyed same-run cells on OTHER dates; (2) dbLoad merge now consults LS_TALLY_QUEUE as well as LS_QUEUE — a day of offline cells + silently-failed flush previously let the server's empty hydration overwrite the local day ("worked all day, lost it at night"); because flushTallyQueue retains only failed rows, post-flush queue state doubles as the flush-success gate; (3) jobDates guarantees today (Active jobs) and every date with existing data appear in the strip regardless of includeWeekends — weekend work was silently landing on the last visible weekday via defDate fallback; (4) new tappable banner when online+fresh but queued entries remain ("N entries not yet on server — tap to retry. Don't clear app data") — closes the silent state that drove users to clear site data and destroy the only copy. NO pay calc changes. v4.6.3d.1b CALC HOTFIX: Presser pay calc was iterating only shedTallies dates, which meant days where the presser pressed bales (or kg) WITHOUT entering shed_runs were skipped entirely from pay calculation. Real money bug — e.g. Whitey on Burragundy had 19 bales on Jun 2 with no shed_runs that day, calc never visited Jun 2 → $269.80 missing from his pay. Fix iterates union of shedTallies, baleTallies, baleWeights date keys so all days with any presser activity are evaluated. Applied to both calcPeriodStats (totals) and generateSummary (pay breakdown). All-runs and all-bales cases unchanged. v4.6.3d.1a hotfix: Presser hybrid-day pay summary display fix — when a presser had BOTH per-bale days AND per-run days in the same job, the displayed breakdown used totalRuns/totalBales summed across all days, producing math that didn't add up (e.g. "23 bales @ $14.20 = $213" when only 15 bales were actually paid per-bale and the other 8 were on a per-run day). Total earn was always correct; only the readable breakdown was wrong. Fix tracks paidRuns/paidBales separately so the line items match the math. All-bale and all-run cases unchanged. v4.6.3d.1 hotfix: (1) Map link handles goo.gl/Maps URLs as addresses by detecting http(s):// and passing through instead of wrapping in maps.google.com search query; (2) Defensive guard on job.baleWeights access in cpk-mode pay calc (was a crash hazard on old jobs without the field if pressMode was toggled to cpk); (3) Guard all 7 unguarded job.totalSheep.toLocaleString() crash sites with ||0 (was a render crash on any job with undefined totalSheep). v4.6.3d adds per-contractor boot-time access password (hash stored in contractor_settings.access_password_hash, verified flag in localStorage = hash itself for auto-invalidation on rotation, master PIN bypass for SRD support, null hash = no gate for graceful rollout). v4.6.3c-final adds mode badges next to crew names in pay summary + grand-total math check line in CONTRACTOR TOTALS. v4.6.3c adds c/kg presser mode (pressMode toggle + kg tracking via new tally_entries kind='bale_kg') and c/km travel mode (per-person day vs km, with override) — additive. v4.6.3b adds cascade delete from tally_entries on delRun/delMob — fixes zombie runs resurrecting via self-heal (Knights, 28 May). v4.6.3a added MOB TOTALS section to pay summary - additive only, no data model change from v4.6.3. v4.6.3 closes the data-loss
+/* v4.6.11 BOOK PHOTO + FARMER ACCESS (8 Jul 2026): (1) END-OF-DAY BOOK PHOTO - one slot per job per day, bottom of Tally tab (lead/admin take; lead/admin/farmer view). Camera -> client-side canvas compression (max 1600px JPEG q0.72) -> Supabase Storage bucket 'book-photos', path slug/jobId/date.jpg + upsert row in book_photos (timestamped, natural key slug/job/date). Re-take replaces. REQUIRES SIGNAL by design - honest hold on device, NO offline queue (multi-MB localStorage queueing is the fragile pattern v5 kills). (2) FARMER ACCESS - farm blob gains farmerName/farmerPhone/farmerPinHash (SHA-256(pin+slug), same pattern as role PINs; farms table schema unchanged). New device role 'farmer': role switch -> pick farm (only farms with a farmer PIN set) -> PIN pad -> LS_FARMER_ID binds device. Farmer sees ONLY their farm's jobs on Home, full per-shearer/per-run tallies (farmers who count out manually cross-check the board - that is the point), day notes read-only, whiteboard read+post (author defaults to Farmer), Summary non-admin view, book photo. NEVER: rates, pay, super, other farms, tally editing, Schedule, Admin. Farmer role persists across the 12h timeout (read-only scope, less privilege than lead). PIN-gated visibility filter, NOT real auth - v5. (3) Farmer SMS modal pre-fills from farm record. (4) Job hero shows farmer emergency tel: contact for lead/admin. */
+/* v4.6.10 FIELD FIXES + CREW VIEW (7 Jul 2026, Kimba field report): (1) INPUT DRIFT KILLED - proven live (Kimba Nottles totalSheep saved 319 for entered 320; desktop mouse-wheel over focused number inputs changes values). Integer fields (tally counts, sheep, days, km, tax %, stands, PINs) now type='text' inputMode='numeric' (also fixes PIN maxLength ignored by number inputs). Decimal money fields keep type='number' but blur on wheel. (2) JOB NUMBERS format A - suggestJobNumber(): FARM 4-letter prefix + per-contractor sequence (NOTT-0042); replaces the RANDOM generator that collided live (Kimba 002113 twice, 002115 twice). Editable at creation with duplicate guard; legacy numbers untouched and ignored by the sequence so the first new job is PREF-0001. (3) SCHEDULE - natural page scroll (fixed-height nested scroll clipped week columns and died in in-app webviews e.g. Facebook browser); date-independent Drafts panel (two Kimba drafts sat invisible in w/c 22 Jun); filter bar (status/type/farm) + month jump. (4) CREW VIEW - read_only devices pick 'Who are you?' once (LS_MY_ID; per-device visibility filter, NOT authentication - real logins are v5); they see ONLY their own jobs, rolling today-2..today+7, on Home AND Schedule. Lead/Admin unchanged. (5) WHITEBOARD BADGES - red unread counts on job-view tab and job cards; per-device LS_WB_SEEN; fresh devices treat only last-48h posts as new; opening the tab marks seen. v4.6.9 TALLY TRENDS + PAYDAY SOURCE (6 Jul 2026): (1) Pay Week sheet gains a Pay Report / Tally Trends view toggle. Trends = last 4 pay weeks per worker, newest first, HEAD COUNTS ONLY (no dollars): shorn and crutched always separate, days worked and head/day shown so form is comparable across different-length weeks; shearers ordered by 4-week volume, staff (runs + bales + days) alphabetical. Contractor use: balancing sheep allocation and watching form. (2) Pay Week sheet now derives payday/frequency from the LATEST non-draft job's rates (falls back to the device template, then Friday/weekly) - fixes stale-device-template periods (screenshot 6 Jul showed Thu-Wed on a Friday-pays contractor because the device template predated the picker fix). Copy CSV hidden on trends view; Copy copies whichever view is showing. v4.6.8 PER-SHEARER STAND FEE (6 Jul 2026): mixed sheds - on a BYO job only shearers who brought their own machine get the fee (e.g. 4 shearers, 2 paid). crewDetails[id].standFee===false excludes a shearer; DEFAULT is eligible (zero-config when the whole team brings own). Admin Stand Fee section gains a per-shearer Yes/No list when EVOs = BYO. Applied consistently in generateSummary, calcPeriodStats (header parity), generateFarmRecord (farmer charged only for actual own-machine shearer-days), and the pay week report. 'standFee' added to sticky worker settings - owning a machine is a worker attribute, set once and carried to future jobs. v4.6.7 PAY WEEK REPORT (6 Jul 2026): cross-job per-worker pay-week report (payroll officer's 'massive one'). Home screen (admin) 'Pay Week' button opens a sheet: period nav (payday/frequency from LS_LAST_RATES; 'shed' frequency falls back to weekly), per-worker date-by-shed earning lines (piecework per date x type x effective rate incl overrides + individual loadings, team loading line, staff per-day incl presser threshold/cpk day rules with union-of-dates per v4.6.3d.1b, travel, stand fees), per-worker GROSS/Superable/Super/Tax/Mess/Sundries/NET, WEEK TOTALS, and an embedded cross-check reconciling each job's slice against calcPeriodStats (jobs with team loadings are skipped in the check - known team-loading divergence in the header estimator). Copy / Copy CSV / Print. CSV shape (worker,role,date,shed,item,units,rate,amount,superable + per-worker totals rows) = the future Xero/MYOB payload. FARMER BILLING UNCHANGED - farm records stay strictly per job. ADDITIVE ONLY: generateSummary/calcPeriodStats untouched. v4.6.6 PAYROLL QoL (6 Jul 2026, pilot contractor payroll officer wish list): (1) STICKY WORKER SETTINGS - LS_WORKER_DEFAULTS persists per-worker taxRate/messRate/travelMode/driverKm/travelKmRate whenever Admin saves rates; seeded into crewDetails when the worker joins a NEW job or is added to an existing job. Existing jobs untouched - historical pay cannot change. Per-device localStorage (same caveat as LS_LAST_RATES); durable home = contractor_settings in the settings redesign. (2) PAYDAY OFF-BY-ONE FIX - Admin picker listed days Monday-first (Friday=4) but period math uses JS getDay() (Friday=5); picking Friday produced Thu-Wed periods. Fix: picker option values map labels to JS day numbers ((i+1)%7). MIGRATION: contractors who worked around by picking the next day's label (one contractor picked 'Saturday') already store the JS-correct value - their periods are UNCHANGED and the picker now displays the true day; anyone who had picked the real label sees it render one day back and must re-pick once. Default payDayOfWeek now 5 = Friday. (3) FORTNIGHTLY period fix - base.end+(len-7) concatenated a number onto a date string producing invalid dates; now addDays twice. Weekly path untouched. Fortnight anchors to the current week. (4) STAND FEE SUPER TOGGLE - rates.standFeeSuper, DEFAULT TRUE per pilot contractor payroll officer written instruction (stand fee IS included in super; meal deductions never reduce super - already enforced). Toggle to No treats it as equipment hire (excluded). Farmer-side charge, gross, tax, NET unaffected either way. v4.6.5 SUPER + STAND FEE (6 Jul 2026): Pay summary computes Super Guarantee per person and in CONTRACTOR TOTALS. SUPERABLE = piecework earnings (incl individual loadings baked into rate) + team loadings + shed staff runs/bales/kg earnings. NOT SUPERABLE: travel (day or km - reimbursement) and stand fees (equipment hire). Deductions (tax/mess/sundries) NEVER reduce the super base - super is SUPER_RATE x superable GROSS. Super is the employer's obligation ON TOP: it does not change gross, tax, deductions, NET, JOB TOTAL or the math check. STAND FEE: rates.standFeePerDay (Admin tab; rides LS_LAST_RATES carry-forward) x tallied days per shearer/crutcher, ONLY when job.evos==='BYO'; itemised per person, own CONTRACTOR TOTALS line + math-check component, shown on farmer record as a charge, included in calcPeriodStats so header Est. Payroll stays in parity with printed gross. v4.6.4 STRUCTURAL (16 Jun, after a pilot contractor crutching->shearing flip). ROOT CAUSE of the recurring job-type-flip class: mob type/desc lived ONLY in jobs.data (no authoritative store); on a flaky-signal device per-cell writes reached tally_entries but the blob structure desynced, then self-heal rebuilt the missing mobs from cells and INVENTED type=Shearing/desc=blank because it had no metadata to read - silently tripling crutching pay ($1.65->$4.80/head). hydrateTallies corrected counts from the table but never type/desc, so corruption persisted and rode the next save up. FIX (mirrors how counts are already safe): (a) tally_entries gains mob_type/mob_desc; count writes carry them; (b) hydrateTallies is now AUTHORITATIVE for type/desc - a corrupted blob from any device is overwritten from row metadata on load, exactly as counts are; (c) self-heal reconstructs synthesized mobs faithfully from row metadata instead of hardcoded Shearing/blank (legacy-null rows fall back to job type and set _synth to flag the guess); (d) post-hoc type/desc edits back-propagate to existing cells (updateMobMeta + LS_TALLY_META_QUEUE + flushTallyMetaQueue) so an edit after counts exist isn't reverted on next hydrate. PREREQUISITE: run v4.6.4-migration.sql FIRST (two nullable columns + backfill from current/corrected blobs), THEN deploy. Legacy null-metadata rows behave as pre-v4.6.4 until the next entry/edit repopulates them; no regression. v4.6.3g RESILIENCE (16 Jun, from Darby/Chloe stuck-queue incident): (1) periodic 20s background drain — browser 'online' event doesn't fire when a flaky connection silently recovers, so queued cells could sit unflushed until manual reopen; timer retries whenever online+fresh+queue non-empty (no-op when empty). (2) poison-pill quarantine — flushTallyQueue now separates PERMANENT rejections (constraint/validation, will never succeed) from TRANSIENT (timeout/network); permanent rows move to LS_TALLY_DEAD instead of pinning the queue + banner forever. (3) dead-letter replay on boot — quarantined cells get one retry per launch, so a since-fixed server blocker (e.g. the 'mess' kind constraint widened 15 Jun) self-recovers without re-entry. (4) sundries load resilient to missing table — sets a session flag on first 'table not found' and stops re-querying, ending per-load error spam when the migration hasn't run. NOTE: the tally_entries kind_check constraint MUST include every kind the build writes (count,shed_runs,bales,bale_kg,travel,mess) and sundries_entries MUST exist BEFORE deploy — both are hard prerequisites. v4.6.3f FEATURES (builds on v4.6.3e — deploy ONLY after 3e soak is clean): (1) MESS RATE — per-person $/day deduction; 3-state per-day toggle on Tally tab (Off ◯ / Half ½ / Full ●) stored as tally_entries kind='mess' multiplier 0/0.5/1 with run_id=mob_id=''; rate = crewDetails[id].messRate override else role default $35 shearer/crutcher $10 staff (resolveMessRate); Admin tab Mess Rate section; pay summary line 'Mess: N full + M half x $R/day = -$T'. (2) SUNDRIES — itemised per-person deductions in NEW sundries_entries table (run schema SQL BEFORE deploying this file); lead adds, admin edits/deletes via Summary-tab panel; pay summary itemises with subtotal. Both deduct POST-tax: GROSS → tax → mess → sundries → NET TOTAL. CONTRACTOR TOTALS gains conditional deduction lines + NET JOB TOTAL; math check extends through net when deductions exist. REGRESSION GUARANTEE: jobs with zero mess + zero sundries produce byte-identical pay output to v4.6.3e. calcPeriodStats now returns {shorn,totalEarn,messDeduction,sundriesDeduction,netEarn} — totalEarn stays gross. v4.6.3e SAFETY RELEASE (6 Jun 2026, after a pilot contractor double incident): (1) delRun/delMob cascade deletes now scoped to cell_date=viewDate — run_id-only delete destroyed same-run cells on OTHER dates; (2) dbLoad merge now consults LS_TALLY_QUEUE as well as LS_QUEUE — a day of offline cells + silently-failed flush previously let the server's empty hydration overwrite the local day ("worked all day, lost it at night"); because flushTallyQueue retains only failed rows, post-flush queue state doubles as the flush-success gate; (3) jobDates guarantees today (Active jobs) and every date with existing data appear in the strip regardless of includeWeekends — weekend work was silently landing on the last visible weekday via defDate fallback; (4) new tappable banner when online+fresh but queued entries remain ("N entries not yet on server — tap to retry. Don't clear app data") — closes the silent state that drove users to clear site data and destroy the only copy. NO pay calc changes. v4.6.3d.1b CALC HOTFIX: Presser pay calc was iterating only shedTallies dates, which meant days where the presser pressed bales (or kg) WITHOUT entering shed_runs were skipped entirely from pay calculation. Real money bug — e.g. Whitey on Burragundy had 19 bales on Jun 2 with no shed_runs that day, calc never visited Jun 2 → $269.80 missing from his pay. Fix iterates union of shedTallies, baleTallies, baleWeights date keys so all days with any presser activity are evaluated. Applied to both calcPeriodStats (totals) and generateSummary (pay breakdown). All-runs and all-bales cases unchanged. v4.6.3d.1a hotfix: Presser hybrid-day pay summary display fix — when a presser had BOTH per-bale days AND per-run days in the same job, the displayed breakdown used totalRuns/totalBales summed across all days, producing math that didn't add up (e.g. "23 bales @ $14.20 = $213" when only 15 bales were actually paid per-bale and the other 8 were on a per-run day). Total earn was always correct; only the readable breakdown was wrong. Fix tracks paidRuns/paidBales separately so the line items match the math. All-bale and all-run cases unchanged. v4.6.3d.1 hotfix: (1) Map link handles goo.gl/Maps URLs as addresses by detecting http(s):// and passing through instead of wrapping in maps.google.com search query; (2) Defensive guard on job.baleWeights access in cpk-mode pay calc (was a crash hazard on old jobs without the field if pressMode was toggled to cpk); (3) Guard all 7 unguarded job.totalSheep.toLocaleString() crash sites with ||0 (was a render crash on any job with undefined totalSheep). v4.6.3d adds per-contractor boot-time access password (hash stored in contractor_settings.access_password_hash, verified flag in localStorage = hash itself for auto-invalidation on rotation, master PIN bypass for SRD support, null hash = no gate for graceful rollout). v4.6.3c-final adds mode badges next to crew names in pay summary + grand-total math check line in CONTRACTOR TOTALS. v4.6.3c adds c/kg presser mode (pressMode toggle + kg tracking via new tally_entries kind='bale_kg') and c/km travel mode (per-person day vs km, with override) — additive. v4.6.3b adds cascade delete from tally_entries on delRun/delMob — fixes zombie runs resurrecting via self-heal (pilot contractor, 28 May). v4.6.3a added MOB TOTALS section to pay summary - additive only, no data model change from v4.6.3. v4.6.3 closes the data-loss
   vectors that survived v4.6.2. The Woolaway incident on 21 May 2026 showed
   three structural gaps even after v4.6.2:
 
@@ -729,7 +731,7 @@ async function writeTallyCell({jobId,kind,runId,mobId,crewId,date,value,mobType,
   };
   /* v4.6.4 — carry mob metadata on count rows so tally_entries is the source
      of truth for mob type/desc, not just counts. This closes the Shearing-flip
-     class (Knights 16 Jun): self-heal previously had to invent type='Shearing'
+     class (pilot contractor 16 Jun): self-heal previously had to invent type='Shearing'
      because metadata had no authoritative home. Only count rows carry a mob;
      other kinds leave these null. mobType is NOT NULL-constrained out — a
      legitimately-empty desc is '' not null. */
@@ -857,7 +859,7 @@ async function flushTallyMetaQueue(){
    given job ids. Returns rows; caller applies them via hydrateTallies. */
 async function loadTalliesForJobs(jobIds){
   if(!jobIds||!jobIds.length)return [];
-  /* v4.6.4 FIX (Knights 17 Jun): Supabase/PostgREST caps a select at 1000 rows
+  /* v4.6.4 FIX (pilot contractor 17 Jun): Supabase/PostgREST caps a select at 1000 rows
      by default. This query fetches cells across ALL of a contractor's jobs at
      once; once tally_entries passes 1000 rows, the cap silently truncates the
      result. With order('updated_at' ascending) the OLDEST rows are returned and
@@ -958,7 +960,7 @@ function hydrateTallies(job,tallyRows){
       if(!mob)return;
       mob.counts[row.crew_id]=v;
       /* v4.6.4 — tally_entries is now authoritative for mob type/desc, not just
-         counts. A corrupted blob arriving from any device (e.g. Knights 16 Jun
+         counts. A corrupted blob arriving from any device (e.g. pilot contractor 16 Jun
          Shearing-flip) is overwritten here from the row metadata, exactly as the
          counts already are. Only apply when the row actually carries metadata —
          legacy rows written before v4.6.4 have mob_type==null, and for those we
@@ -1042,7 +1044,7 @@ async function dbLoad(){
        so the orphan data renders.
        v4.6.4 — synthesized mobs now take type/desc from the row metadata
        (mob_type/mob_desc) instead of the old hardcoded type='Shearing'/desc:''.
-       That hardcode was the Knights 16 Jun Shearing-flip: a crutching mob
+       That hardcode was the pilot contractor 16 Jun Shearing-flip: a crutching mob
        rebuilt by self-heal silently became a $4.80 shearing mob. Faithful
        reconstruction removes the invention. Fallbacks (j.type, '') only apply
        to legacy rows with null metadata; a mob synthesized purely from legacy
@@ -1526,7 +1528,7 @@ function jobDates(j){
   /* v4.6.3e: a worked day must NEVER be hidden. With includeWeekends=false,
      the strip omitted Sat/Sun entirely; defDate then fell back to the last
      visible chip, so weekend work was silently entered under the wrong date
-     (Knights/Bywong, 6 Jun — wet-day Saturday makeup landed on Friday).
+     (a pilot contractor, 6 Jun — wet-day Saturday makeup landed on Friday).
      Guarantee: (a) today is present for Active jobs, (b) any date that
      already has data — run structures or whole-day tallies — is present,
      regardless of the weekend toggle. */
@@ -2467,7 +2469,7 @@ function markAccessVerified(){
 }
 
 /* ── PIN PAD (reusable) ── */
-function PinPad({onSuccess,onCancel,label,subtitle,allowChange,changeLabel,_overridePin,_startInChangeMode,_pinType,_onChanged}){
+function PinPad({onSuccess,onCancel,label,subtitle,allowChange,changeLabel,_overridePin,_validateAsync,_startInChangeMode,_pinType,_onChanged}){
   const [entry,setEntry]=useState('');
   const [err,setErr]=useState('');
   const [changing,setChanging]=useState(!!_startInChangeMode);
@@ -2479,6 +2481,12 @@ function PinPad({onSuccess,onCancel,label,subtitle,allowChange,changeLabel,_over
   const tryPin=async p=>{
     /* If an override PIN is supplied (e.g. a per-job PIN), verify against
        it directly rather than going to Supabase for the role PIN. */
+    if(_validateAsync){ /* v4.6.11 - custom async validator (e.g. farm PIN hash) */
+      const okv=await _validateAsync(String(p));
+      if(okv){setErr('');onSuccess();}
+      else{setErr('Incorrect PIN');setEntry('');setTimeout(()=>setErr(''),1500);}
+      return;
+    }
     if(_overridePin!=null){
       if(String(p)===String(_overridePin)){setErr('');onSuccess();}
       else{setErr('Incorrect PIN');setEntry('');setTimeout(()=>setErr(''),1500);}
@@ -2611,10 +2619,13 @@ function AdminPinModal({onSuccess,onClose}){
 }
 
 function TopBar({role,setRole,onBack,backLabel,onSchedule}){
-  const [showPin,setShowPin]=useState(null); /* 'lead' | 'admin' */
+  const [showPin,setShowPin]=useState(null); /* 'lead' | 'admin' | 'farmer' */
+  const [farmerPick,setFarmerPick]=useState(null); /* v4.6.11 - farm chosen in the farmer gate */
+  const farmerFarms=(FARMS||[]).filter(f=>f.farmerPinHash); /* farms with farmer access enabled */
   const requestRole=rv=>{
     if(rv==='shed_lead'&&role!=='shed_lead'&&role!=='admin')setShowPin('lead');
     else if(rv==='admin'&&role!=='admin')setShowPin('admin');
+    else if(rv==='farmer'&&role!=='farmer'){setFarmerPick(null);setShowPin('farmer');} /* v4.6.11 */
     else setRole(rv);
   };
   const lockRole=()=>{setRole('read_only');lsSet(LS_ROLE,'read_only');lsSet(LS_ROLE_TS,0);};
@@ -2622,12 +2633,29 @@ function TopBar({role,setRole,onBack,backLabel,onSchedule}){
     e('div',{className:'topbar'},
       onBack?e('button',{className:'back-btn',onClick:onBack},e('span',{className:'back-arr'},'←'),e('span',{className:'back-label'},backLabel||'Back')):e('div',{className:'logo'},'my',e('em',null,'Gang')),
       e('div',{style:{display:'flex',alignItems:'center',gap:6}},
-        onSchedule&&role!=='read_only'&&e('button',{className:'sched-btn',onClick:onSchedule,title:'Schedule'},e('span',{className:'sched-btn-ic'},'📅'),e('span',null,'Schedule')),
+        onSchedule&&role!=='read_only'&&role!=='farmer'&&e('button',{className:'sched-btn',onClick:onSchedule,title:'Schedule'},e('span',{className:'sched-btn-ic'},'📅'),e('span',null,'Schedule')),
         role!=='read_only'&&e('button',{onClick:lockRole,title:'Lock',style:{background:'rgba(255,255,255,.1)',border:'none',borderRadius:6,padding:'4px 8px',color:'rgba(255,255,255,.5)',fontSize:14,cursor:'pointer'}},'🔒'),
-        e('div',{className:'role-toggle'},[['👁','View','read_only'],['📋','Lead','shed_lead'],['🔑','Admin','admin']].map(([ic,lbl,rv])=>e('button',{key:rv,className:`rt-btn${role===rv?' active':''}`,onClick:()=>requestRole(rv)},`${ic} ${lbl}`)))
+        e('div',{className:'role-toggle'},[['👁','View','read_only'],...(farmerFarms.length?[['🌾','Farmer','farmer']]:[]),['📋','Lead','shed_lead'],['🔑','Admin','admin']].map(([ic,lbl,rv])=>e('button',{key:rv,className:`rt-btn${role===rv?' active':''}`,onClick:()=>requestRole(rv)},`${ic} ${lbl}`)))
       )
     ),
-    showPin&&e('div',{className:'pin-modal'},
+    showPin==='farmer'&&e('div',{className:'pin-modal'},
+      e('div',{className:'pin-modal-box'},
+        !farmerPick?e('div',null,
+          e('div',{style:{fontFamily:'var(--h)',fontSize:18,fontWeight:800,marginBottom:4}},'Farmer access'),
+          e('div',{style:{color:'var(--muted)',fontSize:13,marginBottom:12}},'Pick your farm'),
+          farmerFarms.map(f=>e('button',{key:f.id,onClick:()=>setFarmerPick(f),style:{display:'block',width:'100%',textAlign:'left',background:'var(--card)',border:'1px solid var(--border)',borderRadius:10,padding:'12px 14px',color:'inherit',fontWeight:700,marginBottom:8,cursor:'pointer'}},f.name)),
+          e('button',{className:'pin-change-btn',onClick:()=>setShowPin(null)},'Cancel')
+        ):e(PinPad,{
+          label:'Farmer PIN',
+          subtitle:farmerPick.name,
+          _validateAsync:async p=>(await hashPin(p))===farmerPick.farmerPinHash,
+          onSuccess:()=>{lsSet(LS_FARMER_ID,farmerPick.id);setRole('farmer');setShowPin(null);setFarmerPick(null);},
+          onCancel:()=>setFarmerPick(null),
+          allowChange:false,
+        })
+      )
+    ),
+    (showPin==='lead'||showPin==='admin')&&e('div',{className:'pin-modal'},
       e('div',{className:'pin-modal-box'},
         e(PinPad,{
           label:showPin==='admin'?'Admin PIN':'Lead PIN',
@@ -2664,6 +2692,77 @@ function JLC({job,onClick,wb}){
     !isDraft&&job.status==='Active'&&p.daysWorked>0&&e('div',null,e('div',{className:'jlc-pr'},e('span',null,p.shorn.toLocaleString()+' / '+(job.totalSheep||0).toLocaleString()+' — Day '+p.daysWorked+' of '+job.daysAllocated),e('span',{className:'pct-lbl'},Math.round(p.pct)+'%')),e('div',{className:'pbar'},e('div',{className:`pbar-f ${cls}`,style:{width:p.pct+'%'}}))),
     job.status==='Dispatched'&&e('div',{style:{fontSize:'12px',color:'var(--amber)',marginTop:'6px'}},'📱 Dispatched — starts '+fmtDateLong(job.startDate)),
     job.status==='Completed'&&e('div',{style:{fontSize:'12px',color:'var(--blue)',marginTop:'6px'}},'✓ '+p.shorn.toLocaleString()+' '+(job.type==='Crutching'?'crutched':'shorn'))
+  );
+}
+/* ── v4.6.11 END-OF-DAY BOOK PHOTO ──
+   One slot per job per day. Lead/admin take; lead/admin/farmer view.
+   Camera -> canvas compression -> Supabase Storage ('book-photos') + book_photos row.
+   REQUIRES SIGNAL by design: no offline queue - honest hold on device. */
+const bookPhotoPath=(job,date)=>CONTRACTOR_SLUG+'/'+job.id+'/'+date+'.jpg';
+async function compressPhoto(file,maxDim,quality){
+  const url=URL.createObjectURL(file);
+  try{
+    const img=await new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=rej;i.src=url;});
+    const scale=Math.min(1,maxDim/Math.max(img.width,img.height));
+    const w=Math.round(img.width*scale),h=Math.round(img.height*scale);
+    const cv=document.createElement('canvas');cv.width=w;cv.height=h;
+    cv.getContext('2d').drawImage(img,0,0,w,h);
+    const blob=await new Promise(res=>cv.toBlob(res,'image/jpeg',quality));
+    if(!blob)throw new Error('compress_failed');
+    return blob;
+  }finally{URL.revokeObjectURL(url);}
+}
+function BookPhotoPanel({job,viewDate,role}){
+  const canSee=role==='admin'||role==='shed_lead'||role==='farmer';
+  const canTake=role==='admin'||role==='shed_lead';
+  const [rec,setRec]=useState(null);
+  const [busy,setBusy]=useState(false);
+  const [msg,setMsg]=useState('');
+  const fileRef=useRef();
+  useEffect(()=>{
+    if(!canSee)return;
+    let alive=true;setRec(null);setMsg('');
+    if(!navigator.onLine)return;
+    (async()=>{try{
+      const {data,error}=await sb.from('book_photos').select('*').eq('contractor_slug',CONTRACTOR_SLUG).eq('job_id',job.id).eq('cell_date',viewDate).maybeSingle();
+      if(alive&&!error&&data)setRec(data);
+    }catch(err){}})();
+    return()=>{alive=false;};
+  },[job.id,viewDate,canSee]);
+  if(!canSee)return null;
+  const NOSIG="No signal \u2014 hold the phone, take it when you've got bars.";
+  const doPick=()=>{if(!navigator.onLine){setMsg(NOSIG);return;}fileRef.current&&fileRef.current.click();};
+  const onFile=async ev=>{
+    const file=ev.target.files&&ev.target.files[0];
+    ev.target.value='';
+    if(!file)return;
+    if(!navigator.onLine){setMsg(NOSIG);return;}
+    setBusy(true);setMsg('');
+    try{
+      const blob=await compressPhoto(file,1600,0.72);
+      const path=bookPhotoPath(job,viewDate);
+      const up=await sb.storage.from('book-photos').upload(path,blob,{upsert:true,contentType:'image/jpeg',cacheControl:'60'});
+      if(up.error)throw up.error;
+      const row={contractor_slug:CONTRACTOR_SLUG,job_id:job.id,cell_date:viewDate,taken_at:new Date().toISOString(),path};
+      const ins=await sb.from('book_photos').upsert(row,{onConflict:'contractor_slug,job_id,cell_date'});
+      if(ins.error)throw ins.error;
+      setRec(row);
+    }catch(err){
+      setMsg('Upload failed \u2014 check signal and take it again. Nothing was saved.');
+    }
+    setBusy(false);
+  };
+  const pubUrl=rec?sb.storage.from('book-photos').getPublicUrl(rec.path).data.publicUrl+'?t='+encodeURIComponent(rec.taken_at):null;
+  return e('div',{className:'notes-wrap',style:{marginTop:10}},
+    e('div',{className:'notes-lbl'},'📓 End of day book \u2014 '+fmtDateLong(viewDate)),
+    rec&&pubUrl&&e('a',{href:pubUrl,target:'_blank',rel:'noopener'},
+      e('img',{src:pubUrl,alt:'Tally book photo',style:{width:'100%',maxHeight:260,objectFit:'contain',borderRadius:10,border:'1px solid var(--border)',background:'#000'}})),
+    rec&&e('div',{style:{color:'var(--muted)',fontSize:12,margin:'6px 0'}},'Taken '+new Date(rec.taken_at).toLocaleString('en-AU',{day:'numeric',month:'short',hour:'numeric',minute:'2-digit'})),
+    !rec&&!busy&&e('div',{style:{color:'var(--muted)',fontSize:13,margin:'6px 0'}},canTake?'Snap the tally book at knock-off \u2014 one photo per day.':'No book photo for this day yet.'),
+    busy&&e('div',{style:{color:'var(--muted)',fontSize:13,margin:'6px 0'}},'Uploading\u2026'),
+    msg&&e('div',{style:{color:'var(--amber)',fontSize:13,margin:'6px 0',fontWeight:700}},msg),
+    canTake&&e('button',{className:'btn-g',style:{width:'100%',marginTop:6},disabled:busy,onClick:doPick},rec?'Re-take photo':'📷 Take book photo'),
+    canTake&&e('input',{type:'file',accept:'image/*',capture:'environment',style:{display:'none'},ref:fileRef,onChange:onFile})
   );
 }
 /* ════════════════════════
@@ -2707,7 +2806,7 @@ function TallyTab({job,setJob,role,viewDate,setViewDate}){
             .eq('contractor_slug',CONTRACTOR_SLUG)
             .eq('job_id',job.id)
             .eq('run_id',rid)
-            .eq('cell_date',viewDate), /* v4.6.3e: scope to current day — run_id-only delete destroyed same-run cells on OTHER dates (Bywong, 6 Jun) */
+            .eq('cell_date',viewDate), /* v4.6.3e: scope to current day — run_id-only delete destroyed same-run cells on OTHER dates (pilot contractor, 6 Jun) */
           5000,'cascade_timeout');
         if(res&&res.error)logSaveFailure('error','delRun_cascade','run='+rid+';err='+res.error.message);
         else try{logSaveFailure('diag_cascade',job.id,'delRun_ok:run='+rid);}catch(e){}
@@ -3085,6 +3184,7 @@ function TallyTab({job,setJob,role,viewDate,setViewDate}){
       })
     ),
     e('div',{className:'notes-wrap'},e('div',{className:'notes-lbl'},'Notes — '+fmtDateLong(viewDate)),e('textarea',{className:'notes-ta',rows:3,placeholder:'Notes for the day...',value:(job.dayNotes||{})[viewDate]||'',disabled:!canEdit,onChange:ev=>setNote(ev.target.value)})),
+    e(BookPhotoPanel,{job,viewDate,role}), /* v4.6.11 */
     e('div',{style:{height:20}})
   );
 }
@@ -3780,7 +3880,7 @@ function WhiteboardTab({job,role}){
   const [entries,setEntries]=useState([]);
   const [loading,setLoading]=useState(true);
   const [text,setText]=useState('');
-  const [authorRole,setAuthorRole]=useState('Shearer');
+  const [authorRole,setAuthorRole]=useState(role==='farmer'?'Farmer':'Shearer'); /* v4.6.11 */
   const [saving,setSaving]=useState(false);
   const ROLES=['Farmer','Lead','Shearer','Staff'];
 
@@ -3894,11 +3994,21 @@ function WhiteboardTab({job,role}){
 /* ── EDIT FARM MODAL ── */
 function EditFarmModal({farm,onSave,onClose}){
   const rName=useRef(),rAddr=useRef(),rStands=useRef(),rNotes=useRef();
-  const doSave=()=>{
+  const rFarmerName=useRef(),rFarmerPhone=useRef(),rFarmerPin=useRef(); /* v4.6.11 */
+  const [clearPin,setClearPin]=useState(false);
+  const doSave=async()=>{
     const name=rName.current?.value?.trim();
     const addr=rAddr.current?.value?.trim();
     if(!name||!addr)return;
-    onSave({...farm,name,address:addr,stands:parseInt(rStands.current?.value)||farm.stands||4,notes:rNotes.current?.value||''});
+    /* v4.6.11 - farmer access: new PIN wins over clear; blank keeps current */
+    let farmerPinHash=clearPin?null:(farm.farmerPinHash||null);
+    const pinVal=rFarmerPin.current?.value?.trim();
+    if(pinVal){
+      if(!/^\d{4,6}$/.test(pinVal)){alert('Farmer PIN must be 4-6 digits');return;}
+      farmerPinHash=await hashPin(pinVal);
+    }
+    onSave({...farm,name,address:addr,stands:parseInt(rStands.current?.value)||farm.stands||4,notes:rNotes.current?.value||'',
+      farmerName:rFarmerName.current?.value?.trim()||'',farmerPhone:rFarmerPhone.current?.value?.trim()||'',farmerPinHash});
   };
   return e('div',{className:'overlay'},e('div',{className:'sheet'},
     e('div',{className:'sheet-handle'}),
@@ -3907,7 +4017,13 @@ function EditFarmModal({farm,onSave,onClose}){
       e(FF,{label:'Farm Name'},e('input',{type:'text',className:'fi',defaultValue:farm.name,ref:rName})),
       e(FF,{label:'Address'},e('input',{type:'text',className:'fi',defaultValue:farm.address,ref:rAddr})),
       e(FF,{label:'Stands'},e('input',{type:'text',className:'fi',defaultValue:farm.stands||4,min:1,ref:rStands,inputMode:'numeric'})),
-      e(FF,{label:'Notes (optional)'},e('input',{type:'text',className:'fi',defaultValue:farm.notes||'',placeholder:'e.g. Gate code 1234',ref:rNotes}))
+      e(FF,{label:'Notes (optional)'},e('input',{type:'text',className:'fi',defaultValue:farm.notes||'',placeholder:'e.g. Gate code 1234',ref:rNotes})),
+      e(FF,{label:'Farmer name (optional)'},e('input',{type:'text',className:'fi',defaultValue:farm.farmerName||'',placeholder:'e.g. John Smith',ref:rFarmerName})),
+      e(FF,{label:'Farmer mobile (optional)'},e('input',{type:'tel',className:'fi',defaultValue:farm.farmerPhone||'',placeholder:'04XX XXX XXX',ref:rFarmerPhone})),
+      e(FF,{label:farm.farmerPinHash?'Farmer PIN (set \u2713 \u2014 enter new to change)':'Farmer PIN (4-6 digits \u2014 turns on farmer app access)'},
+        e('input',{type:'text',inputMode:'numeric',pattern:'[0-9]*',maxLength:6,className:'fi',placeholder:farm.farmerPinHash?'\u2022\u2022\u2022\u2022':'e.g. 4321',ref:rFarmerPin})),
+      farm.farmerPinHash&&e('label',{style:{display:'flex',alignItems:'center',gap:8,fontSize:13,color:'var(--muted)',marginTop:4}},
+        e('input',{type:'checkbox',checked:clearPin,onChange:ev=>setClearPin(ev.target.checked)}),'Remove farmer access (clear PIN)')
     ),
     e('div',{className:'sheet-footer'},
       e('button',{className:'btn-g',onClick:onClose},'Cancel'),
@@ -4025,7 +4141,9 @@ function JobDetailScreen({job,setJob,role,setRole,onBack,onSend,onBroadcast,onEd
             :e(Bdg,{status:job.status}),
           e('span',{className:'pill'},job.type),
           e('span',{style:{fontFamily:'var(--m)',fontSize:'11px',color:'rgba(255,255,255,.4)'}},'#'+job.jobNumber)
-        )
+        ),
+        (role==='admin'||role==='shed_lead')&&farm&&farm.farmerPhone&&e('div',{style:{marginTop:6,fontSize:13}}, /* v4.6.11 - farmer emergency contact */
+          e('a',{href:'tel:'+String(farm.farmerPhone).replace(/\s+/g,''),style:{color:'var(--amber)',textDecoration:'none',fontWeight:700}},'🌾 '+(farm.farmerName||'Farmer')+' \u2014 '+farm.farmerPhone))
       ),
       isDraft&&role==='admin'&&onPublish&&e('div',{className:'draft-banner'},
         e('div',{className:'draft-banner-ic'},'◌'),
@@ -4247,8 +4365,8 @@ function SMSModal({job,onClose,onPreview,farmList,crewList}){
   const gcl=id=>crewList?crewList.find(c=>c.id===id):null;
   const farm=gfl(job.farmId);
   const appUrl=CONTRACTOR_URL;
-  const [farmerName,setFarmerName]=useState('');
-  const [farmerPhone,setFarmerPhone]=useState('');
+  const [farmerName,setFarmerName]=useState(farm?.farmerName||''); /* v4.6.11 - pre-fill from farm record */
+  const [farmerPhone,setFarmerPhone]=useState(farm?.farmerPhone||'');
   const [sendToFarmer,setSendToFarmer]=useState(false);
   const [status,setStatus]=useState('idle'); /* idle | sending | done | error */
   const [results,setResults]=useState([]);
@@ -4366,10 +4484,12 @@ function AddFarmForm({onAdd,onCancel}){
   const [addr,setAddr]=useState('');
   const [stands,setStands]=useState('4');
   const [notes,setNotes]=useState('');
+  const [farmerName,setFarmerName]=useState(''); /* v4.6.11 */
+  const [farmerPhone,setFarmerPhone]=useState('');
   const ok=name.trim()&&addr.trim();
   const doAdd=()=>{
     if(!ok)return;
-    const f={id:'f'+Date.now(),name:name.trim(),address:addr.trim(),stands:parseInt(stands)||4,notes};
+    const f={id:'f'+Date.now(),name:name.trim(),address:addr.trim(),stands:parseInt(stands)||4,notes,farmerName:farmerName.trim(),farmerPhone:farmerPhone.trim()};
     onAdd(f);
   };
   return e('div',{className:'inline-form'},
@@ -4382,7 +4502,11 @@ function AddFarmForm({onAdd,onCancel}){
       e('div',null,e(IField,{lbl:'Stands'},
         e('input',{type:'text',inputMode:'numeric',pattern:'[0-9]*',className:'if-inp',placeholder:'4',min:1,value:stands,onChange:ev=>setStands(ev.target.value)}))),
       e('div',null,e(IField,{lbl:'Notes (optional)'},
-        e('input',{type:'text',className:'if-inp',placeholder:'e.g. Gate code 1234',value:notes,onChange:ev=>setNotes(ev.target.value)})))
+        e('input',{type:'text',className:'if-inp',placeholder:'e.g. Gate code 1234',value:notes,onChange:ev=>setNotes(ev.target.value)}))),
+      e('div',null,e(IField,{lbl:'Farmer name (optional)'},
+        e('input',{type:'text',className:'if-inp',placeholder:'e.g. John Smith',value:farmerName,onChange:ev=>setFarmerName(ev.target.value)}))),
+      e('div',null,e(IField,{lbl:'Farmer mobile (optional)'},
+        e('input',{type:'tel',className:'if-inp',placeholder:'04XX XXX XXX',value:farmerPhone,onChange:ev=>setFarmerPhone(ev.target.value)})))
     ),
     e('div',{className:'if-btns'},
       e('button',{className:'if-cancel',onClick:onCancel},'Cancel'),
@@ -4818,6 +4942,24 @@ function HomeScreen({jobs,role,setRole,onJob,onNew,onDatabase,onSchedule,contrac
 
   return e('div',null,
     e(TopBar,{role,setRole,onSchedule}),
+    /* v4.6.11 - FARMER VIEW: farmer devices see only their farm's jobs */
+    role==='farmer'&&e('div',{style:{position:'fixed',top:58,left:0,right:0,bottom:0,background:'var(--bg)',zIndex:150,overflowY:'auto',WebkitOverflowScrolling:'touch',padding:'16px'}},
+      (function(){
+        const fid=lsGet(LS_FARMER_ID)||null;
+        const myFarm=(FARMS||[]).find(f=>f.id===fid);
+        if(!myFarm)return e('div',{style:{textAlign:'center',padding:'40px 0',color:'var(--muted)'}},'No farm linked to this device. Use the role switch (top right) to sign in again.');
+        const fjobs=jobs.filter(j=>j.status!=='Draft'&&j.farmId===fid)
+          .sort((a,b)=>String(b.startDate||'').localeCompare(String(a.startDate||'')));
+        return e('div',null,
+          e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',margin:'6px 0 2px'}},
+            e('div',{style:{fontFamily:'var(--h)',fontSize:20,fontWeight:800}},"G'day "+(((myFarm.farmerName||'').split(' ')[0])||myFarm.name)),
+            e('button',{onClick:()=>{lsSet(LS_FARMER_ID,'');setRole('read_only');},style:{background:'none',border:'none',color:'var(--muted)',fontSize:12,cursor:'pointer',textDecoration:'underline'}},'Sign out')),
+          e('div',{style:{color:'var(--muted)',fontSize:13,marginBottom:12}},myFarm.name+' \u2014 your sheds'),
+          fjobs.length===0?e('div',{style:{textAlign:'center',padding:'40px 0',color:'var(--muted)'}},'No jobs on '+myFarm.name+' yet.')
+            :fjobs.map(j=>e(JLC,{key:j.id,job:j,wb:wbCounts[j.id]||0,onClick:()=>onJob(j.id)}))
+        );
+      })()
+    ),
     /* v4.6.10 - CREW VIEW: read_only devices see only their own jobs. Lead/Admin via role switch unlock the full app. */
     role==='read_only'&&e('div',{style:{position:'fixed',top:58,left:0,right:0,bottom:0,background:'var(--bg)',zIndex:150,overflowY:'auto',WebkitOverflowScrolling:'touch',padding:'16px'}},
       !myId?e('div',null,
@@ -5439,6 +5581,7 @@ function App(){
     const saved=lsGet(LS_ROLE);
     const ts=lsGet(LS_ROLE_TS)||0;
     const hours=(Date.now()-ts)/(1000*60*60);
+    if(saved==='farmer')return lsGet(LS_FARMER_ID)?'farmer':'read_only'; /* v4.6.11 - farmer binding persists (read-only scope, no timeout); never restore farmer without a farm bound */
     if(saved&&saved!=='read_only'&&hours<ROLE_TIMEOUT_HOURS)return saved;
     return 'read_only';
   });
@@ -5791,7 +5934,7 @@ function App(){
       if(!navigator.onLine||!isFreshRef.current)return;
       /* Only drain the per-CELL tally queue here. The whole-job queue (LS_QUEUE)
          pushes a stripped job BLOB, and a background push of a stale blob is the
-         cross-device structure-overwrite hazard from the 6 Jun Bywong incident.
+         cross-device structure-overwrite hazard from the 6 Jun pilot contractor incident.
          Whole-job flush stays on the explicit goOnline/boot paths where freshness
          is already reconciled. Tally cells are per-cell last-write-wins and safe. */
       const qLen=(lsGet(LS_TALLY_QUEUE)||[]).length;
@@ -6166,4 +6309,3 @@ if('serviceWorker' in navigator){
 </script>
 </body>
 </html>
-
