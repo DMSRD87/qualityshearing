@@ -56,6 +56,18 @@ html,body{background:var(--bg);color:var(--text);font-family:var(--b);min-height
 .fab{position:fixed;bottom:22px;right:calc(50% - 466px);width:52px;height:52px;border-radius:50%;background:var(--amber);border:none;cursor:pointer;font-size:26px;color:#000;font-weight:700;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 24px rgba(245,158,11,.4);z-index:40;transition:transform .15s}
 .fab:active{transform:scale(.91)}
 @media(max-width:960px){.fab{right:18px}}
+/* v4.6.11g mobile layout pass - phones only, desktop untouched */
+@media(max-width:520px){
+  html,body{overflow-x:hidden}
+  .topbar{padding:0 10px;gap:6px}
+  .back-label{max-width:90px}
+  .rt-lbl{display:none}
+  .rt-btn{padding:6px 9px;font-size:13px}
+  .sched-btn{padding:6px 8px;font-size:12px}
+  .sms-row{gap:8px}
+  .sms-l{min-width:0;flex:1}
+  .sms-name,.sms-ph,.sms-role{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+}
 /* WEEK BANNER */
 .week-banner{margin:16px 16px 0;padding:18px;background:linear-gradient(135deg,rgba(245,158,11,.12),rgba(245,158,11,.04));border:1px solid rgba(245,158,11,.3);border-radius:var(--r)}
 .wb-top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px}
@@ -527,18 +539,25 @@ const LS_MY_ID='mg_my_id_'+CONTRACTOR_SLUG; /* v4.6.10 - crew identity per devic
 const LS_WB_SEEN='mg_wb_seen_'+CONTRACTOR_SLUG; /* v4.6.10 - per-device whiteboard last-seen map {jobId:iso} */ /* v4.6.6 - per-worker sticky settings (taxRate/messRate/travel) seeded when a worker joins a job */
 const LS_FARMER_ID='mg_farmer_id_'+CONTRACTOR_SLUG; /* v4.6.11 - farmer device farm binding (PIN-gated visibility, not auth) */
 const LS_DEFAULT_RATES='mg_default_rates_'+CONTRACTOR_SLUG; /* v4.6.11 - contractor-level default rates cache (server-authoritative seed; durable home for the old LS_LAST_RATES per-device caveat) */
+const LS_APP_SETTINGS='mg_app_settings_'+CONTRACTOR_SLUG; /* v4.6.11b - contractor-level app settings cache (contractor_settings.app_settings). crewView:'all' disables the read_only Who-are-you picker (pre-4.6.10 behaviour); unset/'mine' keeps crew view. */
 const LS_ROLE_TS='mg_role_ts_'+CONTRACTOR_SLUG;
 const LS_DATA_VERSION='mg_data_version_'+CONTRACTOR_SLUG; /* tracks DATA_VERSION for one-time cache wipe */
 const LS_TALLY_QUEUE='mg_tally_queue_'+CONTRACTOR_SLUG; /* per-cell offline queue, separate from whole-job queue */
 const LS_TALLY_DEAD='mg_tally_dead_'+CONTRACTOR_SLUG; /* v4.6.3g — quarantined cells (permanent rejection). Replayed once on boot in case the server-side blocker (e.g. missing kind constraint) was since fixed. */
 const LS_TALLY_META_QUEUE='mg_tally_meta_queue_'+CONTRACTOR_SLUG; /* v4.6.4 — offline/failed mob metadata (type/desc) updates to existing count cells; flushed alongside the tally queue. */
 const ROLE_TIMEOUT_HOURS=12; /* auto-reset after 12h inactivity */
-const APP_VERSION='v4.6.11a';
+const APP_VERSION='v4.6.11g';
 const SUPER_RATE=0.12; /* SG rate, 12% from 1 Jul 2025. One-line change if legislated rate moves. */
-/* v4.6.11a HOTFIX (8 Jul 2026, caught in Quality pilot by Dale, console-proven): PostgrestBuilder from the CDN supabase-js@2 is a thenable WITHOUT .catch on at least some cached versions - three pre-existing inline 'sb.from(...)....catch(()=>{})' sites threw TypeError synchronously, killing the handler mid-function: Edit Farm never saved to DB and never closed (both handleSaveFarm sites), and crew delete never reached the DB. Fix is class-wide: route through real async fns (dbSaveFarm; new dbDeleteCrew mirroring dbDeleteFarm) which also adds LS cache + offline queueing that the inline calls skipped. RULE: never chain .catch directly on a Supabase builder - always await inside an async fn or use established db* helpers. NOTE: supabase-js is loaded UNPINNED (@2) from CDN - pinning is an open thread, not a mid-pilot change. */
-/* v4.6.11 BOOK PHOTO + FARMER ACCESS + CONTRACTOR DEFAULT RATES (8 Jul 2026): (0) CONTRACTOR DEFAULT RATES - contractor_settings.default_rates JSONB (nullable, additive) is the durable home for new-job rate seeding, closing the per-device LS_LAST_RATES caveat (field report: a contractor lead asked three times for a stable rate sheet; DB evidence showed the per-device sticky drifting across jobs). Boot fetches into LS_DEFAULT_RATES cache; mkRates layers field-level default->last-used->hardcoded. No admin UI yet - set via SQL; the dashboard Settings tab becomes the UI later. Missing column/row/offline degrades to pre-4.6.11 behaviour exactly. (1) END-OF-DAY BOOK PHOTO - one slot per job per day, bottom of Tally tab (lead/admin take; lead/admin/farmer view). Camera -> client-side canvas compression (max 1600px JPEG q0.72) -> Supabase Storage bucket 'book-photos', path slug/jobId/date.jpg + upsert row in book_photos (timestamped, natural key slug/job/date). Re-take replaces. REQUIRES SIGNAL by design - honest hold on device, NO offline queue (multi-MB localStorage queueing is the fragile pattern v5 kills). (2) FARMER ACCESS - farm blob gains farmerName/farmerPhone/farmerPinHash (SHA-256(pin+slug), same pattern as role PINs; farms table schema unchanged). New device role 'farmer': role switch -> pick farm (only farms with a farmer PIN set) -> PIN pad -> LS_FARMER_ID binds device. Farmer sees ONLY their farm's jobs on Home, full per-shearer/per-run tallies (farmers who count out manually cross-check the board - that is the point), day notes read-only, whiteboard read+post (author defaults to Farmer), Summary non-admin view, book photo. NEVER: rates, pay, super, other farms, tally editing, Schedule, Admin. Farmer role persists across the 12h timeout (read-only scope, less privilege than lead). PIN-gated visibility filter, NOT real auth - v5. (3) Farmer SMS modal pre-fills from farm record. (4) Job hero shows farmer emergency tel: contact for lead/admin. */
-/* v4.6.10 FIELD FIXES + CREW VIEW (7 Jul 2026, Kimba field report): (1) INPUT DRIFT KILLED - proven live (Kimba Nottles totalSheep saved 319 for entered 320; desktop mouse-wheel over focused number inputs changes values). Integer fields (tally counts, sheep, days, km, tax %, stands, PINs) now type='text' inputMode='numeric' (also fixes PIN maxLength ignored by number inputs). Decimal money fields keep type='number' but blur on wheel. (2) JOB NUMBERS format A - suggestJobNumber(): FARM 4-letter prefix + per-contractor sequence (NOTT-0042); replaces the RANDOM generator that collided live (Kimba 002113 twice, 002115 twice). Editable at creation with duplicate guard; legacy numbers untouched and ignored by the sequence so the first new job is PREF-0001. (3) SCHEDULE - natural page scroll (fixed-height nested scroll clipped week columns and died in in-app webviews e.g. Facebook browser); date-independent Drafts panel (two Kimba drafts sat invisible in w/c 22 Jun); filter bar (status/type/farm) + month jump. (4) CREW VIEW - read_only devices pick 'Who are you?' once (LS_MY_ID; per-device visibility filter, NOT authentication - real logins are v5); they see ONLY their own jobs, rolling today-2..today+7, on Home AND Schedule. Lead/Admin unchanged. (5) WHITEBOARD BADGES - red unread counts on job-view tab and job cards; per-device LS_WB_SEEN; fresh devices treat only last-48h posts as new; opening the tab marks seen. v4.6.9 TALLY TRENDS + PAYDAY SOURCE (6 Jul 2026): (1) Pay Week sheet gains a Pay Report / Tally Trends view toggle. Trends = last 4 pay weeks per worker, newest first, HEAD COUNTS ONLY (no dollars): shorn and crutched always separate, days worked and head/day shown so form is comparable across different-length weeks; shearers ordered by 4-week volume, staff (runs + bales + days) alphabetical. Contractor use: balancing sheep allocation and watching form. (2) Pay Week sheet now derives payday/frequency from the LATEST non-draft job's rates (falls back to the device template, then Friday/weekly) - fixes stale-device-template periods (screenshot 6 Jul showed Thu-Wed on a Friday-pays contractor because the device template predated the picker fix). Copy CSV hidden on trends view; Copy copies whichever view is showing. v4.6.8 PER-SHEARER STAND FEE (6 Jul 2026): mixed sheds - on a BYO job only shearers who brought their own machine get the fee (e.g. 4 shearers, 2 paid). crewDetails[id].standFee===false excludes a shearer; DEFAULT is eligible (zero-config when the whole team brings own). Admin Stand Fee section gains a per-shearer Yes/No list when EVOs = BYO. Applied consistently in generateSummary, calcPeriodStats (header parity), generateFarmRecord (farmer charged only for actual own-machine shearer-days), and the pay week report. 'standFee' added to sticky worker settings - owning a machine is a worker attribute, set once and carried to future jobs. v4.6.7 PAY WEEK REPORT (6 Jul 2026): cross-job per-worker pay-week report (payroll officer's 'massive one'). Home screen (admin) 'Pay Week' button opens a sheet: period nav (payday/frequency from LS_LAST_RATES; 'shed' frequency falls back to weekly), per-worker date-by-shed earning lines (piecework per date x type x effective rate incl overrides + individual loadings, team loading line, staff per-day incl presser threshold/cpk day rules with union-of-dates per v4.6.3d.1b, travel, stand fees), per-worker GROSS/Superable/Super/Tax/Mess/Sundries/NET, WEEK TOTALS, and an embedded cross-check reconciling each job's slice against calcPeriodStats (jobs with team loadings are skipped in the check - known team-loading divergence in the header estimator). Copy / Copy CSV / Print. CSV shape (worker,role,date,shed,item,units,rate,amount,superable + per-worker totals rows) = the future Xero/MYOB payload. FARMER BILLING UNCHANGED - farm records stay strictly per job. ADDITIVE ONLY: generateSummary/calcPeriodStats untouched. v4.6.6 PAYROLL QoL (6 Jul 2026, pilot contractor payroll officer wish list): (1) STICKY WORKER SETTINGS - LS_WORKER_DEFAULTS persists per-worker taxRate/messRate/travelMode/driverKm/travelKmRate whenever Admin saves rates; seeded into crewDetails when the worker joins a NEW job or is added to an existing job. Existing jobs untouched - historical pay cannot change. Per-device localStorage (same caveat as LS_LAST_RATES); durable home = contractor_settings in the settings redesign. (2) PAYDAY OFF-BY-ONE FIX - Admin picker listed days Monday-first (Friday=4) but period math uses JS getDay() (Friday=5); picking Friday produced Thu-Wed periods. Fix: picker option values map labels to JS day numbers ((i+1)%7). MIGRATION: contractors who worked around by picking the next day's label (one contractor picked 'Saturday') already store the JS-correct value - their periods are UNCHANGED and the picker now displays the true day; anyone who had picked the real label sees it render one day back and must re-pick once. Default payDayOfWeek now 5 = Friday. (3) FORTNIGHTLY period fix - base.end+(len-7) concatenated a number onto a date string producing invalid dates; now addDays twice. Weekly path untouched. Fortnight anchors to the current week. (4) STAND FEE SUPER TOGGLE - rates.standFeeSuper, DEFAULT TRUE per pilot contractor payroll officer written instruction (stand fee IS included in super; meal deductions never reduce super - already enforced). Toggle to No treats it as equipment hire (excluded). Farmer-side charge, gross, tax, NET unaffected either way. v4.6.5 SUPER + STAND FEE (6 Jul 2026): Pay summary computes Super Guarantee per person and in CONTRACTOR TOTALS. SUPERABLE = piecework earnings (incl individual loadings baked into rate) + team loadings + shed staff runs/bales/kg earnings. NOT SUPERABLE: travel (day or km - reimbursement) and stand fees (equipment hire). Deductions (tax/mess/sundries) NEVER reduce the super base - super is SUPER_RATE x superable GROSS. Super is the employer's obligation ON TOP: it does not change gross, tax, deductions, NET, JOB TOTAL or the math check. STAND FEE: rates.standFeePerDay (Admin tab; rides LS_LAST_RATES carry-forward) x tallied days per shearer/crutcher, ONLY when job.evos==='BYO'; itemised per person, own CONTRACTOR TOTALS line + math-check component, shown on farmer record as a charge, included in calcPeriodStats so header Est. Payroll stays in parity with printed gross. v4.6.4 STRUCTURAL (16 Jun, after a pilot contractor crutching->shearing flip). ROOT CAUSE of the recurring job-type-flip class: mob type/desc lived ONLY in jobs.data (no authoritative store); on a flaky-signal device per-cell writes reached tally_entries but the blob structure desynced, then self-heal rebuilt the missing mobs from cells and INVENTED type=Shearing/desc=blank because it had no metadata to read - silently tripling crutching pay ($1.65->$4.80/head). hydrateTallies corrected counts from the table but never type/desc, so corruption persisted and rode the next save up. FIX (mirrors how counts are already safe): (a) tally_entries gains mob_type/mob_desc; count writes carry them; (b) hydrateTallies is now AUTHORITATIVE for type/desc - a corrupted blob from any device is overwritten from row metadata on load, exactly as counts are; (c) self-heal reconstructs synthesized mobs faithfully from row metadata instead of hardcoded Shearing/blank (legacy-null rows fall back to job type and set _synth to flag the guess); (d) post-hoc type/desc edits back-propagate to existing cells (updateMobMeta + LS_TALLY_META_QUEUE + flushTallyMetaQueue) so an edit after counts exist isn't reverted on next hydrate. PREREQUISITE: run v4.6.4-migration.sql FIRST (two nullable columns + backfill from current/corrected blobs), THEN deploy. Legacy null-metadata rows behave as pre-v4.6.4 until the next entry/edit repopulates them; no regression. v4.6.3g RESILIENCE (16 Jun, from Darby/Chloe stuck-queue incident): (1) periodic 20s background drain — browser 'online' event doesn't fire when a flaky connection silently recovers, so queued cells could sit unflushed until manual reopen; timer retries whenever online+fresh+queue non-empty (no-op when empty). (2) poison-pill quarantine — flushTallyQueue now separates PERMANENT rejections (constraint/validation, will never succeed) from TRANSIENT (timeout/network); permanent rows move to LS_TALLY_DEAD instead of pinning the queue + banner forever. (3) dead-letter replay on boot — quarantined cells get one retry per launch, so a since-fixed server blocker (e.g. the 'mess' kind constraint widened 15 Jun) self-recovers without re-entry. (4) sundries load resilient to missing table — sets a session flag on first 'table not found' and stops re-querying, ending per-load error spam when the migration hasn't run. NOTE: the tally_entries kind_check constraint MUST include every kind the build writes (count,shed_runs,bales,bale_kg,travel,mess) and sundries_entries MUST exist BEFORE deploy — both are hard prerequisites. v4.6.3f FEATURES (builds on v4.6.3e — deploy ONLY after 3e soak is clean): (1) MESS RATE — per-person $/day deduction; 3-state per-day toggle on Tally tab (Off ◯ / Half ½ / Full ●) stored as tally_entries kind='mess' multiplier 0/0.5/1 with run_id=mob_id=''; rate = crewDetails[id].messRate override else role default $35 shearer/crutcher $10 staff (resolveMessRate); Admin tab Mess Rate section; pay summary line 'Mess: N full + M half x $R/day = -$T'. (2) SUNDRIES — itemised per-person deductions in NEW sundries_entries table (run schema SQL BEFORE deploying this file); lead adds, admin edits/deletes via Summary-tab panel; pay summary itemises with subtotal. Both deduct POST-tax: GROSS → tax → mess → sundries → NET TOTAL. CONTRACTOR TOTALS gains conditional deduction lines + NET JOB TOTAL; math check extends through net when deductions exist. REGRESSION GUARANTEE: jobs with zero mess + zero sundries produce byte-identical pay output to v4.6.3e. calcPeriodStats now returns {shorn,totalEarn,messDeduction,sundriesDeduction,netEarn} — totalEarn stays gross. v4.6.3e SAFETY RELEASE (6 Jun 2026, after a pilot contractor double incident): (1) delRun/delMob cascade deletes now scoped to cell_date=viewDate — run_id-only delete destroyed same-run cells on OTHER dates; (2) dbLoad merge now consults LS_TALLY_QUEUE as well as LS_QUEUE — a day of offline cells + silently-failed flush previously let the server's empty hydration overwrite the local day ("worked all day, lost it at night"); because flushTallyQueue retains only failed rows, post-flush queue state doubles as the flush-success gate; (3) jobDates guarantees today (Active jobs) and every date with existing data appear in the strip regardless of includeWeekends — weekend work was silently landing on the last visible weekday via defDate fallback; (4) new tappable banner when online+fresh but queued entries remain ("N entries not yet on server — tap to retry. Don't clear app data") — closes the silent state that drove users to clear site data and destroy the only copy. NO pay calc changes. v4.6.3d.1b CALC HOTFIX: Presser pay calc was iterating only shedTallies dates, which meant days where the presser pressed bales (or kg) WITHOUT entering shed_runs were skipped entirely from pay calculation. Real money bug — e.g. Whitey on Burragundy had 19 bales on Jun 2 with no shed_runs that day, calc never visited Jun 2 → $269.80 missing from his pay. Fix iterates union of shedTallies, baleTallies, baleWeights date keys so all days with any presser activity are evaluated. Applied to both calcPeriodStats (totals) and generateSummary (pay breakdown). All-runs and all-bales cases unchanged. v4.6.3d.1a hotfix: Presser hybrid-day pay summary display fix — when a presser had BOTH per-bale days AND per-run days in the same job, the displayed breakdown used totalRuns/totalBales summed across all days, producing math that didn't add up (e.g. "23 bales @ $14.20 = $213" when only 15 bales were actually paid per-bale and the other 8 were on a per-run day). Total earn was always correct; only the readable breakdown was wrong. Fix tracks paidRuns/paidBales separately so the line items match the math. All-bale and all-run cases unchanged. v4.6.3d.1 hotfix: (1) Map link handles goo.gl/Maps URLs as addresses by detecting http(s):// and passing through instead of wrapping in maps.google.com search query; (2) Defensive guard on job.baleWeights access in cpk-mode pay calc (was a crash hazard on old jobs without the field if pressMode was toggled to cpk); (3) Guard all 7 unguarded job.totalSheep.toLocaleString() crash sites with ||0 (was a render crash on any job with undefined totalSheep). v4.6.3d adds per-contractor boot-time access password (hash stored in contractor_settings.access_password_hash, verified flag in localStorage = hash itself for auto-invalidation on rotation, master PIN bypass for SRD support, null hash = no gate for graceful rollout). v4.6.3c-final adds mode badges next to crew names in pay summary + grand-total math check line in CONTRACTOR TOTALS. v4.6.3c adds c/kg presser mode (pressMode toggle + kg tracking via new tally_entries kind='bale_kg') and c/km travel mode (per-person day vs km, with override) — additive. v4.6.3b adds cascade delete from tally_entries on delRun/delMob — fixes zombie runs resurrecting via self-heal (pilot contractor, 28 May). v4.6.3a added MOB TOTALS section to pay summary - additive only, no data model change from v4.6.3. v4.6.3 closes the data-loss
-  vectors that survived v4.6.2. The Woolaway incident on 21 May 2026 showed
+/* v4.6.11g (15 Jul 2026): MOBILE LAYOUT PASS - phone viewports were forced into horizontal scroll (users zooming out to see the whole interface). Root cause: the topbar role-toggle is flex-shrink:0 with four nowrap buttons; with a farmer on the job its natural width plus the 160px back-label exceeds a ~412px viewport, so the page itself scrolls sideways and every fixed/sheet element looks clipped (send-modal buttons at the right edge etc). Desktop untouched - all changes ride inside @media(max-width:520px): role buttons collapse to emoji-only (labels in .rt-lbl spans, hidden on phones; active state stays amber), tighter topbar padding/gap, back-label capped 90px, body overflow-x hidden (safe: all intentionally-wide content - tally grids, tabs, date strips, week scroll, summaries - already lives in its own overflow-x:auto container), and sms-row left column gets min-width:0 + ellipsis so long names shrink instead of pushing Preview/Send off-screen. */
+/* v4.6.11f (15 Jul 2026, shed-visit follow-up, built on the DEPLOYED 11e codebase): two fixes with DB-proven mechanisms. (1) QUERY-STRING DEEP LINKS - a crew Android did multiple clean full boots (pageshow persisted=false + fresh mountLoad) while its owner's SMS link was tapped, wrote NO job_views receipt, and logged ZERO deeplink/swallow errors: the boot handler ran and simply saw no hash, because Android strips the #fragment when handing a link to an installed PWA (and some SMS linkifiers end the tappable URL at '#'). An iPhone booting 30s later kept its fragment and receipted instantly. SMS builders now emit /?job=&crew= QUERY links - queries survive intent launches and linkifiers, and a query navigation into a warm instance is a FULL PAGE LOAD (unlike a hash change), so the boot handler covers warm-instance taps with no extra listener. Handler reads location.search first, falls back to location.hash so every previously-sent link keeps working; URL cleaned with history.replaceState (no reload, no history spam). HONEST SCOPE: legacy hash links tapped on fragment-stripping handsets still cannot receipt - the parameter never reaches the app; any 11f re-send fixes that person permanently. (2) FARMER NAME TRAP REMOVED - both farmer send paths required phone AND name; a real farm record with phone set but farmerName='' passed every UI check and then silently dropped the farmer from the bulk send AND hid the farmer row's Preview/Send buttons (tickbox on, phone showing, no SMS, no error, no buttons - the full field report 15 Jul). Both gates are now PHONE-ONLY; a blank name falls back to 'there' in the SMS greeting. */
+/* v4.6.11e (15 Jul 2026): (1) IN-FLIGHT TALLY FLUSH - closes the pocket-lock write gap (14 Jul, two contractor jobs, DB-proven): a per-cell tally write dispatched in the instant before the phone locks is frozen mid-flight by iOS - the fetch dies AND the 5s timeout timer freezes, so neither the success path nor the catch->queue path runs until the page resumes; the server holds the PREVIOUS keystroke's value (viewer on another device saw '3' of a '37') for the whole pocket period, and a BFCache restore that drops the promise makes the stale value permanent. Fix: TALLY_INFLIGHT map tracks every dispatched cell row; on visibilitychange->hidden / pagehide / beforeunload the rows are dumped SYNCHRONOUSLY into LS_TALLY_QUEUE (localStorage survives the freeze; existing 20s background drain + goOnline flush push them on resume) plus a best-effort keepalive REST upsert so the server usually gets the final value even while the phone stays pocketed. Idempotent by design - a cell may be upserted twice with the same value. HONEST SCOPE: keepalive is not guaranteed once iOS freezes the page; the guarantee is the queue (value can no longer be lost), the keepalive just shrinks the stale window from 'until device resumes' to usually-immediate. (2) FARMER SEND ROW - farmer gets his own row in Send Job Cards (avatar/name/phone/viewed receipt/Preview/Send) so a contractor can send or re-send the farmer link WITHOUT re-texting the whole crew; the 'Also send to farmer' tickbox stays for the bulk path. Preview reuses JobCardView (greeting is crew-gated, renders clean for farmer identity). Send requires farm record farmerName+farmerPhone - edit via the tickbox fields or Edit Farm. */
+/* v4.6.11d (12 Jul 2026): crew job-card SMS trimmed to a teaser (greeting + contractor + start date + link + do-not-reply). Full job detail now lives BEHIND the link only, so crew must OPEN it to see the job - which writes the green 'viewed' receipt on the Overview (the point of the trim, per contractor feedback). Also drops the crew card from 3 Twilio segments to 2 (clears the body-trim open thread). Contractor name used once to hold the 2-segment ceiling for long names. GSM-7 only. Broadcast send body was already hyphen/GSM-7 (only its on-screen preview carries em-dashes - cosmetic, not billed); left untouched. Carries forward the 4.6.11c farmer view-receipt. */
+/* v4.6.11c (12 Jul 2026): farmer view-receipt on Overview. Completes 4.6.11 farmer access. The farmer SMS link now carries &crew=farmer.FARMID so the farmer's tap writes the SAME job_views receipt the crew get (existing deep-link handler is identity-agnostic - no write-path change, no DB/schema change). Overview renders an admin-only farmer row (distinct from crew - farmer lives on the farm blob, not job.crew) keyed on views['farmer.'+farmId] showing Viewed/Not-yet-opened. HONEST SCOPE: this is a link-tap receipt on whatever device opened the link, NOT proof the grower personally read it - same limitation the crew tags already carry; never oversell it as read-confirmation. */
+/* v4.6.11b (9 Jul 2026): per-contractor crew-view toggle. contractor_settings.app_settings JSONB, key crewView: 'all' = read_only devices see the full app with no Who-are-you picker (pre-4.6.10 behaviour, for contractors who do not want per-person filtering); unset or 'mine' = crew view unchanged. Cached to LS_APP_SETTINGS on the same boot fetch as default rates; offline-first boot defaults to 'mine' until first online boot. Server-flippable per contractor without redeploy. */
+/* v4.6.11a HOTFIX (8 Jul 2026, caught in pilot, console-proven): PostgrestBuilder from the CDN supabase-js@2 is a thenable WITHOUT .catch on at least some cached versions - three pre-existing inline 'sb.from(...)....catch(()=>{})' sites threw TypeError synchronously, killing the handler mid-function: Edit Farm never saved to DB and never closed (both handleSaveFarm sites), and crew delete never reached the DB. Fix is class-wide: route through real async fns (dbSaveFarm; new dbDeleteCrew mirroring dbDeleteFarm) which also adds LS cache + offline queueing that the inline calls skipped. RULE: never chain .catch directly on a Supabase builder - always await inside an async fn or use established db* helpers. NOTE: supabase-js is loaded UNPINNED (@2) from CDN - pinning is an open thread, not a mid-pilot change. */
+/* v4.6.11 BOOK PHOTO + FARMER ACCESS + CONTRACTOR DEFAULT RATES (8 Jul 2026): (0) CONTRACTOR DEFAULT RATES - contractor_settings.default_rates JSONB (nullable, additive) is the durable home for new-job rate seeding, closing the per-device LS_LAST_RATES caveat (field report: a pilot contractor lead asked three times for a stable rate sheet; DB evidence showed the per-device sticky drifting across jobs). Boot fetches into LS_DEFAULT_RATES cache; mkRates layers field-level default->last-used->hardcoded. No admin UI yet - set via SQL; the dashboard Settings tab becomes the UI later. Missing column/row/offline degrades to pre-4.6.11 behaviour exactly. (1) END-OF-DAY BOOK PHOTO - one slot per job per day, bottom of Tally tab (lead/admin take; lead/admin/farmer view). Camera -> client-side canvas compression (max 1600px JPEG q0.72) -> Supabase Storage bucket 'book-photos', path slug/jobId/date.jpg + upsert row in book_photos (timestamped, natural key slug/job/date). Re-take replaces. REQUIRES SIGNAL by design - honest hold on device, NO offline queue (multi-MB localStorage queueing is the fragile pattern v5 kills). (2) FARMER ACCESS - farm blob gains farmerName/farmerPhone/farmerPinHash (SHA-256(pin+slug), same pattern as role PINs; farms table schema unchanged). New device role 'farmer': role switch -> pick farm (only farms with a farmer PIN set) -> PIN pad -> LS_FARMER_ID binds device. Farmer sees ONLY their farm's jobs on Home, full per-shearer/per-run tallies (farmers who count out manually cross-check the board - that is the point), day notes read-only, whiteboard read+post (author defaults to Farmer), Summary non-admin view, book photo. NEVER: rates, pay, super, other farms, tally editing, Schedule, Admin. Farmer role persists across the 12h timeout (read-only scope, less privilege than lead). PIN-gated visibility filter, NOT real auth - v5. (3) Farmer SMS modal pre-fills from farm record. (4) Job hero shows farmer emergency tel: contact for lead/admin. */
+/* v4.6.10 FIELD FIXES + CREW VIEW (7 Jul 2026, pilot field report): (1) INPUT DRIFT KILLED - proven live (a pilot farm totalSheep saved 319 for entered 320; desktop mouse-wheel over focused number inputs changes values). Integer fields (tally counts, sheep, days, km, tax %, stands, PINs) now type='text' inputMode='numeric' (also fixes PIN maxLength ignored by number inputs). Decimal money fields keep type='number' but blur on wheel. (2) JOB NUMBERS format A - suggestJobNumber(): FARM 4-letter prefix + per-contractor sequence (NOTT-0042); replaces the RANDOM generator that collided live (two duplicate pairs in the field). Editable at creation with duplicate guard; legacy numbers untouched and ignored by the sequence so the first new job is PREF-0001. (3) SCHEDULE - natural page scroll (fixed-height nested scroll clipped week columns and died in in-app webviews e.g. Facebook browser); date-independent Drafts panel (two drafts sat invisible in w/c 22 Jun); filter bar (status/type/farm) + month jump. (4) CREW VIEW - read_only devices pick 'Who are you?' once (LS_MY_ID; per-device visibility filter, NOT authentication - real logins are v5); they see ONLY their own jobs, rolling today-2..today+7, on Home AND Schedule. Lead/Admin unchanged. (5) WHITEBOARD BADGES - red unread counts on job-view tab and job cards; per-device LS_WB_SEEN; fresh devices treat only last-48h posts as new; opening the tab marks seen. v4.6.9 TALLY TRENDS + PAYDAY SOURCE (6 Jul 2026): (1) Pay Week sheet gains a Pay Report / Tally Trends view toggle. Trends = last 4 pay weeks per worker, newest first, HEAD COUNTS ONLY (no dollars): shorn and crutched always separate, days worked and head/day shown so form is comparable across different-length weeks; shearers ordered by 4-week volume, staff (runs + bales + days) alphabetical. Contractor use: balancing sheep allocation and watching form. (2) Pay Week sheet now derives payday/frequency from the LATEST non-draft job's rates (falls back to the device template, then Friday/weekly) - fixes stale-device-template periods (screenshot 6 Jul showed Thu-Wed on a Friday-pays contractor because the device template predated the picker fix). Copy CSV hidden on trends view; Copy copies whichever view is showing. v4.6.8 PER-SHEARER STAND FEE (6 Jul 2026): mixed sheds - on a BYO job only shearers who brought their own machine get the fee (e.g. 4 shearers, 2 paid). crewDetails[id].standFee===false excludes a shearer; DEFAULT is eligible (zero-config when the whole team brings own). Admin Stand Fee section gains a per-shearer Yes/No list when EVOs = BYO. Applied consistently in generateSummary, calcPeriodStats (header parity), generateFarmRecord (farmer charged only for actual own-machine shearer-days), and the pay week report. 'standFee' added to sticky worker settings - owning a machine is a worker attribute, set once and carried to future jobs. v4.6.7 PAY WEEK REPORT (6 Jul 2026): cross-job per-worker pay-week report (payroll officer's 'massive one'). Home screen (admin) 'Pay Week' button opens a sheet: period nav (payday/frequency from LS_LAST_RATES; 'shed' frequency falls back to weekly), per-worker date-by-shed earning lines (piecework per date x type x effective rate incl overrides + individual loadings, team loading line, staff per-day incl presser threshold/cpk day rules with union-of-dates per v4.6.3d.1b, travel, stand fees), per-worker GROSS/Superable/Super/Tax/Mess/Sundries/NET, WEEK TOTALS, and an embedded cross-check reconciling each job's slice against calcPeriodStats (jobs with team loadings are skipped in the check - known team-loading divergence in the header estimator). Copy / Copy CSV / Print. CSV shape (worker,role,date,shed,item,units,rate,amount,superable + per-worker totals rows) = the future Xero/MYOB payload. FARMER BILLING UNCHANGED - farm records stay strictly per job. ADDITIVE ONLY: generateSummary/calcPeriodStats untouched. v4.6.6 PAYROLL QoL (6 Jul 2026, pilot contractor payroll officer wish list): (1) STICKY WORKER SETTINGS - LS_WORKER_DEFAULTS persists per-worker taxRate/messRate/travelMode/driverKm/travelKmRate whenever Admin saves rates; seeded into crewDetails when the worker joins a NEW job or is added to an existing job. Existing jobs untouched - historical pay cannot change. Per-device localStorage (same caveat as LS_LAST_RATES); durable home = contractor_settings in the settings redesign. (2) PAYDAY OFF-BY-ONE FIX - Admin picker listed days Monday-first (Friday=4) but period math uses JS getDay() (Friday=5); picking Friday produced Thu-Wed periods. Fix: picker option values map labels to JS day numbers ((i+1)%7). MIGRATION: contractors who worked around by picking the next day's label (one contractor picked 'Saturday') already store the JS-correct value - their periods are UNCHANGED and the picker now displays the true day; anyone who had picked the real label sees it render one day back and must re-pick once. Default payDayOfWeek now 5 = Friday. (3) FORTNIGHTLY period fix - base.end+(len-7) concatenated a number onto a date string producing invalid dates; now addDays twice. Weekly path untouched. Fortnight anchors to the current week. (4) STAND FEE SUPER TOGGLE - rates.standFeeSuper, DEFAULT TRUE per pilot contractor payroll officer written instruction (stand fee IS included in super; meal deductions never reduce super - already enforced). Toggle to No treats it as equipment hire (excluded). Farmer-side charge, gross, tax, NET unaffected either way. v4.6.5 SUPER + STAND FEE (6 Jul 2026): Pay summary computes Super Guarantee per person and in CONTRACTOR TOTALS. SUPERABLE = piecework earnings (incl individual loadings baked into rate) + team loadings + shed staff runs/bales/kg earnings. NOT SUPERABLE: travel (day or km - reimbursement) and stand fees (equipment hire). Deductions (tax/mess/sundries) NEVER reduce the super base - super is SUPER_RATE x superable GROSS. Super is the employer's obligation ON TOP: it does not change gross, tax, deductions, NET, JOB TOTAL or the math check. STAND FEE: rates.standFeePerDay (Admin tab; rides LS_LAST_RATES carry-forward) x tallied days per shearer/crutcher, ONLY when job.evos==='BYO'; itemised per person, own CONTRACTOR TOTALS line + math-check component, shown on farmer record as a charge, included in calcPeriodStats so header Est. Payroll stays in parity with printed gross. v4.6.4 STRUCTURAL (16 Jun, after a live crutching->shearing flip). ROOT CAUSE of the recurring job-type-flip class: mob type/desc lived ONLY in jobs.data (no authoritative store); on a flaky-signal device per-cell writes reached tally_entries but the blob structure desynced, then self-heal rebuilt the missing mobs from cells and INVENTED type=Shearing/desc=blank because it had no metadata to read - silently tripling crutching pay ($1.65->$4.80/head). hydrateTallies corrected counts from the table but never type/desc, so corruption persisted and rode the next save up. FIX (mirrors how counts are already safe): (a) tally_entries gains mob_type/mob_desc; count writes carry them; (b) hydrateTallies is now AUTHORITATIVE for type/desc - a corrupted blob from any device is overwritten from row metadata on load, exactly as counts are; (c) self-heal reconstructs synthesized mobs faithfully from row metadata instead of hardcoded Shearing/blank (legacy-null rows fall back to job type and set _synth to flag the guess); (d) post-hoc type/desc edits back-propagate to existing cells (updateMobMeta + LS_TALLY_META_QUEUE + flushTallyMetaQueue) so an edit after counts exist isn't reverted on next hydrate. PREREQUISITE: run v4.6.4-migration.sql FIRST (two nullable columns + backfill from current/corrected blobs), THEN deploy. Legacy null-metadata rows behave as pre-v4.6.4 until the next entry/edit repopulates them; no regression. v4.6.3g RESILIENCE (16 Jun, from a stuck-queue field incident): (1) periodic 20s background drain — browser 'online' event doesn't fire when a flaky connection silently recovers, so queued cells could sit unflushed until manual reopen; timer retries whenever online+fresh+queue non-empty (no-op when empty). (2) poison-pill quarantine — flushTallyQueue now separates PERMANENT rejections (constraint/validation, will never succeed) from TRANSIENT (timeout/network); permanent rows move to LS_TALLY_DEAD instead of pinning the queue + banner forever. (3) dead-letter replay on boot — quarantined cells get one retry per launch, so a since-fixed server blocker (e.g. the 'mess' kind constraint widened 15 Jun) self-recovers without re-entry. (4) sundries load resilient to missing table — sets a session flag on first 'table not found' and stops re-querying, ending per-load error spam when the migration hasn't run. NOTE: the tally_entries kind_check constraint MUST include every kind the build writes (count,shed_runs,bales,bale_kg,travel,mess) and sundries_entries MUST exist BEFORE deploy — both are hard prerequisites. v4.6.3f FEATURES (builds on v4.6.3e — deploy ONLY after 3e soak is clean): (1) MESS RATE — per-person $/day deduction; 3-state per-day toggle on Tally tab (Off ◯ / Half ½ / Full ●) stored as tally_entries kind='mess' multiplier 0/0.5/1 with run_id=mob_id=''; rate = crewDetails[id].messRate override else role default $35 shearer/crutcher $10 staff (resolveMessRate); Admin tab Mess Rate section; pay summary line 'Mess: N full + M half x $R/day = -$T'. (2) SUNDRIES — itemised per-person deductions in NEW sundries_entries table (run schema SQL BEFORE deploying this file); lead adds, admin edits/deletes via Summary-tab panel; pay summary itemises with subtotal. Both deduct POST-tax: GROSS → tax → mess → sundries → NET TOTAL. CONTRACTOR TOTALS gains conditional deduction lines + NET JOB TOTAL; math check extends through net when deductions exist. REGRESSION GUARANTEE: jobs with zero mess + zero sundries produce byte-identical pay output to v4.6.3e. calcPeriodStats now returns {shorn,totalEarn,messDeduction,sundriesDeduction,netEarn} — totalEarn stays gross. v4.6.3e SAFETY RELEASE (6 Jun 2026, after a double field incident): (1) delRun/delMob cascade deletes now scoped to cell_date=viewDate — run_id-only delete destroyed same-run cells on OTHER dates; (2) dbLoad merge now consults LS_TALLY_QUEUE as well as LS_QUEUE — a day of offline cells + silently-failed flush previously let the server's empty hydration overwrite the local day ("worked all day, lost it at night"); because flushTallyQueue retains only failed rows, post-flush queue state doubles as the flush-success gate; (3) jobDates guarantees today (Active jobs) and every date with existing data appear in the strip regardless of includeWeekends — weekend work was silently landing on the last visible weekday via defDate fallback; (4) new tappable banner when online+fresh but queued entries remain ("N entries not yet on server — tap to retry. Don't clear app data") — closes the silent state that drove users to clear site data and destroy the only copy. NO pay calc changes. v4.6.3d.1b CALC HOTFIX: Presser pay calc was iterating only shedTallies dates, which meant days where the presser pressed bales (or kg) WITHOUT entering shed_runs were skipped entirely from pay calculation. Real money bug — e.g. one presser had 19 bales on Jun 2 with no shed_runs that day, calc never visited Jun 2 → $269.80 missing from his pay. Fix iterates union of shedTallies, baleTallies, baleWeights date keys so all days with any presser activity are evaluated. Applied to both calcPeriodStats (totals) and generateSummary (pay breakdown). All-runs and all-bales cases unchanged. v4.6.3d.1a hotfix: Presser hybrid-day pay summary display fix — when a presser had BOTH per-bale days AND per-run days in the same job, the displayed breakdown used totalRuns/totalBales summed across all days, producing math that didn't add up (e.g. "23 bales @ $14.20 = $213" when only 15 bales were actually paid per-bale and the other 8 were on a per-run day). Total earn was always correct; only the readable breakdown was wrong. Fix tracks paidRuns/paidBales separately so the line items match the math. All-bale and all-run cases unchanged. v4.6.3d.1 hotfix: (1) Map link handles goo.gl/Maps URLs as addresses by detecting http(s):// and passing through instead of wrapping in maps.google.com search query; (2) Defensive guard on job.baleWeights access in cpk-mode pay calc (was a crash hazard on old jobs without the field if pressMode was toggled to cpk); (3) Guard all 7 unguarded job.totalSheep.toLocaleString() crash sites with ||0 (was a render crash on any job with undefined totalSheep). v4.6.3d adds per-contractor boot-time access password (hash stored in contractor_settings.access_password_hash, verified flag in localStorage = hash itself for auto-invalidation on rotation, master PIN bypass for SRD support, null hash = no gate for graceful rollout). v4.6.3c-final adds mode badges next to crew names in pay summary + grand-total math check line in CONTRACTOR TOTALS. v4.6.3c adds c/kg presser mode (pressMode toggle + kg tracking via new tally_entries kind='bale_kg') and c/km travel mode (per-person day vs km, with override) — additive. v4.6.3b adds cascade delete from tally_entries on delRun/delMob — fixes zombie runs resurrecting via self-heal (28 May). v4.6.3a added MOB TOTALS section to pay summary - additive only, no data model change from v4.6.3. v4.6.3 closes the data-loss
+  vectors that survived v4.6.2. A field incident on 21 May 2026 showed
   three structural gaps even after v4.6.2:
 
   (1) flushQueue wrote item.data raw to Supabase, bypassing
@@ -573,8 +592,8 @@ const DATA_VERSION='2026-05-18-storage-rebuild'; /* Bump forces one-time localSt
    v4.6.2 — CACHE-FLIP BOOT GUARD
    ════════════════════════════════════════════════════════════════════
    Catches the case where the wrong contractor's cached app loads at
-   this URL — e.g. Lachlan tapped his Woolaway bookmark but his browser
-   served Darby's cached SW. The PIN screen rejected him; he had to
+   this URL — e.g. a lead tapped one contractor's bookmark but his browser
+   served another contractor's cached SW. The PIN screen rejected him; he had to
    close-and-reopen the app to get the right one.
 
    This boot guard compares window.location.hostname against the
@@ -717,6 +736,44 @@ function queueTallyCell(row){
   lsSet(LS_TALLY_QUEUE,filtered);
 }
 
+/* v4.6.11e — in-flight cell write tracking (14 Jul pocket-lock incident,
+   proven on two contractors' jobs). A cell write dispatched just before the
+   phone locks is frozen mid-flight: the fetch dies AND the withTimeout timer
+   freezes with the page, so neither success nor the catch->queue path runs
+   until (or unless) the page resumes cleanly. The server keeps the previous
+   keystroke's value for the whole pocket period. TALLY_INFLIGHT holds every
+   dispatched row until its upsert settles; flushInflightTallies dumps
+   unsettled rows into LS_TALLY_QUEUE synchronously on page hide. */
+const TALLY_INFLIGHT=new Map();
+
+function flushInflightTallies(){
+  if(TALLY_INFLIGHT.size===0)return;
+  const rows=[...TALLY_INFLIGHT.values()];
+  TALLY_INFLIGHT.clear();
+  /* Synchronous localStorage write — survives the page freeze. The existing
+     20s background drain / goOnline flush pushes these on resume. queueTallyCell
+     dedups per cell key so a row that also lands via keepalive or a resumed
+     fetch just re-upserts the same value — harmless. */
+  rows.forEach(queueTallyCell);
+  /* Best-effort push while the page can still speak: fetch keepalive is
+     allowed to complete after the page hides on modern WebKit/Blink. NOT
+     guaranteed — the queue above is the actual safety net. */
+  try{
+    fetch(SUPABASE_URL+'/rest/v1/tally_entries?on_conflict=contractor_slug,job_id,cell_date,kind,run_id,mob_id,crew_id',{
+      method:'POST',
+      keepalive:true,
+      headers:{
+        'apikey':SUPABASE_ANON_KEY,
+        'Authorization':'Bearer '+SUPABASE_ANON_KEY,
+        'Content-Type':'application/json',
+        'Prefer':'resolution=merge-duplicates'
+      },
+      body:JSON.stringify(rows)
+    }).catch(()=>{});
+  }catch(e){}
+  try{logSaveFailure('diag_save','inflight_dump','n='+rows.length);}catch(e){}
+}
+
 /* writeTallyCell — upserts a single cell to Supabase, or queues it if offline.
    This is fired on every tally-cell change. No debounce; the volume is fine. */
 async function writeTallyCell({jobId,kind,runId,mobId,crewId,date,value,mobType,mobDesc}){
@@ -733,7 +790,7 @@ async function writeTallyCell({jobId,kind,runId,mobId,crewId,date,value,mobType,
   };
   /* v4.6.4 — carry mob metadata on count rows so tally_entries is the source
      of truth for mob type/desc, not just counts. This closes the Shearing-flip
-     class (pilot contractor 16 Jun): self-heal previously had to invent type='Shearing'
+     class (16 Jun): self-heal previously had to invent type='Shearing'
      because metadata had no authoritative home. Only count rows carry a mob;
      other kinds leave these null. mobType is NOT NULL-constrained out — a
      legitimately-empty desc is '' not null. */
@@ -745,6 +802,10 @@ async function writeTallyCell({jobId,kind,runId,mobId,crewId,date,value,mobType,
     queueTallyCell(row);
     return;
   }
+  /* v4.6.11e — register as in-flight until the upsert settles. If the page
+     hides while this write is airborne, flushInflightTallies queues it. */
+  const _ik=tallyKey(row);
+  TALLY_INFLIGHT.set(_ik,row);
   try{
     const result=await withTimeout(
       sb.from('tally_entries').upsert(row,{
@@ -754,7 +815,10 @@ async function writeTallyCell({jobId,kind,runId,mobId,crewId,date,value,mobType,
       'tally_upsert_timeout'
     );
     if(result&&result.error)throw new Error(result.error.message);
+    /* Only clear if a newer write for the same cell hasn't replaced our entry */
+    if(TALLY_INFLIGHT.get(_ik)===row)TALLY_INFLIGHT.delete(_ik);
   }catch(e){
+    if(TALLY_INFLIGHT.get(_ik)===row)TALLY_INFLIGHT.delete(_ik);
     queueTallyCell(row);
     logSaveFailure(
       e.message==='tally_upsert_timeout'?'timeout':'error',
@@ -785,7 +849,7 @@ async function flushTallyQueue(){
            will never succeed on retry) from TRANSIENT ones (timeout/network).
            A permanent failure is quarantined to LS_TALLY_DEAD instead of being
            re-queued forever, so one bad row can't pin the queue and strand the
-           banner (Darby mess-kind constraint case, 15 Jun). Transient failures
+           banner (mess-kind constraint case, 15 Jun). Transient failures
            re-queue and the background drain retries them. */
         const msg=result.error.message||'';
         if(/violates check constraint|invalid input|column .* does not exist|violates not-null/i.test(msg)){
@@ -861,7 +925,7 @@ async function flushTallyMetaQueue(){
    given job ids. Returns rows; caller applies them via hydrateTallies. */
 async function loadTalliesForJobs(jobIds){
   if(!jobIds||!jobIds.length)return [];
-  /* v4.6.4 FIX (pilot contractor 17 Jun): Supabase/PostgREST caps a select at 1000 rows
+  /* v4.6.4 FIX (17 Jun): Supabase/PostgREST caps a select at 1000 rows
      by default. This query fetches cells across ALL of a contractor's jobs at
      once; once tally_entries passes 1000 rows, the cap silently truncates the
      result. With order('updated_at' ascending) the OLDEST rows are returned and
@@ -962,7 +1026,7 @@ function hydrateTallies(job,tallyRows){
       if(!mob)return;
       mob.counts[row.crew_id]=v;
       /* v4.6.4 — tally_entries is now authoritative for mob type/desc, not just
-         counts. A corrupted blob arriving from any device (e.g. pilot contractor 16 Jun
+         counts. A corrupted blob arriving from any device (e.g. the 16 Jun
          Shearing-flip) is overwritten here from the row metadata, exactly as the
          counts already are. Only apply when the row actually carries metadata —
          legacy rows written before v4.6.4 have mob_type==null, and for those we
@@ -1041,12 +1105,12 @@ async function dbLoad(){
     /* v4.6.3 — self-heal step. If tally_entries has run_ids or (date,run,mob)
        combos that aren't in the job's runs structure, the cells are
        orphaned: present in the DB, invisible in the UI. This happens when
-       a stale device wrote a truncated runs structure (the Woolaway 21 May
+       a stale device wrote a truncated runs structure (the 21 May
        incident). Synthesize the missing run/mob entries from tally_entries
        so the orphan data renders.
        v4.6.4 — synthesized mobs now take type/desc from the row metadata
        (mob_type/mob_desc) instead of the old hardcoded type='Shearing'/desc:''.
-       That hardcode was the pilot contractor 16 Jun Shearing-flip: a crutching mob
+       That hardcode was the 16 Jun Shearing-flip: a crutching mob
        rebuilt by self-heal silently became a $4.80 shearing mob. Faithful
        reconstruction removes the invention. Fallbacks (j.type, '') only apply
        to legacy rows with null metadata; a mob synthesized purely from legacy
@@ -1208,7 +1272,7 @@ function buildStrippedJobBlob(job){
 /* ── v4.6.3f SUNDRIES (itemised per-person deductions, own table) ── */
 /* v4.6.3g — session flag: once we learn the table is absent (migration not yet
    run on this contractor), stop re-querying it every load. Avoids the per-load
-   error spam seen on Darby and a pointless round-trip. Reset on full reload. */
+   error spam seen in the field and a pointless round-trip. Reset on full reload. */
 let _sundriesTableMissing=false;
 async function loadSundriesForJob(jobId){
   if(_sundriesTableMissing)return [];
@@ -1264,7 +1328,7 @@ async function dbSaveJob(job){
   }
   /* Online path: cap the upsert at 5 seconds to prevent silent hangs.
      A hanging upsert on poor signal that never resolves is the EXACT
-     bug pattern that wiped Cutting Edge job 002125 — without a timeout
+     bug pattern that wiped a live job — without a timeout
      the await never returns, the catch block never fires, and the data
      never makes it to the queue. */
   try{
@@ -1275,8 +1339,8 @@ async function dbSaveJob(job){
        React state has a runs structure that's truncated relative to
        reality. Refuse the save, queue for retry, log.
 
-       This is the structural fix for the Woolaway 21 May 2026 incident
-       where Dale's laptop wrote a 3-run blob over a 10-run state, leaving
+       This is the structural fix for the 21 May 2026 incident
+       where a laptop wrote a 3-run blob over a 10-run state, leaving
        Wed and Thu cells orphaned in tally_entries with no run structure
        to display them under. */
     try{
@@ -1540,7 +1604,7 @@ function jobDates(j){
   /* v4.6.3e: a worked day must NEVER be hidden. With includeWeekends=false,
      the strip omitted Sat/Sun entirely; defDate then fell back to the last
      visible chip, so weekend work was silently entered under the wrong date
-     (a pilot contractor, 6 Jun — wet-day Saturday makeup landed on Friday).
+     (6 Jun — wet-day Saturday makeup landed on Friday).
      Guarantee: (a) today is present for Active jobs, (b) any date that
      already has data — run structures or whole-day tallies — is present,
      regardless of the weekend toggle. */
@@ -1909,7 +1973,7 @@ function generateSummary(job,period){
     const crMobs=s.mobs.filter(m=>m.type==='Crutching');
     const writeMobs=(label,mobs,totalEarn)=>{
       if(mobs.length===0)return;
-      /* v4.6.4b — collapse per-person lines to per-rate totals (Josh Knight, 18 Jun):
+      /* v4.6.4b — collapse per-person lines to per-rate totals (pilot payroll request, 18 Jun):
          crew are paid by rate tier, not per mob colour. Group by effective rate,
          highest first. Mob descriptions remain in the Farm Record and the MOB
          TOTALS section for the grower. DISPLAY ONLY — per-rate earn sums to the
@@ -2444,9 +2508,10 @@ let _accessLoaded=false;
    offline job creation keeps the last-known defaults. Missing column/row degrades silently. */
 async function loadDefaultRates(){
   try{
-    const result=await sb.from('contractor_settings').select('default_rates').eq('contractor_slug',CONTRACTOR_SLUG).maybeSingle();
-    if(result&&!result.error&&result.data&&result.data.default_rates&&typeof result.data.default_rates==='object'){
-      lsSet(LS_DEFAULT_RATES,result.data.default_rates);
+    const result=await sb.from('contractor_settings').select('default_rates,app_settings').eq('contractor_slug',CONTRACTOR_SLUG).maybeSingle();
+    if(result&&!result.error&&result.data){
+      if(result.data.default_rates&&typeof result.data.default_rates==='object')lsSet(LS_DEFAULT_RATES,result.data.default_rates);
+      if(result.data.app_settings&&typeof result.data.app_settings==='object')lsSet(LS_APP_SETTINGS,result.data.app_settings); /* v4.6.11b */
     }
   }catch(e){}
 }
@@ -2660,7 +2725,7 @@ function TopBar({role,setRole,onBack,backLabel,onSchedule}){
       e('div',{style:{display:'flex',alignItems:'center',gap:6}},
         onSchedule&&role!=='read_only'&&role!=='farmer'&&e('button',{className:'sched-btn',onClick:onSchedule,title:'Schedule'},e('span',{className:'sched-btn-ic'},'📅'),e('span',null,'Schedule')),
         role!=='read_only'&&e('button',{onClick:lockRole,title:'Lock',style:{background:'rgba(255,255,255,.1)',border:'none',borderRadius:6,padding:'4px 8px',color:'rgba(255,255,255,.5)',fontSize:14,cursor:'pointer'}},'🔒'),
-        e('div',{className:'role-toggle'},[['👁','View','read_only'],...(farmerFarms.length?[['🌾','Farmer','farmer']]:[]),['📋','Lead','shed_lead'],['🔑','Admin','admin']].map(([ic,lbl,rv])=>e('button',{key:rv,className:`rt-btn${role===rv?' active':''}`,onClick:()=>requestRole(rv)},`${ic} ${lbl}`)))
+        e('div',{className:'role-toggle'},[['👁','View','read_only'],...(farmerFarms.length?[['🌾','Farmer','farmer']]:[]),['📋','Lead','shed_lead'],['🔑','Admin','admin']].map(([ic,lbl,rv])=>e('button',{key:rv,className:`rt-btn${role===rv?' active':''}`,onClick:()=>requestRole(rv)},ic,e('span',{className:'rt-lbl'},' '+lbl))))
       )
     ),
     showPin==='farmer'&&e('div',{className:'pin-modal'},
@@ -2831,7 +2896,7 @@ function TallyTab({job,setJob,role,viewDate,setViewDate}){
             .eq('contractor_slug',CONTRACTOR_SLUG)
             .eq('job_id',job.id)
             .eq('run_id',rid)
-            .eq('cell_date',viewDate), /* v4.6.3e: scope to current day — run_id-only delete destroyed same-run cells on OTHER dates (pilot contractor, 6 Jun) */
+            .eq('cell_date',viewDate), /* v4.6.3e: scope to current day — run_id-only delete destroyed same-run cells on OTHER dates (6 Jun) */
           5000,'cascade_timeout');
         if(res&&res.error)logSaveFailure('error','delRun_cascade','run='+rid+';err='+res.error.message);
         else try{logSaveFailure('diag_cascade',job.id,'delRun_ok:run='+rid);}catch(e){}
@@ -2911,7 +2976,7 @@ function TallyTab({job,setJob,role,viewDate,setViewDate}){
        metadata to tally_entries (source of truth). dayRuns is the in-scope
        per-day array in TallyTab (NOT 'runs' — that var doesn't exist here;
        referencing it threw a ReferenceError that silently killed the cell
-       write — Kimba first-deploy, 17 Jun). */
+       write — first-deploy field case, 17 Jun). */
     const _run=(dayRuns||[]).find(r=>r.id===rid);
     const _mob=_run?mobsOf(_run).find(m=>m.id===mid):null;
     writeTallyCell({jobId:job.id,kind:'count',runId:rid,mobId:mid,crewId:cid,date:viewDate,value:val,mobType:_mob?_mob.type:null,mobDesc:_mob?(_mob.desc||''):null});
@@ -4105,6 +4170,27 @@ function OverviewTab({job,role,onSend,onBroadcast,canSend,onEditFarm,isDraft,onP
         role==='admin'&&e('div',{style:{fontFamily:'var(--m)',fontSize:'11px',color:'var(--dim)'}},c.phone)
       );
     }),
+    /* v4.6.11c — farmer view-receipt row (admin only). The farmer is NOT a crew member;
+       he lives on the farm blob, so he renders here as a separate row keyed on the
+       synthetic id 'farmer.'+farmId that his SMS link carries. Same Viewed/Not-opened
+       tag the crew get. It's a link-tap receipt, not read-confirmation. */
+    role==='admin'&&farm&&(farm.farmerName||farm.farmerPhone)&&(function(){
+      const fViewed=views['farmer.'+job.farmId];
+      return e('div',{key:'farmer-row',className:'crew-row',style:{borderTop:'1px dashed var(--border)'}},
+        e('div',{className:'cr-l'},
+          e(Av,{name:farm.farmerName||'Farmer'}),
+          e('div',null,
+            e('div',{className:'cr-name'},'🌾 '+(farm.farmerName||'Farmer')),
+            e('div',{className:'cr-role'},'Farmer (grower)'),
+            farm.farmerPhone&&(fViewed
+              ?e('div',{style:{fontSize:11,color:'var(--green)',fontWeight:700,marginTop:2}},'👁 Viewed '+fmtViewed(fViewed))
+              :e('div',{style:{fontSize:11,color:'var(--dim)',marginTop:2}},'⌛ Not yet opened')
+            )
+          )
+        ),
+        farm.farmerPhone&&e('div',{style:{fontFamily:'var(--m)',fontSize:'11px',color:'var(--dim)'}},farm.farmerPhone)
+      );
+    })(),
     /* Draft → show Publish button instead of Send */
     isDraft&&role==='admin'&&onPublish&&e('div',{className:'send-bar'},
       e('button',{className:'send-btn',onClick:onPublish,style:{background:'linear-gradient(135deg,#dc2626,#991b1b)',boxShadow:'0 4px 16px rgba(220,38,38,.3)'}},'🚀 Publish Job & Send Cards to Crew')
@@ -4306,18 +4392,19 @@ function buildJobCardSMS(job,crewId,farmList,crewList,appUrl){
   const endDate=jds.length?jds[jds.length-1]:job.startDate;
   const teamNames=job.crew.map(id=>{const c=gcl(id);if(!c)return null;return {c,id};}).filter(Boolean).map(({c,id})=>c.name+' ('+(getJobRole(job,id)||c.role)+')').join(', ');
   const jobName=job.jobName||(farm?farm.name:'Farm');
+  /* v4.6.11d — teaser body by design: minimal detail forces the crew to OPEN the link
+     to see the job, which is what writes the green 'viewed' receipt on the Overview.
+     Contractor name used ONCE (not twice) to hold the 2-segment ceiling even for long
+     names. GSM-7 only — never introduce emoji or em-dash here (em-dash forces UCS-2 and
+     doubles the bill). Full job detail lives behind the link, not in the SMS. */
   return [
-    'Hi '+crew.name.split(' ')[0]+'! You have been added to a job with '+CONTRACTOR_NAME+'.',
+    'Hi '+crew.name.split(' ')[0]+', you have been added to a job with '+CONTRACTOR_NAME+' starting '+fmtDate(job.startDate)+'.',
     '',
-    jobName+' - '+job.type,
-    'Start: '+fmtDate(job.startDate)+'  End: '+fmtDate(endDate),
-    'Sheep: '+(job.totalSheep||0).toLocaleString(),
-    farm?'Address: '+farm.address:'',
+    'Open the link to view the job:',
+    appUrl+'/?job='+job.id+'&crew='+crewId, /* v4.6.11f - query not fragment: fragments are stripped by Android PWA intent launches and some SMS linkifiers */
     '',
-    'View job details: '+appUrl+'#job='+job.id+'&crew='+crewId,
-    'Do not reply to this message - contact me directly.',
-    '- '+CONTRACTOR_NAME+' via myGang'
-  ].filter(l=>l!==null&&l!=='').join('\n');
+    'Please do not reply to this text - contact us directly with any questions.'
+  ].join('\n');
 }
 
 function buildFarmerSMS(job,farmerName,farmerPhone,farmList,appUrl){
@@ -4333,7 +4420,7 @@ function buildFarmerSMS(job,farmerName,farmerPhone,farmList,appUrl){
     'Sheep: '+(job.totalSheep||0).toLocaleString(),
     farm?'Address: '+farm.address:'',
     '',
-    'View job details: '+appUrl+'#job='+job.id,
+    'View job details: '+appUrl+'/?job='+job.id+'&crew=farmer.'+job.farmId, /* v4.6.11f - query not fragment */ /* v4.6.11c - farmer identity so the tap writes a job_views receipt via the existing deep-link handler */
     '',
     'Questions? Call or reply to this message.',
     '- '+CONTRACTOR_NAME+' via myGang'
@@ -4385,6 +4472,48 @@ function CrewSMSRow({id,c,views,status,onPreview,job,farmList,crewList,appUrl}){
   );
 }
 
+/* v4.6.11e — farmer's own row in Send Job Cards. Mirrors CrewSMSRow so a
+   contractor can send/re-send JUST the farmer link without re-texting the
+   crew. Viewed receipt keyed on the synthetic 'farmer.'+farmId identity the
+   farmer SMS link already carries (4.6.11c). Send needs farmerName+farmerPhone
+   — the tickbox fields below (or Edit Farm) supply them. */
+function FarmerSMSRow({job,views,onPreview,farmList,appUrl,farmerName,farmerPhone}){
+  const [fSending,setFSending]=useState(false);
+  const [fSent,setFSent]=useState(false);
+  const farmerId='farmer.'+job.farmId;
+  const viewedAt=views[farmerId];
+  const ready=!!farmerPhone; /* v4.6.11f: phone-only - requiring a name too hid Preview/Send entirely on a phone-but-no-name farm record (field case 15 Jul) */
+  const sendOne=async()=>{
+    if(!ready)return;
+    setFSending(true);
+    try{
+      await fetch('/api/send-sms',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({messages:[{to:farmerPhone,body:buildFarmerSMS(job,farmerName||'there',farmerPhone,farmList,appUrl)}]})});
+      setFSent(true);
+    }catch(e){}
+    setFSending(false);
+  };
+  return e('div',{className:'sms-row',style:{borderTop:'1px dashed var(--border)'}},
+    e('div',{className:'sms-l'},
+      e('div',{style:{width:40,height:40,borderRadius:'50%',background:'#5c2018',color:'#f5c518',display:'flex',alignItems:'center',justifyContent:'center',fontFamily:'var(--h)',fontSize:'15px',fontWeight:'700',flexShrink:0}},'F'),
+      e('div',null,
+        e('div',{className:'sms-name'},'🌾 '+(farmerName||'Farmer')),
+        e('div',{className:'sms-role'},'Farmer (grower)'),
+        e('div',{className:'sms-ph'},farmerPhone||e('span',{style:{color:'var(--red)'}},'No number — add below')),
+        viewedAt&&e('div',{style:{fontSize:11,color:'var(--green)',fontWeight:700,marginTop:2}},'👁 Viewed '+fmtViewed(viewedAt))
+      )
+    ),
+    e('div',{style:{display:'flex',flexDirection:'column',gap:4,alignItems:'flex-end'}},
+      ready&&e('button',{className:'prev-btn',onClick:()=>onPreview(farmerId)},'Preview'),
+      ready&&e('button',{type:'button',onClick:sendOne,disabled:fSending||fSent,
+        style:{fontSize:11,padding:'4px 10px',borderRadius:6,border:'none',cursor:'pointer',fontWeight:700,
+          background:fSent?'var(--green)':fSending?'var(--muted)':'var(--amber)',color:'#000'}},
+        fSent?'✓ Sent':fSending?'...':'Send'),
+      !viewedAt&&ready&&e('div',{style:{fontSize:10,color:'var(--muted)'}},'')
+    )
+  );
+}
+
 function SMSModal({job,onClose,onPreview,farmList,crewList}){
   const gfl=id=>farmList?farmList.find(f=>f.id===id):null;
   const gcl=id=>crewList?crewList.find(c=>c.id===id):null;
@@ -4418,8 +4547,11 @@ function SMSModal({job,onClose,onPreview,farmList,crewList}){
       return{to:c.phone,body:buildJobCardSMS(job,id,farmList,crewList,appUrl)};
     }).filter(Boolean);
 
-    if(sendToFarmer&&farmerPhone&&farmerName){
-      messages.push({to:farmerPhone,body:buildFarmerSMS(job,farmerName,farmerPhone,farmList,appUrl)});
+    /* v4.6.11f: PHONE-ONLY. phone AND name silently dropped the farmer when the farm
+       record had a phone but a blank name (real field case 15 Jul) - tickbox on, no SMS,
+       no error. Blank name falls back to 'there' in the greeting. */
+    if(sendToFarmer&&farmerPhone){
+      messages.push({to:farmerPhone,body:buildFarmerSMS(job,farmerName||'there',farmerPhone,farmList,appUrl)});
     }
 
     if(messages.length===0){setStatus('error');return;}
@@ -4457,7 +4589,9 @@ function SMSModal({job,onClose,onPreview,farmList,crewList}){
         job.crew.map(id=>{
           const c=gcl(id);if(!c)return null;
           return e(CrewSMSRow,{key:id,id,c,views,status,onPreview,job,farmList,crewList,appUrl});
-        })
+        }),
+        /* v4.6.11e — farmer send row (individual send/re-send without re-texting crew) */
+        job.farmId&&e(FarmerSMSRow,{job,views,onPreview,farmList,appUrl,farmerName,farmerPhone})
       ),
       status==='sending'&&e('div',{className:'sent-state'},
         e('div',{style:{fontSize:40,marginBottom:8}},'📤'),
@@ -4633,7 +4767,7 @@ function NewJobModal({onClose,onCreate,farmList,crewList,addFarm,addCrew,jobs}){
       const c=crewList.find(cr=>cr.id===id);
       if(c)initialCrewDetails[id]={...((lsGet(LS_WORKER_DEFAULTS)||{})[id]||{}),role:c.role}; /* v4.6.6 - seed sticky worker settings */
     });
-    /* v4.6.10 - job number: editable, duplicate-guarded; random generator retired (live collisions at Kimba) */
+    /* v4.6.10 - job number: editable, duplicate-guarded; random generator retired (live collisions in the field) */
     const _farmNm=(((farmList||[]).find(f=>f.id===farmId))||{}).name||'';
     const jnFinal=((((rJobNum.current&&rJobNum.current.value)||'').trim().toUpperCase())||suggestJobNumber(jobs,_farmNm));
     if((jobs||[]).some(j=>String(j.jobNumber||'').trim().toUpperCase()===jnFinal)){
@@ -4986,7 +5120,7 @@ function HomeScreen({jobs,role,setRole,onJob,onNew,onDatabase,onSchedule,contrac
       })()
     ),
     /* v4.6.10 - CREW VIEW: read_only devices see only their own jobs. Lead/Admin via role switch unlock the full app. */
-    role==='read_only'&&e('div',{style:{position:'fixed',top:58,left:0,right:0,bottom:0,background:'var(--bg)',zIndex:150,overflowY:'auto',WebkitOverflowScrolling:'touch',padding:'16px'}},
+    role==='read_only'&&((lsGet(LS_APP_SETTINGS)||{}).crewView!=='all')&&e('div',{style:{position:'fixed',top:58,left:0,right:0,bottom:0,background:'var(--bg)',zIndex:150,overflowY:'auto',WebkitOverflowScrolling:'touch',padding:'16px'}}, /* v4.6.11b - crewView:'all' removes the picker+filter entirely */
       !myId?e('div',null,
         e('div',{style:{fontFamily:'var(--h)',fontSize:20,fontWeight:800,margin:'8px 0 4px'}},'Who are you?'),
         e('div',{style:{color:'var(--muted)',fontSize:13,marginBottom:12}},'Pick your name to see your jobs. Leads and admins: use the role switch top-right.'),
@@ -5711,9 +5845,14 @@ function App(){
          wipe bug. Wrapping everything in try/catch ensures any error here can't escape
          this block, and the deep-link logging is non-essential anyway. */
       try{
+        /* v4.6.11f: query string FIRST (?job=&crew= - survives PWA intent launches and
+           SMS linkifiers, both of which strip #fragments; proven in the field 15 Jul),
+           hash accepted as fallback so previously-sent links keep working. */
+        const search=window.location.search;
         const hash=window.location.hash;
-        const jobMatch=hash.match(/[#&]job=([^&]+)/);
-        const crewMatch=hash.match(/[#&]crew=([^&]+)/);
+        const src=(search&&/[?&]job=/.test(search))?search:hash;
+        const jobMatch=src.match(/[?#&]job=([^&]+)/);
+        const crewMatch=src.match(/[?#&]crew=([^&]+)/);
         if(jobMatch){
           const jid=jobMatch[1];
           const cid=crewMatch?crewMatch[1]:null;
@@ -5737,7 +5876,9 @@ function App(){
               try{logSaveFailure('diag_load','job_views_swallowed','err='+(viewErr&&viewErr.message||'unknown'));}catch(e){}
             }
           }
-          window.location.hash='';
+          /* v4.6.11f: one replaceState strips query AND hash without a reload or a
+             history entry; hash assignment kept as fallback for ancient browsers. */
+          try{window.history.replaceState(null,'',window.location.pathname);}catch(e){window.location.hash='';}
         }
       }catch(deepLinkErr){
         /* Final safety net: deep-link processing must never break the app. */
@@ -5949,7 +6090,7 @@ function App(){
      on a true offline→online transition. A connection that degrades to flaky
      (requests time out) and then silently recovers never fires 'online', so a
      queued cell could sit unflushed until the next manual reopen — exactly the
-     Darby/Chloe case (banner stuck while signal was fine). This timer attempts
+     field case (banner stuck while signal was fine). This timer attempts
      a drain every 20s whenever we're online, fresh, and the queue is non-empty.
      Cheap (no-op when queue empty), and the only thing that makes the queue
      self-healing without user action. */
@@ -5960,7 +6101,7 @@ function App(){
       if(!navigator.onLine||!isFreshRef.current)return;
       /* Only drain the per-CELL tally queue here. The whole-job queue (LS_QUEUE)
          pushes a stripped job BLOB, and a background push of a stale blob is the
-         cross-device structure-overwrite hazard from the 6 Jun pilot contractor incident.
+         cross-device structure-overwrite hazard from the 6 Jun incident.
          Whole-job flush stays on the explicit goOnline/boot paths where freshness
          is already reconciled. Tally cells are per-cell last-write-wins and safe. */
       const qLen=(lsGet(LS_TALLY_QUEUE)||[]).length;
@@ -6101,6 +6242,11 @@ function App(){
        the effect returned, and no listeners were ever installed. flushNow / onVis self-check
        isFreshRef internally so they're safe to install before mountLoad finishes. */
     const flushNow=()=>{
+      /* v4.6.11e — dump any airborne per-cell tally writes into the queue
+         FIRST, before the isFresh gate below. writeTallyCell itself is not
+         freshness-gated (cells are last-write-wins user input), so the
+         hide-time rescue must not be gated either. */
+      try{flushInflightTallies();}catch(e){}
       /* Cancel any pending debounce — we're saving now */
       clearTimeout(saveTimer.current);
       /* PATCH v4.5.0: Don't push state we can't trust to Supabase.
@@ -6194,7 +6340,7 @@ function App(){
       const current=jobs.find(j=>j.id===selJobId);
       if(current){
         /* v4.6.3 — diag log so every direct save is traceable. The
-           Woolaway incident had a save at 10:55:27 with no diag trail
+           21 May incident had a save at 10:55:27 with no diag trail
            because goJob's direct dbSaveJob never logged. */
         try{
           const runIds=[];
