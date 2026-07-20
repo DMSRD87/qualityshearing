@@ -56,7 +56,11 @@ html,body{background:var(--bg);color:var(--text);font-family:var(--b);min-height
 .pmb-sub{font-size:12px;color:rgba(255,255,255,.4);margin-bottom:24px;text-align:center}
 .fab{position:fixed;bottom:22px;right:calc(50% - 466px);width:52px;height:52px;border-radius:50%;background:var(--amber);border:none;cursor:pointer;font-size:26px;color:#000;font-weight:700;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 24px rgba(245,158,11,.4);z-index:40;transition:transform .15s}
 .fab:active{transform:scale(.91)}
-@media(max-width:960px){.fab{right:18px}}
+@media(max-width:960px){.fab{right:18px}
+  /* v4.6.11i: inside the admin quick-action column the FAB must stack, not float -
+     fixed positioning made it sit on top of the My Database pill in this corner */
+  .fab-stack .fab{position:static}
+}
 /* v4.6.11g mobile layout pass - phones only, desktop untouched */
 @media(max-width:520px){
   html,body{overflow-x:hidden}
@@ -64,6 +68,9 @@ html,body{background:var(--bg);color:var(--text);font-family:var(--b);min-height
   .rt-ic{display:none}
   .rt-btn{padding:6px 7px;font-size:10px}
   .back-label{max-width:70px}
+  .sched-lbl{display:none}
+  .sched-btn{padding:6px 9px}
+  .logo{font-size:20px}
   .sched-btn{padding:6px 8px;font-size:12px}
   .sms-row{gap:8px}
   .sms-l{min-width:0;flex:1}
@@ -547,8 +554,9 @@ const LS_TALLY_QUEUE='mg_tally_queue_'+CONTRACTOR_SLUG; /* per-cell offline queu
 const LS_TALLY_DEAD='mg_tally_dead_'+CONTRACTOR_SLUG; /* v4.6.3g — quarantined cells (permanent rejection). Replayed once on boot in case the server-side blocker (e.g. missing kind constraint) was since fixed. */
 const LS_TALLY_META_QUEUE='mg_tally_meta_queue_'+CONTRACTOR_SLUG; /* v4.6.4 — offline/failed mob metadata (type/desc) updates to existing count cells; flushed alongside the tally queue. */
 const ROLE_TIMEOUT_HOURS=12; /* auto-reset after 12h inactivity */
-const APP_VERSION='v4.6.11h';
+const APP_VERSION='v4.6.11i';
 const SUPER_RATE=0.12; /* SG rate, 12% from 1 Jul 2025. One-line change if legislated rate moves. */
+/* v4.6.11i (19 Jul 2026, field feedback on 11h): (1) BOTTOM-RIGHT STACK FIXED - the admin Pay Week / My Database pills render in a fixed flex column at bottom-right, but the + FAB inside that same column is position:fixed, so it escapes the stack; on <=960px its right:18 lands in the pills' corner and the circle sits ON TOP of My Database (desktop unaffected because the FAB's right:calc(50% - 466px) parks it at the content edge, away from the pills - which is why laptop looked fine). Fix: .fab-stack .fab{position:static} at <=960px so all three stack cleanly with the column's gap. (2) HOME TOPBAR WIDTH - admin mode on Home is logo + Schedule + lock + four role buttons; ADMIN clipped off the right edge even with 11h text-only roles. On phones the Schedule label hides (icon-only, .sched-lbl span) and the logo drops to 20px - that recovers the width the role bar needs. Lock button kept: it's lockRole (drops the device back to view-only so an elevated session doesn't ride along when the phone is handed over). Desktop byte-identical rendering. */
 /* v4.6.11h (15 Jul 2026): mobile role buttons TEXT-ONLY, not emoji-only - field feedback on 11g was that bare emoji (clipboard vs key) are meaningless to crew seeing them cold. On phones the emoji hides and the small-caps label shows: VIEW FARMER LEAD ADMIN. Text-only is narrower than the emoji+label combo that caused the original overflow, so the topbar still fits with all four buttons + back + schedule on a ~412px viewport (back-label capped 70px for small-phone headroom). Desktop unchanged: emoji + label as always. */
 /* v4.6.11g (15 Jul 2026): MOBILE LAYOUT PASS - phone viewports were forced into horizontal scroll (users zooming out to see the whole interface). Root cause: the topbar role-toggle is flex-shrink:0 with four nowrap buttons; with a farmer on the job its natural width plus the 160px back-label exceeds a ~412px viewport, so the page itself scrolls sideways and every fixed/sheet element looks clipped (send-modal buttons at the right edge etc). Desktop untouched - all changes ride inside @media(max-width:520px): role buttons collapse to emoji-only (labels in .rt-lbl spans, hidden on phones; active state stays amber), tighter topbar padding/gap, back-label capped 90px, body overflow-x hidden (safe: all intentionally-wide content - tally grids, tabs, date strips, week scroll, summaries - already lives in its own overflow-x:auto container), and sms-row left column gets min-width:0 + ellipsis so long names shrink instead of pushing Preview/Send off-screen. */
 /* v4.6.11f (15 Jul 2026, shed-visit follow-up, built on the DEPLOYED 11e codebase): two fixes with DB-proven mechanisms. (1) QUERY-STRING DEEP LINKS - a crew Android did multiple clean full boots (pageshow persisted=false + fresh mountLoad) while its owner's SMS link was tapped, wrote NO job_views receipt, and logged ZERO deeplink/swallow errors: the boot handler ran and simply saw no hash, because Android strips the #fragment when handing a link to an installed PWA (and some SMS linkifiers end the tappable URL at '#'). An iPhone booting 30s later kept its fragment and receipted instantly. SMS builders now emit /?job=&crew= QUERY links - queries survive intent launches and linkifiers, and a query navigation into a warm instance is a FULL PAGE LOAD (unlike a hash change), so the boot handler covers warm-instance taps with no extra listener. Handler reads location.search first, falls back to location.hash so every previously-sent link keeps working; URL cleaned with history.replaceState (no reload, no history spam). HONEST SCOPE: legacy hash links tapped on fragment-stripping handsets still cannot receipt - the parameter never reaches the app; any 11f re-send fixes that person permanently. (2) FARMER NAME TRAP REMOVED - both farmer send paths required phone AND name; a real farm record with phone set but farmerName='' passed every UI check and then silently dropped the farmer from the bulk send AND hid the farmer row's Preview/Send buttons (tickbox on, phone showing, no SMS, no error, no buttons - the full field report 15 Jul). Both gates are now PHONE-ONLY; a blank name falls back to 'there' in the SMS greeting. */
@@ -2725,7 +2733,7 @@ function TopBar({role,setRole,onBack,backLabel,onSchedule}){
     e('div',{className:'topbar'},
       onBack?e('button',{className:'back-btn',onClick:onBack},e('span',{className:'back-arr'},'←'),e('span',{className:'back-label'},backLabel||'Back')):e('div',{className:'logo'},'my',e('em',null,'Gang')),
       e('div',{style:{display:'flex',alignItems:'center',gap:6}},
-        onSchedule&&role!=='read_only'&&role!=='farmer'&&e('button',{className:'sched-btn',onClick:onSchedule,title:'Schedule'},e('span',{className:'sched-btn-ic'},'📅'),e('span',null,'Schedule')),
+        onSchedule&&role!=='read_only'&&role!=='farmer'&&e('button',{className:'sched-btn',onClick:onSchedule,title:'Schedule'},e('span',{className:'sched-btn-ic'},'📅'),e('span',{className:'sched-lbl'},'Schedule')),
         role!=='read_only'&&e('button',{onClick:lockRole,title:'Lock',style:{background:'rgba(255,255,255,.1)',border:'none',borderRadius:6,padding:'4px 8px',color:'rgba(255,255,255,.5)',fontSize:14,cursor:'pointer'}},'🔒'),
         e('div',{className:'role-toggle'},[['👁','View','read_only'],...(farmerFarms.length?[['🌾','Farmer','farmer']]:[]),['📋','Lead','shed_lead'],['🔑','Admin','admin']].map(([ic,lbl,rv])=>e('button',{key:rv,className:`rt-btn${role===rv?' active':''}`,onClick:()=>requestRole(rv)},e('span',{className:'rt-ic'},ic),e('span',{className:'rt-lbl'},lbl))))
       )
@@ -5220,7 +5228,7 @@ function HomeScreen({jobs,role,setRole,onJob,onNew,onDatabase,onSchedule,contrac
         e('div',{style:{fontWeight:700}},'No jobs match "'+search+'"')
       )
     ),
-    e('div',{style:{position:'fixed',bottom:24,right:20,display:'flex',flexDirection:'column',gap:10,alignItems:'flex-end'}},
+    e('div',{className:'fab-stack',style:{position:'fixed',bottom:24,right:20,display:'flex',flexDirection:'column',gap:10,alignItems:'flex-end',zIndex:40}},
       role==='admin'&&e('button',{onClick:()=>{setPwOffset(0);setShowPayWeek(true);},style:{background:'var(--hdr)',border:'1px solid rgba(255,255,255,.2)',borderRadius:24,padding:'10px 18px',color:'#ffffff',fontWeight:700,fontSize:13,cursor:'pointer',boxShadow:'0 4px 14px rgba(0,0,0,.3)'}},'💰 Pay Week'),
       role==='admin'&&e('button',{onClick:onDatabase,style:{background:'var(--hdr)',border:'1px solid rgba(255,255,255,.2)',borderRadius:24,padding:'10px 18px',color:'#ffffff',fontWeight:700,fontSize:13,cursor:'pointer',boxShadow:'0 4px 14px rgba(0,0,0,.3)'}},'📂 My Database'),
       (role==='admin'||role==='shed_lead')&&e('button',{className:'fab',onClick:onNew},'+')
