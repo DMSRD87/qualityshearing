@@ -554,8 +554,9 @@ const LS_TALLY_QUEUE='mg_tally_queue_'+CONTRACTOR_SLUG; /* per-cell offline queu
 const LS_TALLY_DEAD='mg_tally_dead_'+CONTRACTOR_SLUG; /* v4.6.3g — quarantined cells (permanent rejection). Replayed once on boot in case the server-side blocker (e.g. missing kind constraint) was since fixed. */
 const LS_TALLY_META_QUEUE='mg_tally_meta_queue_'+CONTRACTOR_SLUG; /* v4.6.4 — offline/failed mob metadata (type/desc) updates to existing count cells; flushed alongside the tally queue. */
 const ROLE_TIMEOUT_HOURS=12; /* auto-reset after 12h inactivity */
-const APP_VERSION='v4.6.11i';
+const APP_VERSION='v4.6.11j';
 const SUPER_RATE=0.12; /* SG rate, 12% from 1 Jul 2025. One-line change if legislated rate moves. */
+/* v4.6.11j (20 Jul 2026): (1) PAY WEEK PAYDAY - now prefers contractor_settings.default_rates payDayOfWeek/payFrequency (durable, admin-set, boot-cached to LS_DEFAULT_RATES) over the latest-job rule. DB evidence 20 Jul: two contractors who deliberately picked Saturday (payday 6) had every subsequent job seeded payday 4 from stale pre-4.6.6 device templates (4 = old-picker 'Friday', post-fix Thursday), and the v4.6.9 latest-job rule adopted it -> Pay Week flipped to Thu-Wed periods ('reset from Saturday to Wednesday'). default_rates is the template devices can't overwrite; latest-job then device template remain the fallbacks, so contractors without default_rates behave exactly as before. NO period-maths change. (2) CREW CHIP DISAMBIGUATION - job-creation/crew-edit chips showed first name only; two same-first-name workers were identical chips. chipLabel adds a surname initial ONLY when first names clash in the group, full surname when initials clash too, phone last-3 when names are entirely identical. Unambiguous names render exactly as before. (3) QUICK-ACTION ORDER - + FAB moved to the top of the bottom-right admin stack (then Pay Week, then My Database) per field preference. (4) STAFF ROLE TOTALS - pay summary gains a role-combined block after per-worker staff lines (e.g. 'Wool Handlers (2): 16 runs - $1,360.00'); Pay Week report WEEK TOTALS gains role-combined wages. Roles with nothing to show are omitted. DISPLAY-ONLY: new lines assembled from already-computed per-worker figures; no pay calculation, superable base, tax, or totals maths touched; jobs whose reports are never re-generated are unaffected. */
 /* v4.6.11i (19 Jul 2026, field feedback on 11h): (1) BOTTOM-RIGHT STACK FIXED - the admin Pay Week / My Database pills render in a fixed flex column at bottom-right, but the + FAB inside that same column is position:fixed, so it escapes the stack; on <=960px its right:18 lands in the pills' corner and the circle sits ON TOP of My Database (desktop unaffected because the FAB's right:calc(50% - 466px) parks it at the content edge, away from the pills - which is why laptop looked fine). Fix: .fab-stack .fab{position:static} at <=960px so all three stack cleanly with the column's gap. (2) HOME TOPBAR WIDTH - admin mode on Home is logo + Schedule + lock + four role buttons; ADMIN clipped off the right edge even with 11h text-only roles. On phones the Schedule label hides (icon-only, .sched-lbl span) and the logo drops to 20px - that recovers the width the role bar needs. Lock button kept: it's lockRole (drops the device back to view-only so an elevated session doesn't ride along when the phone is handed over). Desktop byte-identical rendering. */
 /* v4.6.11h (15 Jul 2026): mobile role buttons TEXT-ONLY, not emoji-only - field feedback on 11g was that bare emoji (clipboard vs key) are meaningless to crew seeing them cold. On phones the emoji hides and the small-caps label shows: VIEW FARMER LEAD ADMIN. Text-only is narrower than the emoji+label combo that caused the original overflow, so the topbar still fits with all four buttons + back + schedule on a ~412px viewport (back-label capped 70px for small-phone headroom). Desktop unchanged: emoji + label as always. */
 /* v4.6.11g (15 Jul 2026): MOBILE LAYOUT PASS - phone viewports were forced into horizontal scroll (users zooming out to see the whole interface). Root cause: the topbar role-toggle is flex-shrink:0 with four nowrap buttons; with a farmer on the job its natural width plus the 160px back-label exceeds a ~412px viewport, so the page itself scrolls sideways and every fixed/sheet element looks clipped (send-modal buttons at the right edge etc). Desktop untouched - all changes ride inside @media(max-width:520px): role buttons collapse to emoji-only (labels in .rt-lbl spans, hidden on phones; active state stays amber), tighter topbar padding/gap, back-label capped 90px, body overflow-x hidden (safe: all intentionally-wide content - tally grids, tabs, date strips, week scroll, summaries - already lives in its own overflow-x:auto container), and sms-row left column gets min-width:0 + ellipsis so long names shrink instead of pushing Preview/Send off-screen. */
@@ -2016,6 +2017,7 @@ function generateSummary(job,period){
     if(taxPct>0||mz.amount>0||sz.amount>0)L.push('  NET TOTAL: $'+(gross-taxAmt-mz.amount-sz.amount).toFixed(2));
   });
   L.push('');L.push(dash);L.push('');L.push('SHED STAFF');L.push(dash);
+  const staffRoleTot={}; /* v4.6.11j - role-combined display totals, assembled from per-worker figures */
   shedIds.forEach(id=>{
     const c=gc(id);if(!c)return;
     const role=getJobRole(job,id);
@@ -2089,7 +2091,21 @@ function generateSummary(job,period){
     mz.lines.forEach(l=>L.push(l));
     sz.lines.forEach(l=>L.push(l));
     if(taxPct>0||mz.amount>0||sz.amount>0)L.push('  NET TOTAL: $'+(gross-taxAmt-mz.amount-sz.amount).toFixed(2));
+    /* v4.6.11j - accumulate role totals (earn = work wage excl travel, matching Superable) */
+    if(!staffRoleTot[role])staffRoleTot[role]={n:0,runs:0,wage:0};
+    staffRoleTot[role].n++;staffRoleTot[role].runs+=totalRuns;staffRoleTot[role].wage+=earn;
   });
+  /* v4.6.11j - STAFF ROLE TOTALS: combined per role, zero roles omitted. Display only. */
+  {
+    const srtKeys=Object.keys(staffRoleTot).filter(r=>staffRoleTot[r].wage>0.005||staffRoleTot[r].runs>0);
+    if(srtKeys.length>0){
+      L.push('');L.push('STAFF ROLE TOTALS');
+      srtKeys.forEach(r=>{
+        const t=staffRoleTot[r];
+        L.push('  '+r+'s ('+t.n+'): '+(t.runs>0?t.runs+' runs \u2014 ':'')+'$'+t.wage.toFixed(2)+' wages');
+      });
+    }
+  }
   const totalShorn=shIds.reduce((s,id)=>s+(shornBy[id].sh+shornBy[id].cr),0);
   const jobTotal=totalShEarn+totalTeamLoad+totalShedEarn+totalTravel+totalStand;
   /* MOB TOTALS - grower-invoice view, base rates only. Loadings shown as a separate line. */
@@ -2331,6 +2347,14 @@ function generatePayWeekReport(jobs,period,contractorName){
   workers.forEach(w=>{const g=w.piece+w.teamLoad+w.staffEarn+w.travel+w.stand;tg+=g;ts+=w.piece+w.teamLoad+w.staffEarn+w.standSuper;tt+=w.tax;tm+=w.mess;tsu+=w.sundries;});
   L.push(dash);L.push('WEEK TOTALS');L.push(dash);
   L.push('Workers: '+workers.length+'   Sheds: '+(sheds.join(', ')||'none'));
+  /* v4.6.11j - role-combined staff wages across the period (staffEarn = work wage,
+     travel/stand excluded, matching the per-worker Superable basis). Zero roles omitted. */
+  {
+    const rt={};
+    workers.forEach(w=>{if(isSh(w))return;if(w.staffEarn<=0.005)return;if(!rt[w.role])rt[w.role]={n:0,wage:0};rt[w.role].n++;rt[w.role].wage+=w.staffEarn;});
+    const rk=Object.keys(rt);
+    if(rk.length){L.push('');L.push('STAFF ROLE TOTALS');rk.forEach(r=>{L.push('  '+r+'s ('+rt[r].n+'): $'+rt[r].wage.toFixed(2)+' wages');});}
+  }
   L.push('Gross: $'+tg.toFixed(2)+'   Superable: $'+ts.toFixed(2)+'   Super ('+(SUPER_RATE*100).toFixed(0)+'%): $'+(ts*SUPER_RATE).toFixed(2));
   L.push('Tax: -$'+tt.toFixed(2)+'   Mess: -$'+tm.toFixed(2)+'   Sundries: -$'+tsu.toFixed(2)+'   NET: $'+(tg-tt-tm-tsu).toFixed(2));
   if(checks.length){
@@ -2358,6 +2382,27 @@ function generatePayWeekCSV(jobs,period){
     [['GROSS',gross],['SUPERABLE',superable],['SUPER',superable*SUPER_RATE],['TAX',-p.tax],['MESS',-p.mess],['SUNDRIES',-p.sundries],['NET',gross-p.tax-p.mess-p.sundries]].forEach(kv=>rows.push([p.name,p.role,'','',kv[0],'','',kv[1].toFixed(2),'']));
   });
   return rows.map(r=>r.map(esc).join(',')).join('\n');
+}
+/* v4.6.11j - crew chip disambiguation. First-name-only chips made same-first-name workers
+   indistinguishable at job creation. Escalates only as needed: unique first name -> unchanged;
+   first-name clash -> surname initial; initial clash too -> full surname; entirely identical
+   or single-word names -> phone last 3. */
+function chipLabel(c,members){
+  const first=(c.name||'').split(' ')[0];
+  const fl=first.toLowerCase();
+  const clash=members.filter(m=>((m.name||'').split(' ')[0]||'').toLowerCase()===fl).length>1;
+  if(!clash)return first;
+  const parts=(c.name||'').split(' ');
+  const sur=parts.slice(1).join(' ');
+  if(sur){
+    const myIni=sur.charAt(0).toLowerCase();
+    const iniClash=members.filter(m=>{
+      const p=(m.name||'').split(' ');
+      return (p[0]||'').toLowerCase()===fl&&(p.slice(1).join(' ').charAt(0)||'').toLowerCase()===myIni;
+    }).length>1;
+    return first+' '+(iniClash?sur:sur.charAt(0)+'.');
+  }
+  return first+(c.phone?' \u00b7'+String(c.phone).slice(-3):'');
 }
 /* v4.6.10 - job number suggestion: FARM prefix + per-contractor sequence. Legacy 6-digit numbers
    (no '-NNNN' tail) are ignored, so the first new-format job is PREF-0001. */
@@ -4867,7 +4912,7 @@ function NewJobModal({onClose,onCreate,farmList,crewList,addFarm,addCrew,jobs}){
             e('div',{className:'crew-group-lbl'},r+'s'),
             e('div',{className:'chip-wrap'},
               members.map(c=>e('div',{key:c.id,className:`chip${selCrew.includes(c.id)?' sel':''}`,onClick:()=>tog(c.id)},
-                c.name.split(' ')[0]+(c.hasVehicle?' 🚗':'')
+                chipLabel(c,members)+(c.hasVehicle?' 🚗':'')
               ))
             )
           )),
@@ -5026,7 +5071,7 @@ function EditJobScreen({job,onSave,onClose,farmList,addFarm,crewList,addCrew}){
             e('div',{className:'crew-group-lbl'},r+'s'),
             e('div',{className:'chip-wrap'},
               members.map(c=>e('div',{key:c.id,className:`chip${selCrew.includes(c.id)?' sel':''}`,onClick:()=>tog(c.id)},
-                c.name.split(' ')[0]+(c.hasVehicle?' 🚗':'')
+                chipLabel(c,members)+(c.hasVehicle?' 🚗':'')
               ))
             )
           )),
@@ -5229,20 +5274,27 @@ function HomeScreen({jobs,role,setRole,onJob,onNew,onDatabase,onSchedule,contrac
       )
     ),
     e('div',{className:'fab-stack',style:{position:'fixed',bottom:24,right:20,display:'flex',flexDirection:'column',gap:10,alignItems:'flex-end',zIndex:40}},
+      /* v4.6.11j - field preference: + on top, then Pay Week, then My Database */
+      (role==='admin'||role==='shed_lead')&&e('button',{className:'fab',onClick:onNew},'+'),
       role==='admin'&&e('button',{onClick:()=>{setPwOffset(0);setShowPayWeek(true);},style:{background:'var(--hdr)',border:'1px solid rgba(255,255,255,.2)',borderRadius:24,padding:'10px 18px',color:'#ffffff',fontWeight:700,fontSize:13,cursor:'pointer',boxShadow:'0 4px 14px rgba(0,0,0,.3)'}},'💰 Pay Week'),
-      role==='admin'&&e('button',{onClick:onDatabase,style:{background:'var(--hdr)',border:'1px solid rgba(255,255,255,.2)',borderRadius:24,padding:'10px 18px',color:'#ffffff',fontWeight:700,fontSize:13,cursor:'pointer',boxShadow:'0 4px 14px rgba(0,0,0,.3)'}},'📂 My Database'),
-      (role==='admin'||role==='shed_lead')&&e('button',{className:'fab',onClick:onNew},'+')
+      role==='admin'&&e('button',{onClick:onDatabase,style:{background:'var(--hdr)',border:'1px solid rgba(255,255,255,.2)',borderRadius:24,padding:'10px 18px',color:'#ffffff',fontWeight:700,fontSize:13,cursor:'pointer',boxShadow:'0 4px 14px rgba(0,0,0,.3)'}},'📂 My Database')
     ),
     /* v4.6.7 - Pay Week Report sheet (admin) */
     showPayWeek&&(function(){
       var last=lsGet(LS_LAST_RATES)||{};
-      /* v4.6.9 - derive payday from the latest job so the report never depends on a stale device template */
+      /* v4.6.9 - derive payday from the latest job so the report never depends on a stale device template.
+         v4.6.11j - contractor_settings.default_rates comes FIRST: the latest-job rule was itself
+         poisoned by stale templates re-seeding every new job (proven 20 Jul: deliberate Saturday
+         picks overridden by payday-4 template jobs -> Thu-Wed periods). default_rates is
+         admin-set and device-proof; unset falls through to the previous behaviour exactly. */
+      var dfltPW=lsGet(LS_DEFAULT_RATES)||{};
       var srcJob=(jobs||[]).filter(function(j){return j&&j.rates&&j.rates.payDayOfWeek!=null&&j.status!=='Draft';})
         .sort(function(a,b){return String(b.startDate||'').localeCompare(String(a.startDate||''));})[0];
       var srcRates=srcJob?srcJob.rates:{};
-      var pd=srcRates.payDayOfWeek!=null?srcRates.payDayOfWeek:(last.payDayOfWeek!=null?last.payDayOfWeek:5);
-      var fq=(srcRates.payFrequency&&srcRates.payFrequency!=='shed')?srcRates.payFrequency
-        :((last.payFrequency&&last.payFrequency!=='shed')?last.payFrequency:'weekly');
+      var pd=dfltPW.payDayOfWeek!=null?dfltPW.payDayOfWeek:(srcRates.payDayOfWeek!=null?srcRates.payDayOfWeek:(last.payDayOfWeek!=null?last.payDayOfWeek:5));
+      var fq=(dfltPW.payFrequency&&dfltPW.payFrequency!=='shed')?dfltPW.payFrequency
+        :((srcRates.payFrequency&&srcRates.payFrequency!=='shed')?srcRates.payFrequency
+        :((last.payFrequency&&last.payFrequency!=='shed')?last.payFrequency:'weekly'));
       var period=getPeriodByOffset(localToday(),pd,pwOffset,fq);
       var txt=(pwView==='tallies')?generateTallyTrends(jobs,period,fq,4):generatePayWeekReport(jobs,period,contractorName);
       var doCopy=function(t,set){navigator.clipboard.writeText(t).then(function(){set(true);setTimeout(function(){set(false);},2000);}).catch(function(){});};
