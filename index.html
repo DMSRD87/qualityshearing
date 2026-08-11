@@ -394,11 +394,16 @@ textarea.fi{resize:none;line-height:1.5}
 .tog-row{display:flex;background:var(--card2);border:1px solid var(--border);border-radius:8px;overflow:hidden}
 .tog-opt{flex:1;padding:10px;text-align:center;font-size:14px;font-weight:600;cursor:pointer;color:var(--muted);transition:.15s;border:none;background:none}
 .tog-opt.on{background:var(--amber);color:#000}
-.farm-list{background:var(--card2);border:1px solid var(--border);border-radius:8px;max-height:180px;overflow-y:auto}
-.farm-opt{padding:11px 12px;border-bottom:1px solid var(--border);cursor:pointer;transition:.12s}
+.farm-list{background:var(--card);border:1px solid var(--border);border-radius:8px;max-height:260px;overflow-y:auto}
+.farm-opt{padding:13px 14px;border-bottom:1px solid var(--border);cursor:pointer;transition:.12s;background:var(--card);position:relative}
+.farm-opt:hover{background:var(--card2)}
 .farm-opt:last-child{border-bottom:none}
-.farm-opt.sel,.farm-opt:active{background:var(--amberD)}
-.fo-name{font-weight:600;font-size:14px}.fo-addr{font-size:12px;color:var(--muted);margin-top:2px}
+.farm-opt.sel,.farm-opt:active{background:var(--amberD);box-shadow:inset 4px 0 0 var(--amber)}
+.farm-opt.sel{padding-left:18px}
+.farm-opt.sel .fo-name{color:var(--text);font-weight:800}
+.farm-opt.sel .fo-addr{color:var(--text);opacity:.75}
+.farm-opt.sel::after{content:'\2713';position:absolute;right:14px;top:50%;transform:translateY(-50%);color:var(--amber);font-weight:800;font-size:17px}
+.fo-name{font-weight:700;font-size:15px;color:var(--text)}.fo-addr{font-size:13px;color:var(--muted);margin-top:3px}
 .chip-wrap{display:flex;flex-wrap:wrap;gap:6px}
 .chip{padding:6px 10px;border-radius:20px;font-size:12px;font-weight:600;cursor:pointer;background:var(--card2);border:1px solid var(--border);color:var(--muted);transition:.15s}
 .chip.sel{background:var(--amberD);border-color:var(--amberB);color:var(--amber)}
@@ -418,7 +423,7 @@ textarea.fi{resize:none;line-height:1.5}
 .if-btns{display:flex;gap:6px}
 .if-save{flex:1;padding:9px;background:var(--amber);border:none;border-radius:7px;font-size:13px;font-weight:700;color:#000;cursor:pointer;font-family:var(--b)}
 .if-cancel{padding:9px 14px;background:none;border:1px solid var(--border);border-radius:7px;font-size:13px;cursor:pointer;color:var(--muted);font-family:var(--b)}
-.farm-search{width:100%;padding:9px 12px;background:var(--card);border:1px solid var(--border);border-radius:8px 8px 0 0;font-family:var(--b);font-size:13px;color:var(--text);outline:none;border-bottom:none}
+.farm-search{width:100%;padding:11px 12px;background:var(--card);border:1px solid var(--border);border-radius:8px 8px 0 0;font-family:var(--b);font-size:15px;color:var(--text);outline:none;border-bottom:none}
 .farm-search:focus{border-color:var(--amber)}
 /* ── DRAFT STYLING (job cards + banners) ── */
 .jlc.draft{border-left:4px solid var(--red);background:linear-gradient(to right,var(--redD) 0%,var(--card) 40%)}
@@ -555,7 +560,7 @@ const LS_TALLY_QUEUE='mg_tally_queue_'+CONTRACTOR_SLUG; /* per-cell offline queu
 const LS_TALLY_DEAD='mg_tally_dead_'+CONTRACTOR_SLUG; /* v4.6.3g — quarantined cells (permanent rejection). Replayed once on boot in case the server-side blocker (e.g. missing kind constraint) was since fixed. */
 const LS_TALLY_META_QUEUE='mg_tally_meta_queue_'+CONTRACTOR_SLUG; /* v4.6.4 — offline/failed mob metadata (type/desc) updates to existing count cells; flushed alongside the tally queue. */
 const ROLE_TIMEOUT_HOURS=12; /* auto-reset after 12h inactivity */
-const APP_VERSION='v4.6.14';
+const APP_VERSION='v4.6.14b';
 const SUPER_RATE=0.12; /* SG rate, 12% from 1 Jul 2025. One-line change if legislated rate moves. */
 /* v4.6.12a (26 Jul 2026): fleet-alignment rebuild - feature content identical to v4.6.12; new version string per one-build-one-version discipline. */
 /* v4.6.12 (20 Jul 2026): PER-CREW PIN, contractor-controlled (design settled with the founder before any deploy; an earlier worker-self-set draft was discarded - self-set has a bootstrap race where an imposter claims a name first and sets its PIN). MODEL: every worker is AUTO-ASSIGNED a random 4-digit PIN (genCrewPin at creation; existing crew backfilled via SQL per contractor at rollout). The PIN is stored READABLE at crew_members.data.pin and shown on the worker's card in My Database (admin-only surface) with a regenerate button and a 'Text PIN' button (plain GSM-7 SMS via /api/send-sms so the worker has it on file). DELIBERATE ENGINEERING CALL, not an oversight: with the shared anon key and a 4-digit space, a hash is brute-forced in under a second by anyone determined, so hashing here is theatre; readable storage buys contractor look-up-ability at no real security cost. This is a visibility gate against casual wrong-name claims - real authentication is v5 (Supabase Auth + RLS). CLAIM FLOW: picking a name with a PIN demands it (CrewPinVerifyModal, direct compare, works offline once the record is synced; names with PINs show a lock in the picker); 'Not you?' re-challenges; app_settings.requireCrewPin=true blocks claiming names with NO pin ('ask your contractor') for hard-lockdown contractors, off = pinless names bind as before. Workers never set or change their own PIN; contractor regenerates on request (specific chosen PINs = SRD via SQL). Lead/Admin PINs and the per-job PIN untouched. */
@@ -2906,7 +2911,7 @@ function TopBar({role,setRole,onBack,backLabel,onSchedule}){
     e('div',{className:'topbar'},
       onBack?e('button',{className:'back-btn',onClick:onBack},e('span',{className:'back-arr'},'←'),e('span',{className:'back-label'},backLabel||'Back')):e('div',{className:'logo'},'my',e('em',null,'Gang')),
       e('div',{style:{display:'flex',alignItems:'center',gap:6}},
-        onSchedule&&role!=='read_only'&&role!=='farmer'&&e('button',{className:'sched-btn',onClick:onSchedule,title:'Schedule'},e('span',{className:'sched-btn-ic'},'📅'),e('span',{className:'sched-lbl'},'Schedule')),
+        onSchedule&&role!=='read_only'&&role!=='farmer'&&role!=='shed_lead'&&e('button',{className:'sched-btn',onClick:onSchedule,title:'Schedule'},e('span',{className:'sched-btn-ic'},'📅'),e('span',{className:'sched-lbl'},'Schedule')),
         role!=='read_only'&&e('button',{onClick:lockRole,title:'Lock',style:{background:'rgba(255,255,255,.1)',border:'none',borderRadius:6,padding:'4px 8px',color:'rgba(255,255,255,.5)',fontSize:14,cursor:'pointer'}},'🔒'),
         e('div',{className:'role-toggle'},[['👁','View','read_only'],...(farmerFarms.length?[['🌾','Farmer','farmer']]:[]),['📋','Lead','shed_lead'],['🔑','Admin','admin']].map(([ic,lbl,rv])=>e('button',{key:rv,className:`rt-btn${role===rv?' active':''}`,onClick:()=>requestRole(rv)},e('span',{className:'rt-ic'},ic),e('span',{className:'rt-lbl'},lbl))))
       )
@@ -5448,9 +5453,9 @@ function MyTallies({myId,me,jobs}){
   const shedList=Object.values(sheds).sort((a,b)=>b.last.localeCompare(a.last));
 
   const chip=(k,lbl)=>e('button',{key:k,onClick:()=>setPeriod(k),
-    style:{background:period===k?'var(--accent)':'var(--card)',color:period===k?'#fff':'var(--muted)',
-      border:'1px solid var(--border)',borderRadius:8,padding:'7px 12px',fontSize:13,fontWeight:700,
-      marginRight:6,marginBottom:6,cursor:'pointer'}},lbl);
+    style:{background:period===k?'var(--amber)':'var(--card)',color:period===k?'#000':'var(--muted)',
+      border:'1px solid '+(period===k?'var(--amber)':'var(--border)'),borderRadius:8,padding:'8px 13px',fontSize:13,
+      fontWeight:period===k?800:600,marginRight:6,marginBottom:6,cursor:'pointer'}},lbl);
 
   const stat=(lbl,val)=>e('div',{style:{background:'var(--card)',border:'1px solid var(--border)',borderRadius:10,padding:'12px 14px'}},
     e('div',{style:{color:'var(--muted)',fontSize:12,marginBottom:2}},lbl),
@@ -5615,8 +5620,9 @@ function HomeScreen({jobs:allJobs,role,setRole,onJob,onNew,onDatabase,onSchedule
             e('button',{onClick:()=>{lsSet(LS_MY_ID,'');setMyId(null);},style:{background:'none',border:'none',color:'var(--muted)',fontSize:12,cursor:'pointer',textDecoration:'underline'}},'Not you?')),
           e('div',{style:{display:'flex',gap:8,margin:'10px 0 14px'}},
             ['jobs','tallies'].map(t=>e('button',{key:t,onClick:()=>setCrewTab(t),
-              style:{flex:1,background:crewTab===t?'var(--accent)':'var(--card)',color:crewTab===t?'#fff':'var(--muted)',
-                border:'1px solid var(--border)',borderRadius:8,padding:'9px 0',fontSize:14,fontWeight:700,cursor:'pointer'}},
+              style:{flex:1,background:crewTab===t?'var(--amber)':'var(--card)',color:crewTab===t?'#000':'var(--muted)',
+                border:'1px solid '+(crewTab===t?'var(--amber)':'var(--border)'),borderRadius:8,padding:'11px 0',
+                fontSize:15,fontWeight:crewTab===t?800:600,cursor:'pointer'}},
               t==='jobs'?'My jobs':'My tallies'))),
           crewTab==='jobs'?e('div',null,
             e('div',{style:{color:'var(--muted)',fontSize:13,marginBottom:12}},'Your jobs — recent and the week ahead'),
@@ -5647,7 +5653,7 @@ function HomeScreen({jobs:allJobs,role,setRole,onJob,onNew,onDatabase,onSchedule
       ),
 
       /* Drafts pill — only shown if drafts exist; directs to Schedule. Hidden for read-only role. */
-      drafts.length>0&&onSchedule&&role!=='read_only'&&e('div',{className:'drafts-pill',onClick:onSchedule},
+      drafts.length>0&&onSchedule&&role!=='read_only'&&role!=='shed_lead'&&e('div',{className:'drafts-pill',onClick:onSchedule},
         e('div',{className:'drafts-pill-ic'},'◌'),
         e('div',{className:'drafts-pill-body'},
           e('div',{className:'drafts-pill-t'},drafts.length+' draft'+(drafts.length>1?'s':'')+' planned'),
@@ -5670,8 +5676,11 @@ function HomeScreen({jobs:allJobs,role,setRole,onJob,onNew,onDatabase,onSchedule
       e(Sec,{title:'Active',items:active,badge:active.length||null}),
       e(Sec,{title:'Completed',items:completed,badge:completed.length||null}),
 
-      /* Archive section */
-      charged.length>0&&e('div',null,
+      /* Archive section - v4.6.14b: ADMIN ONLY. A shed lead has no reason to read
+         back through charged-out work, and the archive is the contractor's billing
+         record, not a crew tool. Completed stays visible to leads deliberately -
+         they still need yesterday's shed. */
+      role==='admin'&&charged.length>0&&e('div',null,
         e('div',{style:{padding:'8px 16px'}},
           e('button',{onClick:()=>setShowArchive(p=>!p),style:{display:'flex',alignItems:'center',gap:8,background:'none',border:'none',cursor:'pointer',padding:0}},
             e('div',{className:'slbl',style:{margin:0}},'📦 Archive'),
@@ -6836,7 +6845,13 @@ function App(){
   const selJob=jobs.find(j=>j.id===selJobId);
   const setSelJob=fn=>setJobs(prev=>prev.map(j=>j.id===selJobId?fn(j):j));
   const [jobPinPending,setJobPinPending]=useState(null); /* job id awaiting PIN */
+  /* v4.6.14b - a shed lead may not open a Charged Out or Draft job. Hiding a job
+     from a list is not the same as closing it: a bookmark, a back button or a
+     restored selJobId all reach the job screen without ever touching the list.
+     Guarded here AND at the render, so no path arrives by another route. */
+  const leadBlocked=j=>role==='shed_lead'&&!!j&&(j.status==='Charged Out'||j.status==='Draft');
   const goJob=id=>{
+    if(leadBlocked(jobs.find(j=>j.id===id))){setScreen('home');setSelJobId(null);return;}
     /* Save current job immediately before switching */
     if(selJobId&&selJobId!==id){
       const current=jobs.find(j=>j.id===selJobId);
@@ -6866,6 +6881,15 @@ function App(){
       setSelJobId(id);setScreen('job');
     }
   };
+  /* v4.6.14b - screens that a role can no longer reach must REDIRECT, never render
+     nothing. Switching role while on Schedule previously left a blank screen with
+     no way back; the same trap now exists for a lead on a charged-out job. */
+  useEffect(()=>{
+    if(screen==='schedule'&&(role==='read_only'||role==='shed_lead'||role==='farmer')){
+      setScreen('home');setSelJobId(null);return;
+    }
+    if(screen==='job'&&selJob&&leadBlocked(selJob)){setScreen('home');setSelJobId(null);}
+  },[screen,role,selJob&&selJob.status]);
   const goHome=()=>{
     /* Save current job immediately before going home */
     if(selJobId){const current=jobs.find(j=>j.id===selJobId);if(current)dbSaveJob(current).catch(()=>{});}
@@ -6953,8 +6977,8 @@ function App(){
   return e('div',{style:{paddingTop:(!isOnline||(isOnline&&!isFreshState&&isLoaded.current)||(isOnline&&isFreshState&&isLoaded.current&&pendingCount>0))?20:0}},
     e(StatusBar),
     screen==='home'&&e(HomeScreen,{jobs,role,setRole:persistRole,onJob:goJob,onNew:()=>setShowNew(true),onDatabase:()=>setShowDatabase(true),onSchedule:goSchedule,contractorName:CONTRACTOR_NAME}),
-    screen==='schedule'&&role!=='read_only'&&e(ScheduleScreen,{jobs,role,setRole:persistRole,onBack:goHome,onJob:goJob,onNew:()=>setShowNew(true),onNewDraft:()=>setShowNew(true)}),
-    screen==='job'&&selJob&&e(JobDetailScreen,{job:selJob,setJob:setSelJob,role,setRole:persistRole,onBack:goHome,onSend:()=>setShowSMS(true),onBroadcast:()=>setShowBroadcast(true),gfl,gcl,onEdit:()=>setShowEdit(true),onPublish:publishJob,onDeleteJob:async()=>{const id=selJob.id;setSelJobId(null);await dbDeleteJob(id);setJobs(p=>p.filter(j=>j.id!==id));setScreen('home');setShowSMS(false);setPreviewId(null);setJobPinPending(null);},initialTab:deepLinkTab,crewList,addCrew,key:selJobId+(deepLinkTab||'')}),
+    screen==='schedule'&&role!=='read_only'&&role!=='shed_lead'&&e(ScheduleScreen,{jobs,role,setRole:persistRole,onBack:goHome,onJob:goJob,onNew:()=>setShowNew(true),onNewDraft:()=>setShowNew(true)}),
+    screen==='job'&&selJob&&!leadBlocked(selJob)&&e(JobDetailScreen,{job:selJob,setJob:setSelJob,role,setRole:persistRole,onBack:goHome,onSend:()=>setShowSMS(true),onBroadcast:()=>setShowBroadcast(true),gfl,gcl,onEdit:()=>setShowEdit(true),onPublish:publishJob,onDeleteJob:async()=>{const id=selJob.id;setSelJobId(null);await dbDeleteJob(id);setJobs(p=>p.filter(j=>j.id!==id));setScreen('home');setShowSMS(false);setPreviewId(null);setJobPinPending(null);},initialTab:deepLinkTab,crewList,addCrew,key:selJobId+(deepLinkTab||'')}),
     showSMS&&selJob&&e(SMSModal,{job:selJob,onClose:()=>{setShowSMS(false);setPreviewId(null);},onPreview:id=>setPreviewId(id),farmList,crewList}),
     showBroadcast&&selJob&&e(BroadcastModal,{job:selJob,onClose:()=>setShowBroadcast(false),farmList,crewList}),
     previewId&&selJob&&e(JobCardView,{job:selJob,crewId:previewId,onClose:()=>setPreviewId(null),gfl,gcl}),
