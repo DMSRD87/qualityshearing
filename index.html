@@ -1694,15 +1694,39 @@ function fmtWeekRange(mondayStr){const [y1,m1,d1]=mondayStr.split('-').map(Numbe
 function statusClass(s){return s==='Draft'?'draft':s==='Completed'?'completed':s==='Charged Out'?'charged':s==='Dispatched'?'dispatched':'active';}
 const mobsOf=run=>run.mobs||[];
 function calcProg(job){
-  /* Include both shearers and crutchers in progress count */
+  /* v4.6.14 - shearing and crutching are counted SEPARATELY. They are different
+     work at different rates and a combined figure is meaningless: 150 shorn plus
+     100 crutched is not 250 of anything. `sh` and `cr` are the real numbers.
+     `shorn` remains the sum and exists ONLY to drive pct against totalSheep,
+     which is a single "sheep through the shed" target. Never display `shorn`. */
   const shIds=job.crew.filter(id=>{const r=getJobRole(job,id);return r==='Shearer'||r==='Crutcher';});
-  let shorn=0,daysWorked=0;
-  Object.entries(job.runs||{}).forEach(([,rs])=>{if(rs&&rs.length){daysWorked++;rs.forEach(run=>{mobsOf(run).forEach(mob=>{shIds.forEach(id=>{shorn+=mob.counts[id]||0;});});});}});
-  /* Also count any counts regardless of role if no shearers/crutchers found */
-  if(shIds.length===0){
-    Object.entries(job.runs||{}).forEach(([,rs])=>{if(rs&&rs.length){rs.forEach(run=>{mobsOf(run).forEach(mob=>{Object.values(mob.counts||{}).forEach(c=>{shorn+=c||0;});});});}});
-  }
-  return{shorn,pct:job.totalSheep>0?Math.min(shorn/job.totalSheep*100,100):0,daysWorked,shIds};
+  let sh=0,cr=0,daysWorked=0;
+  const shDays=new Set(),crDays=new Set();
+  const anyRole=shIds.length===0;
+  Object.entries(job.runs||{}).forEach(([date,rs])=>{
+    if(!rs||!rs.length)return;
+    daysWorked++;
+    rs.forEach(run=>{mobsOf(run).forEach(mob=>{
+      const isCr=mob.type==='Crutching';
+      let n=0;
+      if(anyRole)Object.values(mob.counts||{}).forEach(c=>{n+=c||0;});
+      else shIds.forEach(id=>{n+=mob.counts[id]||0;});
+      if(!n)return;
+      if(isCr){cr+=n;crDays.add(date);}else{sh+=n;shDays.add(date);}
+    });});
+  });
+  const shorn=sh+cr;
+  return{sh,cr,shorn,shDays:shDays.size,crDays:crDays.size,
+    pct:job.totalSheep>0?Math.min(shorn/job.totalSheep*100,100):0,daysWorked,shIds};
+}
+/* v4.6.14 - one place that formats a split figure, so no screen can drift back
+   to a combined number. Returns e.g. "800 shorn" / "4,200 crutched" /
+   "800 shorn \u00b7 4,200 crutched". Zero-safe. */
+function fmtSplit(sh,cr){
+  const a=[];
+  if(sh>0)a.push(sh.toLocaleString()+' shorn');
+  if(cr>0)a.push(cr.toLocaleString()+' crutched');
+  return a.length?a.join(' \u00b7 '):'\u2014';
 }
 function shearerStats(job,viewDate,shIds){
   const r={};shIds.forEach(id=>{r[id]={shBF:0,shDay:0,crBF:0,crDay:0};});
@@ -2942,12 +2966,14 @@ function TopBar({role,setRole,onBack,backLabel,onSchedule}){
 function WeekBanner({jobs,contractorName}){
   const active=jobs.filter(j=>j.status==='Active');
   const crew=new Set(jobs.filter(j=>j.status==='Active'||j.status==='Dispatched').flatMap(j=>j.crew)).size;
-  const shorn=active.reduce((s,j)=>s+calcProg(j).shorn,0);
+  const progs=active.map(j=>calcProg(j));
+  const shorn=progs.reduce((s,p)=>s+p.shorn,0);
+  const bSh=progs.reduce((s,p)=>s+p.sh,0),bCr=progs.reduce((s,p)=>s+p.cr,0);
   const total=active.reduce((s,j)=>s+j.totalSheep,0);
   const today=new Date().toLocaleDateString('en-AU',{weekday:'long',day:'numeric',month:'short'});
   return e('div',{className:'week-banner'},
     e('div',{className:'wb-top'},e('div',{className:'wb-title'},contractorName||'myGang'),e('div',{className:'wb-date'},today)),
-    e('div',{className:'wb-stats'},e('div',{className:'wb-stat'},e('div',{className:'wb-num'},active.length),e('div',{className:'wb-lbl'},'Active')),e('div',{className:'wb-stat'},e('div',{className:'wb-num'},jobs.filter(j=>j.status==='Completed').length),e('div',{className:'wb-lbl'},'Done')),e('div',{className:'wb-stat'},e('div',{className:'wb-num'},crew),e('div',{className:'wb-lbl'},'Crew Out')),e('div',{className:'wb-stat'},e('div',{className:'wb-num'},total-shorn>0?(total-shorn).toLocaleString():'✓'),e('div',{className:'wb-lbl'},'Remaining')))
+    e('div',{className:'wb-stats'},e('div',{className:'wb-stat'},e('div',{className:'wb-num'},active.length),e('div',{className:'wb-lbl'},'Active')),e('div',{className:'wb-stat'},e('div',{className:'wb-num'},jobs.filter(j=>j.status==='Completed').length),e('div',{className:'wb-lbl'},'Done')),e('div',{className:'wb-stat'},e('div',{className:'wb-num'},crew),e('div',{className:'wb-lbl'},'Crew Out')),e('div',{className:'wb-stat'},e('div',{className:'wb-num'},bSh>0?bSh.toLocaleString():'\u2014'),e('div',{className:'wb-lbl'},'Shorn')),e('div',{className:'wb-stat'},e('div',{className:'wb-num'},bCr>0?bCr.toLocaleString():'\u2014'),e('div',{className:'wb-lbl'},'Crutched')))
   );
 }
 /* ── JOB LIST CARD ── */
@@ -2959,9 +2985,9 @@ function JLC({job,onClick,wb}){
     e('div',{className:'jlc-top'},e('div',null,e('div',{className:'jlc-name'},job.jobName||(farm?farm.name:'Unknown'),job.jobPin&&e('span',{style:{fontSize:'14px',marginLeft:6,opacity:.5}},'🔒'),(wb||0)>0&&e('span',{style:{marginLeft:6,background:'#e53e3e',color:'#fff',borderRadius:10,fontSize:'10px',padding:'1px 6px',fontWeight:800,verticalAlign:'middle'}},'📋'+(wb>9?'9+':wb))),e('div',{className:'jlc-num'},'#'+job.jobNumber)),e(Bdg,{status:job.status})),
     e('div',{className:'jlc-meta'},e('span',{className:'pill'},job.type),e('span',{style:{fontSize:'12px',color:'var(--muted)'}},(job.totalSheep||0).toLocaleString()+' sheep'),e('span',{style:{fontSize:'12px',color:'var(--muted)'}},job.crew.length+' crew')),
     isDraft&&e('div',{className:'draft-hint'},'◌ Draft — not sent to crew yet. Tap to open and publish.'),
-    !isDraft&&job.status==='Active'&&p.daysWorked>0&&e('div',null,e('div',{className:'jlc-pr'},e('span',null,p.shorn.toLocaleString()+' / '+(job.totalSheep||0).toLocaleString()+' — Day '+p.daysWorked+' of '+job.daysAllocated),e('span',{className:'pct-lbl'},Math.round(p.pct)+'%')),e('div',{className:'pbar'},e('div',{className:`pbar-f ${cls}`,style:{width:p.pct+'%'}}))),
+    !isDraft&&job.status==='Active'&&p.daysWorked>0&&e('div',null,e('div',{className:'jlc-pr'},e('span',null,fmtSplit(p.sh,p.cr)+' — Day '+p.daysWorked+' of '+job.daysAllocated),e('span',{className:'pct-lbl'},Math.round(p.pct)+'%')),e('div',{className:'pbar'},e('div',{className:`pbar-f ${cls}`,style:{width:p.pct+'%'}}))),
     job.status==='Dispatched'&&e('div',{style:{fontSize:'12px',color:'var(--amber)',marginTop:'6px'}},'📱 Dispatched — starts '+fmtDateLong(job.startDate)),
-    job.status==='Completed'&&e('div',{style:{fontSize:'12px',color:'var(--blue)',marginTop:'6px'}},'✓ '+p.shorn.toLocaleString()+' '+(job.type==='Crutching'?'crutched':'shorn'))
+    job.status==='Completed'&&e('div',{style:{fontSize:'12px',color:'var(--blue)',marginTop:'6px'}},'\u2713 '+fmtSplit(p.sh,p.cr))
   );
 }
 /* ── v4.6.11 END-OF-DAY BOOK PHOTO ──
@@ -3057,8 +3083,10 @@ function TallyTab({job,setJob,role,viewDate,setViewDate}){
   const rates=job.rates||{};
   const mobRunTot=mob=>shearers.reduce((s,id)=>s+(mob.counts[id]||0),0);
   const runTot=run=>mobsOf(run).reduce((s,mob)=>s+mobRunTot(mob),0);
-  const dayGrand=dayRuns.reduce((s,r)=>s+runTot(r),0);
-  const jobTotal=calcProg(job).shorn;
+  /* v4.6.14 - day totals split by mob type. A mixed day is two numbers, never one. */
+  const dayTypeTot=t=>dayRuns.reduce((s,r)=>s+mobsOf(r).filter(m=>(m.type==='Crutching')===(t==='Crutching')).reduce((a,m)=>a+mobRunTot(m),0),0);
+  const daySh=dayTypeTot('Shearing'),dayCr=dayTypeTot('Crutching');
+  const jobP=calcProg(job);
   const [y2,mo2,dy2]=viewDate.split('-').map(Number);
   const vdt=new Date(y2,mo2-1,dy2);
   const dtLbl=DAY_NAMES[vdt.getDay()].toUpperCase()+' '+String(vdt.getDate()).padStart(2,'0')+'/'+String(vdt.getMonth()+1).padStart(2,'0');
@@ -3221,8 +3249,8 @@ function TallyTab({job,setJob,role,viewDate,setViewDate}){
     ),
     /* DAY TOTALS */
     e('div',{className:'day-totals'},
-      e('div',{className:'dt-cell'},e('div',{className:'dt-lbl'},(job.type==='Crutching'?'Crutching ':'Shearing ')+dtLbl),e('div',{className:'dt-val'},dayGrand>0?dayGrand.toLocaleString():'—')),
-      e('div',{className:'dt-cell'},e('div',{className:'dt-lbl'},'Shed Totals'),e('div',{className:'dt-sub'},e('span',{style:{fontWeight:600}},'Shorn: '),e('span',{style:{fontFamily:'var(--m)',fontSize:'16px',fontWeight:700,color:'var(--muted)'}},jobTotal.toLocaleString())))
+      e('div',{className:'dt-cell'},e('div',{className:'dt-lbl'},dtLbl),e('div',{className:'dt-val',style:{fontSize:(daySh>0&&dayCr>0)?'18px':undefined}},fmtSplit(daySh,dayCr))),
+      e('div',{className:'dt-cell'},e('div',{className:'dt-lbl'},'Shed Totals'),e('div',{className:'dt-sub'},e('span',{style:{fontFamily:'var(--m)',fontSize:'15px',fontWeight:700,color:'var(--muted)'}},fmtSplit(jobP.sh,jobP.cr))))
     ),
     !canEdit&&e('div',{className:'read-hint'},'👁 View only — shed lead or admin can edit tallies'),
     canEdit&&orderedShearers.length>=2&&e('div',{style:{padding:'10px 16px 0',display:'flex',gap:8,alignItems:'center'}},
@@ -4146,11 +4174,24 @@ function ProgressTab({job}){
   const p=calcProg(job);
   if(p.daysWorked===0)return e('div',{style:{padding:'40px 16px',textAlign:'center',color:'var(--dim)'}},e('div',{style:{fontSize:40,marginBottom:8}},'📊'),e('div',null,'No tallies yet'));
   const pCls=p.pct>=80?'fg':p.pct>=40?'fa':'fr';
-  const shTots=p.shIds.map(id=>{const tot=Object.values(job.runs).flat().flatMap(r=>mobsOf(r)).reduce((s,mob)=>s+(mob.counts[id]||0),0);const days=Object.entries(job.runs).filter(([,rs])=>rs.some(r=>mobsOf(r).some(m=>m.counts[id]>0))).length;return{id,tot,avg:days>0?Math.round(tot/days):0};});
+  /* v4.6.14 - per shearer, shearing and crutching are tracked and averaged
+     SEPARATELY, each over its OWN days. A man who shore 150 and crutched 100
+     on one day did 150/day shearing and 100/day crutching, never 250/day.
+     A day that had both counts toward both averages, because he was there. */
+  const shTots=p.shIds.map(id=>{
+    let shT=0,crT=0; const shD=new Set(),crD=new Set();
+    Object.entries(job.runs||{}).forEach(([date,rs])=>{(rs||[]).forEach(r=>mobsOf(r).forEach(m=>{
+      const n=m.counts[id]||0; if(!n)return;
+      if(m.type==='Crutching'){crT+=n;crD.add(date);}else{shT+=n;shD.add(date);}
+    }));});
+    return{id,shT,crT,tot:shT+crT,
+      shAvg:shD.size?Math.round(shT/shD.size):0,
+      crAvg:crD.size?Math.round(crT/crD.size):0};
+  });
   const maxT=Math.max(...shTots.map(x=>x.tot),1);
   return e('div',{className:'prog-wrap'},
-    e('div',{className:'pc'},e('div',{className:'pc-lbl'},'Job Progress'),e('div',{className:'prog-big'},e('div',null,e('div',{className:'prog-count'},p.shorn.toLocaleString()),e('div',{className:'prog-of'},'of '+(job.totalSheep||0).toLocaleString()+' sheep')),e('div',null,e('div',{className:'prog-pct'},Math.round(p.pct)+'%'),e('div',{className:'prog-day'},'Day '+p.daysWorked+' of '+job.daysAllocated))),e('div',{className:'pbar-lg'},e('div',{className:`pbar-lf ${pCls}`,style:{width:p.pct+'%'}})),e('div',{style:{fontSize:'13px',color:'var(--dim)',marginTop:6}},(((job.totalSheep||0)-p.shorn)).toLocaleString()+' remaining — '+(job.daysAllocated-p.daysWorked)+' day'+(job.daysAllocated-p.daysWorked!==1?'s':'')+' left')),
-    e('div',{className:'pc'},e('div',{className:'pc-lbl'},'By Shearer — Job Total'),shTots.map(({id,tot,avg})=>{const c=gc(id);if(!c)return null;return e('div',{key:id,className:'spr'},e('div',{className:'spr-name'},sn(c.name)),e('div',{className:'spr-bar'},e('div',{className:'spr-bar-f',style:{width:(tot/maxT*100)+'%'}})),e('div',{className:'spr-tot'},tot.toLocaleString()),e('div',{className:'spr-avg'},avg+'/day'));}))
+    e('div',{className:'pc'},e('div',{className:'pc-lbl'},'Job Progress'),e('div',{className:'prog-big'},e('div',null,e('div',{className:'prog-count',style:{fontSize:(p.sh>0&&p.cr>0)?'22px':undefined}},fmtSplit(p.sh,p.cr)),e('div',{className:'prog-of'},'of '+(job.totalSheep||0).toLocaleString()+' sheep')),e('div',null,e('div',{className:'prog-pct'},Math.round(p.pct)+'%'),e('div',{className:'prog-day'},'Day '+p.daysWorked+' of '+job.daysAllocated))),e('div',{className:'pbar-lg'},e('div',{className:`pbar-lf ${pCls}`,style:{width:p.pct+'%'}})),e('div',{style:{fontSize:'13px',color:'var(--dim)',marginTop:6}},(((job.totalSheep||0)-p.shorn)).toLocaleString()+' remaining — '+(job.daysAllocated-p.daysWorked)+' day'+(job.daysAllocated-p.daysWorked!==1?'s':'')+' left')),
+    e('div',{className:'pc'},e('div',{className:'pc-lbl'},'By Shearer — Job Total'),shTots.map(({id,shT,crT,tot,shAvg,crAvg})=>{const c=gc(id);if(!c)return null;return e('div',{key:id,className:'spr'},e('div',{className:'spr-name'},sn(c.name)),e('div',{className:'spr-bar'},e('div',{className:'spr-bar-f',style:{width:(tot/maxT*100)+'%'}})),e('div',{className:'spr-tot',style:{fontSize:'12px',lineHeight:1.35}},fmtSplit(shT,crT)),e('div',{className:'spr-avg',style:{fontSize:'11px',lineHeight:1.35}},[shT>0?shAvg+'/day sh':null,crT>0?crAvg+'/day cr':null].filter(Boolean).join(' \u00b7 ')));}))
   );
 }
 /* ── OVERVIEW TAB ── */
@@ -5387,15 +5428,19 @@ function MyTallies({myId,me,jobs}){
   const bales=R.filter(x=>x.kind==='bales').reduce((a,x)=>a+num(x.value),0);
   const workDays=[...new Set(R.filter(x=>['count','shed_runs','bales'].includes(x.kind)&&num(x.value)>0).map(x=>x.cell_date))];
   const isShearer=(shorn+crutched)>0||(!runs&&!bales);
-  const head=shorn+crutched;
-  const perDay=workDays.length?Math.round(head/workDays.length):0;
+  /* v4.6.14 - averages are per work type, each over its OWN days. 150 shorn plus
+     100 crutched in a day is 150/day shearing and 100/day crutching, not 250/day. */
+  const shDays=[...new Set(R.filter(x=>x.kind==='count'&&x.mob_type!=='Crutching'&&num(x.value)>0).map(x=>x.cell_date))].length;
+  const crDays=[...new Set(R.filter(x=>x.kind==='count'&&x.mob_type==='Crutching'&&num(x.value)>0).map(x=>x.cell_date))].length;
+  const shAvg=shDays?Math.round(shorn/shDays):0;
+  const crAvg=crDays?Math.round(crutched/crDays):0;
 
   const jname=id=>{const j=(jobs||[]).find(x=>x.id===id);return j?(j.jobName||(gf(j.farmId)||{}).name||'Shed'):'Shed';};
   const sheds={};
   R.filter(x=>['count','shed_runs','bales'].includes(x.kind)&&num(x.value)>0).forEach(x=>{
     const k=x.job_id;
-    if(!sheds[k])sheds[k]={id:k,head:0,runs:0,bales:0,last:x.cell_date};
-    if(x.kind==='count')sheds[k].head+=num(x.value);
+    if(!sheds[k])sheds[k]={id:k,sh:0,cr:0,runs:0,bales:0,last:x.cell_date};
+    if(x.kind==='count'){ if(x.mob_type==='Crutching')sheds[k].cr+=num(x.value); else sheds[k].sh+=num(x.value); }
     if(x.kind==='shed_runs')sheds[k].runs+=num(x.value);
     if(x.kind==='bales')sheds[k].bales+=num(x.value);
     if(x.cell_date>sheds[k].last)sheds[k].last=x.cell_date;
@@ -5433,7 +5478,10 @@ function MyTallies({myId,me,jobs}){
         isShearer?stat('Shorn',shorn):stat('Runs',runs),
         isShearer?stat('Crutched',crutched):stat('Bales',bales),
         stat('Days worked',workDays.length),
-        isShearer?stat('Average / day',perDay):stat('Sheds',shedList.length)),
+        isShearer?stat('Sheds',shedList.length):stat('Sheds',shedList.length)),
+      isShearer&&(shDays>0||crDays>0)&&e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:12}},
+        shDays>0?stat('Shearing / day',shAvg):null,
+        crDays>0?stat('Crutching / day',crAvg):null),
       e('div',{style:{color:'var(--muted)',fontSize:12,margin:'14px 0 6px',fontWeight:700,letterSpacing:.4}},'SHEDS'),
       shedList.map(sd=>e('div',{key:sd.id,style:{display:'flex',justifyContent:'space-between',alignItems:'center',
         borderBottom:'1px solid var(--border)',padding:'9px 0'}},
@@ -5441,7 +5489,7 @@ function MyTallies({myId,me,jobs}){
           e('div',{style:{fontWeight:700,fontSize:14,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},jname(sd.id)),
           e('div',{style:{color:'var(--muted)',fontSize:12}},fmt(sd.last))),
         e('div',{style:{fontWeight:800,fontSize:15,whiteSpace:'nowrap'}},
-          sd.head?sd.head.toLocaleString():(sd.runs?sd.runs+' runs':sd.bales+' bales'))))
+          (sd.sh||sd.cr)?fmtSplit(sd.sh,sd.cr):(sd.runs?sd.runs+' runs':sd.bales+' bales'))))
     )
   );
 }
@@ -5991,7 +6039,7 @@ function ScheduleScreen({jobs,role,setRole,onBack,onJob,onNew,onNewDraft}){
       !compact&&e('span',{className:'wk-tile-type '+type},job.type),
       !compact&&!isDraft&&job.status==='Active'&&p.daysWorked>0&&e('div',null,
         e('div',{className:'wk-tile-prog'},
-          e('span',null,p.shorn.toLocaleString()+' / '+(job.totalSheep||0).toLocaleString()),
+          e('span',null,fmtSplit(p.sh,p.cr)),
           e('span',null,Math.round(p.pct)+'%')
         ),
         e('div',{className:'wk-tile-pbar'},e('div',{className:'wk-tile-pbarf',style:{width:p.pct+'%'}}))
