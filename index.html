@@ -560,7 +560,7 @@ const LS_TALLY_QUEUE='mg_tally_queue_'+CONTRACTOR_SLUG; /* per-cell offline queu
 const LS_TALLY_DEAD='mg_tally_dead_'+CONTRACTOR_SLUG; /* v4.6.3g — quarantined cells (permanent rejection). Replayed once on boot in case the server-side blocker (e.g. missing kind constraint) was since fixed. */
 const LS_TALLY_META_QUEUE='mg_tally_meta_queue_'+CONTRACTOR_SLUG; /* v4.6.4 — offline/failed mob metadata (type/desc) updates to existing count cells; flushed alongside the tally queue. */
 const ROLE_TIMEOUT_HOURS=12; /* auto-reset after 12h inactivity */
-const APP_VERSION='v4.6.14b';
+const APP_VERSION='v4.6.15';
 const SUPER_RATE=0.12; /* SG rate, 12% from 1 Jul 2025. One-line change if legislated rate moves. */
 /* v4.6.12a (26 Jul 2026): fleet-alignment rebuild - feature content identical to v4.6.12; new version string per one-build-one-version discipline. */
 /* v4.6.12 (20 Jul 2026): PER-CREW PIN, contractor-controlled (design settled with the founder before any deploy; an earlier worker-self-set draft was discarded - self-set has a bootstrap race where an imposter claims a name first and sets its PIN). MODEL: every worker is AUTO-ASSIGNED a random 4-digit PIN (genCrewPin at creation; existing crew backfilled via SQL per contractor at rollout). The PIN is stored READABLE at crew_members.data.pin and shown on the worker's card in My Database (admin-only surface) with a regenerate button and a 'Text PIN' button (plain GSM-7 SMS via /api/send-sms so the worker has it on file). DELIBERATE ENGINEERING CALL, not an oversight: with the shared anon key and a 4-digit space, a hash is brute-forced in under a second by anyone determined, so hashing here is theatre; readable storage buys contractor look-up-ability at no real security cost. This is a visibility gate against casual wrong-name claims - real authentication is v5 (Supabase Auth + RLS). CLAIM FLOW: picking a name with a PIN demands it (CrewPinVerifyModal, direct compare, works offline once the record is synced; names with PINs show a lock in the picker); 'Not you?' re-challenges; app_settings.requireCrewPin=true blocks claiming names with NO pin ('ask your contractor') for hard-lockdown contractors, off = pinless names bind as before. Workers never set or change their own PIN; contractor regenerates on request (specific chosen PINs = SRD via SQL). Lead/Admin PINs and the per-job PIN untouched. */
@@ -2623,6 +2623,21 @@ async function hashPin(pin){
   return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
 }
 
+/* v4.6.15 - every farm gets a farmer PIN automatically. The plaintext is kept on
+   the farm record ALONGSIDE the hash, deliberately, so a job card can be re-sent
+   next season with the same PIN the farmer already has. This is a convenience
+   code, not a secret: a 4-digit PIN hashed against a known slug with no salt is
+   breakable by a lookup table in seconds, so pretending otherwise by discarding
+   the plaintext bought nothing and cost re-sends. The hash stays because the
+   farmer gate still validates against it. */
+async function mintFarmerPin(farm){
+  if(!farm)return farm;
+  if(farm.farmerPin&&farm.farmerPinHash)return farm;
+  /* 4 digits, never leading zero-only patterns that read as a typo */
+  const pin=String(Math.floor(1000+Math.random()*9000));
+  return {...farm,farmerPin:pin,farmerPinHash:await hashPin(pin)};
+}
+
 /* PIN cache — loaded from Supabase, persisted to localStorage as offline fallback */
 const LS_PINS='mg_pins_'+CONTRACTOR_SLUG;
 let _pinCache={lead:null,admin:null};
@@ -4327,13 +4342,15 @@ function EditFarmModal({farm,onSave,onClose}){
     if(!name||!addr)return;
     /* v4.6.11 - farmer access: new PIN wins over clear; blank keeps current */
     let farmerPinHash=clearPin?null:(farm.farmerPinHash||null);
+    let farmerPin=clearPin?null:(farm.farmerPin||null); /* v4.6.15 - plaintext kept for re-sends */
     const pinVal=rFarmerPin.current?.value?.trim();
     if(pinVal){
       if(!/^\d{4,6}$/.test(pinVal)){alert('Farmer PIN must be 4-6 digits');return;}
       farmerPinHash=await hashPin(pinVal);
+      farmerPin=pinVal;
     }
     onSave({...farm,name,address:addr,stands:parseInt(rStands.current?.value)||farm.stands||4,notes:rNotes.current?.value||'',
-      farmerName:rFarmerName.current?.value?.trim()||'',farmerPhone:rFarmerPhone.current?.value?.trim()||'',farmerPinHash});
+      farmerName:rFarmerName.current?.value?.trim()||'',farmerPhone:rFarmerPhone.current?.value?.trim()||'',farmerPinHash,farmerPin});
   };
   return e('div',{className:'overlay'},e('div',{className:'sheet'},
     e('div',{className:'sheet-handle'}),
@@ -4345,7 +4362,13 @@ function EditFarmModal({farm,onSave,onClose}){
       e(FF,{label:'Notes (optional)'},e('input',{type:'text',className:'fi',defaultValue:farm.notes||'',placeholder:'e.g. Gate code 1234',ref:rNotes})),
       e(FF,{label:'Farmer name (optional)'},e('input',{type:'text',className:'fi',defaultValue:farm.farmerName||'',placeholder:'e.g. John Smith',ref:rFarmerName})),
       e(FF,{label:'Farmer mobile (optional)'},e('input',{type:'tel',className:'fi',defaultValue:farm.farmerPhone||'',placeholder:'04XX XXX XXX',ref:rFarmerPhone})),
-      e(FF,{label:farm.farmerPinHash?'Farmer PIN (set \u2713 \u2014 enter new to change)':'Farmer PIN (4-6 digits \u2014 turns on farmer app access)'},
+      /* v4.6.15 - the PIN is shown in plain text so the contractor can read it out
+         over the phone. It ships automatically on the job card; this is the fallback. */
+      farm.farmerPin&&e('div',{style:{background:'var(--amberD)',border:'1px solid var(--amberB)',borderRadius:8,padding:'10px 12px',marginBottom:10}},
+        e('div',{style:{fontSize:12,color:'var(--muted)',fontWeight:700}},'FARMER PIN'),
+        e('div',{style:{fontFamily:'var(--m)',fontSize:24,fontWeight:800,letterSpacing:2}},farm.farmerPin),
+        e('div',{style:{fontSize:12,color:'var(--muted)',marginTop:2}},'Sent with every job card for this farm.')),
+      e(FF,{label:farm.farmerPinHash?'Change farmer PIN (4-6 digits)':'Farmer PIN (4-6 digits \u2014 turns on farmer app access)'},
         e('input',{type:'text',inputMode:'numeric',pattern:'[0-9]*',maxLength:6,className:'fi',placeholder:farm.farmerPinHash?'\u2022\u2022\u2022\u2022':'e.g. 4321',ref:rFarmerPin})),
       farm.farmerPinHash&&e('label',{style:{display:'flex',alignItems:'center',gap:8,fontSize:13,color:'var(--muted)',marginTop:4}},
         e('input',{type:'checkbox',checked:clearPin,onChange:ev=>setClearPin(ev.target.checked)}),'Remove farmer access (clear PIN)')
@@ -4711,6 +4734,9 @@ function buildFarmerSMS(job,farmerName,farmerPhone,farmList,appUrl){
     '',
     'View job details: '+appUrl+'/?job='+job.id+'&crew=farmer.'+job.farmId, /* v4.6.11f - query not fragment */ /* v4.6.11c - farmer identity so the tap writes a job_views receipt via the existing deep-link handler */
     '',
+    /* v4.6.15 - farmer PIN rides with the card. Plain ASCII only: this whole body
+       must stay GSM-7 or Twilio bills every segment at UCS-2 rates. */
+    (farm&&farm.farmerPin)?('Your PIN: '+farm.farmerPin+' - open the link, tap Farmer, see all your sheds.'):'',
     'Questions? Call or reply to this message.',
     '- '+CONTRACTOR_NAME+' via myGang'
   ].filter(l=>l!==null&&l!=='').join('\n');
@@ -4935,10 +4961,12 @@ function AddFarmForm({onAdd,onCancel}){
   const [farmerName,setFarmerName]=useState(''); /* v4.6.11 */
   const [farmerPhone,setFarmerPhone]=useState('');
   const ok=name.trim()&&addr.trim();
-  const doAdd=()=>{
+  const doAdd=async()=>{
     if(!ok)return;
     const f={id:'f'+Date.now(),name:name.trim(),address:addr.trim(),stands:parseInt(stands)||4,notes,farmerName:farmerName.trim(),farmerPhone:farmerPhone.trim()};
-    onAdd(f);
+    /* v4.6.15 - every new farm is born with a farmer PIN so the first job card
+       already carries it. No contractor action required. */
+    onAdd(await mintFarmerPin(f));
   };
   return e('div',{className:'inline-form'},
     e('div',{className:'inline-form-title'},'New Farm'),
