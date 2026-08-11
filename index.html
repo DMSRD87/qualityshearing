@@ -81,7 +81,8 @@ html,body{background:var(--bg);color:var(--text);font-family:var(--b);min-height
 .wb-top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px}
 .wb-title{font-family:var(--h);font-size:12px;font-weight:700;color:var(--amber);letter-spacing:1.2px;text-transform:uppercase}
 .wb-date{font-size:12px;color:var(--dim)}
-.wb-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.wb-stats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}
+@media(max-width:560px){.wb-stats{grid-template-columns:repeat(3,minmax(0,1fr))}}
 .wb-stat{text-align:center;padding:10px 4px;background:rgba(255,255,255,.6);border-radius:8px;border:1px solid var(--border)}
 .wb-num{font-family:var(--h);font-size:28px;font-weight:800;color:var(--text);line-height:1}
 .wb-lbl{font-size:10px;color:var(--muted);margin-top:2px;text-transform:uppercase;letter-spacing:.4px}
@@ -560,7 +561,7 @@ const LS_TALLY_QUEUE='mg_tally_queue_'+CONTRACTOR_SLUG; /* per-cell offline queu
 const LS_TALLY_DEAD='mg_tally_dead_'+CONTRACTOR_SLUG; /* v4.6.3g — quarantined cells (permanent rejection). Replayed once on boot in case the server-side blocker (e.g. missing kind constraint) was since fixed. */
 const LS_TALLY_META_QUEUE='mg_tally_meta_queue_'+CONTRACTOR_SLUG; /* v4.6.4 — offline/failed mob metadata (type/desc) updates to existing count cells; flushed alongside the tally queue. */
 const ROLE_TIMEOUT_HOURS=12; /* auto-reset after 12h inactivity */
-const APP_VERSION='v4.6.15';
+const APP_VERSION='v4.6.16';
 const SUPER_RATE=0.12; /* SG rate, 12% from 1 Jul 2025. One-line change if legislated rate moves. */
 /* v4.6.12a (26 Jul 2026): fleet-alignment rebuild - feature content identical to v4.6.12; new version string per one-build-one-version discipline. */
 /* v4.6.12 (20 Jul 2026): PER-CREW PIN, contractor-controlled (design settled with the founder before any deploy; an earlier worker-self-set draft was discarded - self-set has a bootstrap race where an imposter claims a name first and sets its PIN). MODEL: every worker is AUTO-ASSIGNED a random 4-digit PIN (genCrewPin at creation; existing crew backfilled via SQL per contractor at rollout). The PIN is stored READABLE at crew_members.data.pin and shown on the worker's card in My Database (admin-only surface) with a regenerate button and a 'Text PIN' button (plain GSM-7 SMS via /api/send-sms so the worker has it on file). DELIBERATE ENGINEERING CALL, not an oversight: with the shared anon key and a 4-digit space, a hash is brute-forced in under a second by anyone determined, so hashing here is theatre; readable storage buys contractor look-up-ability at no real security cost. This is a visibility gate against casual wrong-name claims - real authentication is v5 (Supabase Auth + RLS). CLAIM FLOW: picking a name with a PIN demands it (CrewPinVerifyModal, direct compare, works offline once the record is synced; names with PINs show a lock in the picker); 'Not you?' re-challenges; app_settings.requireCrewPin=true blocks claiming names with NO pin ('ask your contractor') for hard-lockdown contractors, off = pinless names bind as before. Workers never set or change their own PIN; contractor regenerates on request (specific chosen PINs = SRD via SQL). Lead/Admin PINs and the per-job PIN untouched. */
@@ -1727,6 +1728,15 @@ function calcProg(job){
 /* v4.6.14 - one place that formats a split figure, so no screen can drift back
    to a combined number. Returns e.g. "800 shorn" / "4,200 crutched" /
    "800 shorn \u00b7 4,200 crutched". Zero-safe. */
+/* v4.6.15a - "Day 3 of 1" made the app look broken. Days allocated is a plan, not
+   a limit: sheds run over all the time. Past the plan we stop pretending and show
+   how far over it is instead of a nonsense fraction. */
+function fmtDays(worked,allocated){
+  const a=Number(allocated)||0;
+  if(!a)return 'Day '+worked;
+  if(worked>a)return 'Day '+worked+' \u2014 '+(worked-a)+' over plan';
+  return 'Day '+worked+' of '+a;
+}
 function fmtSplit(sh,cr){
   const a=[];
   if(sh>0)a.push(sh.toLocaleString()+' shorn');
@@ -2630,11 +2640,20 @@ async function hashPin(pin){
    breakable by a lookup table in seconds, so pretending otherwise by discarding
    the plaintext bought nothing and cost re-sends. The hash stays because the
    farmer gate still validates against it. */
-async function mintFarmerPin(farm){
+async function mintFarmerPin(farm,existing){
   if(!farm)return farm;
   if(farm.farmerPin&&farm.farmerPinHash)return farm;
-  /* 4 digits, never leading zero-only patterns that read as a typo */
-  const pin=String(Math.floor(1000+Math.random()*9000));
+  /* v4.6.16 - SIX digits, and unique within this contractor. Uniqueness is not
+     cosmetic: the farmer gate resolves a farm FROM the PIN, so two farms sharing
+     one PIN would send a grower into somebody else's shed. Six digits also means
+     PinPad auto-submits on the last keypress instead of needing a Submit tap. */
+  const taken=new Set((existing||FARMS||[]).map(f=>f&&f.farmerPin).filter(Boolean));
+  let pin=null;
+  for(let i=0;i<50;i++){
+    const c=String(Math.floor(100000+Math.random()*900000));
+    if(!taken.has(c)){pin=c;break;}
+  }
+  if(!pin)return farm; /* astronomically unlikely; better no PIN than a duplicate */
   return {...farm,farmerPin:pin,farmerPinHash:await hashPin(pin)};
 }
 
@@ -2902,6 +2921,9 @@ function AdminPinModal({onSuccess,onClose}){
 function TopBar({role,setRole,onBack,backLabel,onSchedule}){
   const [showPin,setShowPin]=useState(null); /* 'lead' | 'leadPerson' | 'admin' | 'farmer' */
   const [farmerPick,setFarmerPick]=useState(null); /* v4.6.11 - farm chosen in the farmer gate */
+  const [farmerBrowse,setFarmerBrowse]=useState(false); /* v4.6.16 - fallback farm finder */
+  const [farmerQ,setFarmerQ]=useState('');
+  const farmerMatch=useRef(null); /* v4.6.16 - farm resolved by PIN, handed to onSuccess */
   const [leadPick,setLeadPick]=useState(null); /* v4.6.13 - crew member chosen in the lead gate */
   const farmerFarms=(FARMS||[]).filter(f=>f.farmerPinHash); /* farms with farmer access enabled */
   /* v4.6.13 - only people actually designated lead on a live job can be picked. Someone
@@ -2931,21 +2953,54 @@ function TopBar({role,setRole,onBack,backLabel,onSchedule}){
         e('div',{className:'role-toggle'},[['👁','View','read_only'],...(farmerFarms.length?[['🌾','Farmer','farmer']]:[]),['📋','Lead','shed_lead'],['🔑','Admin','admin']].map(([ic,lbl,rv])=>e('button',{key:rv,className:`rt-btn${role===rv?' active':''}`,onClick:()=>requestRole(rv)},e('span',{className:'rt-ic'},ic),e('span',{className:'rt-lbl'},lbl))))
       )
     ),
+    /* v4.6.16 - FARMER GATE IS PIN-FIRST. The old flow made the grower find his own
+       farm in a list that can be five long for one contractor and fifty-five for
+       another, and spelled however the contractor happened to type it. His text message already says
+       "Your PIN: 123456", so that is now literally all he does: type it, and the app
+       works out which farm it belongs to. PINs are unique per contractor and 6 digits,
+       so PinPad auto-submits on the last keypress. The farm list survives only as a
+       fallback for a grower who has lost the message. */
     showPin==='farmer'&&e('div',{className:'pin-modal'},
       e('div',{className:'pin-modal-box'},
-        !farmerPick?e('div',null,
-          e('div',{style:{fontFamily:'var(--h)',fontSize:18,fontWeight:800,marginBottom:4}},'Farmer access'),
-          e('div',{style:{color:'var(--muted)',fontSize:13,marginBottom:12}},'Pick your farm'),
-          farmerFarms.map(f=>e('button',{key:f.id,onClick:()=>setFarmerPick(f),style:{display:'block',width:'100%',textAlign:'left',background:'var(--card)',border:'1px solid var(--border)',borderRadius:10,padding:'12px 14px',color:'inherit',fontWeight:700,marginBottom:8,cursor:'pointer'}},f.name)),
-          e('button',{className:'pin-change-btn',onClick:()=>setShowPin(null)},'Cancel')
-        ):e(PinPad,{
-          label:'Farmer PIN',
-          subtitle:farmerPick.name,
-          _validateAsync:async p=>(await hashPin(p))===farmerPick.farmerPinHash,
-          onSuccess:()=>{lsSet(LS_FARMER_ID,farmerPick.id);setRole('farmer');setShowPin(null);setFarmerPick(null);},
-          onCancel:()=>setFarmerPick(null),
-          allowChange:false,
-        })
+        farmerBrowse?e('div',null,
+          e('div',{style:{fontFamily:'var(--h)',fontSize:18,fontWeight:800,marginBottom:4}},'Find your farm'),
+          e('div',{style:{color:'var(--muted)',fontSize:13,marginBottom:10}},'Ask '+CONTRACTOR_NAME+' for your PIN if you have lost it.'),
+          e('input',{type:'text',className:'fi',placeholder:'Search farms\u2026',value:farmerQ,
+            onChange:ev=>setFarmerQ(ev.target.value),style:{marginBottom:10}}),
+          e('div',{style:{maxHeight:280,overflowY:'auto',marginBottom:10}},
+            farmerFarms.filter(f=>!farmerQ.trim()||(f.name||'').toLowerCase().includes(farmerQ.trim().toLowerCase())
+              ||(f.address||'').toLowerCase().includes(farmerQ.trim().toLowerCase()))
+              .map(f=>e('button',{key:f.id,onClick:()=>{setFarmerBrowse(false);setFarmerQ('');setFarmerPick(f);},
+                style:{display:'block',width:'100%',textAlign:'left',background:'var(--card)',border:'1px solid var(--border)',
+                  borderRadius:10,padding:'12px 14px',color:'inherit',fontWeight:700,marginBottom:8,cursor:'pointer'}},
+                f.name,
+                f.address&&e('div',{style:{fontSize:12,color:'var(--muted)',fontWeight:400,marginTop:2}},f.address)))),
+          e('button',{className:'pin-change-btn',onClick:()=>{setFarmerBrowse(false);setFarmerQ('');}},'Back')
+        ):e('div',null,
+          e(PinPad,{
+            label:'Farmer PIN',
+            subtitle:farmerPick?farmerPick.name:'Enter the PIN from your job message',
+            _validateAsync:async p=>{
+              const h=await hashPin(String(p));
+              /* farm chosen from the fallback list -> validate against that farm only.
+                 Otherwise the PIN itself identifies the farm. */
+              const f=farmerPick?((farmerPick.farmerPinHash===h)?farmerPick:null)
+                                :farmerFarms.find(x=>x.farmerPinHash===h);
+              farmerMatch.current=f||null;
+              return !!f;
+            },
+            onSuccess:()=>{
+              const f=farmerMatch.current;
+              if(!f)return;
+              lsSet(LS_FARMER_ID,f.id);setRole('farmer');
+              setShowPin(null);setFarmerPick(null);farmerMatch.current=null;
+            },
+            onCancel:()=>{if(farmerPick)setFarmerPick(null);else setShowPin(null);},
+            allowChange:false,
+          }),
+          !farmerPick&&e('button',{className:'pin-change-btn',onClick:()=>setFarmerBrowse(true)},
+            'Lost your PIN? Find your farm')
+        )
       )
     ),
     /* v4.6.13 - DESIGNATED LEAD GATE. Tara unlocks with her own 4-digit crew PIN, the
@@ -3005,7 +3060,7 @@ function JLC({job,onClick,wb}){
     e('div',{className:'jlc-top'},e('div',null,e('div',{className:'jlc-name'},job.jobName||(farm?farm.name:'Unknown'),job.jobPin&&e('span',{style:{fontSize:'14px',marginLeft:6,opacity:.5}},'🔒'),(wb||0)>0&&e('span',{style:{marginLeft:6,background:'#e53e3e',color:'#fff',borderRadius:10,fontSize:'10px',padding:'1px 6px',fontWeight:800,verticalAlign:'middle'}},'📋'+(wb>9?'9+':wb))),e('div',{className:'jlc-num'},'#'+job.jobNumber)),e(Bdg,{status:job.status})),
     e('div',{className:'jlc-meta'},e('span',{className:'pill'},job.type),e('span',{style:{fontSize:'12px',color:'var(--muted)'}},(job.totalSheep||0).toLocaleString()+' sheep'),e('span',{style:{fontSize:'12px',color:'var(--muted)'}},job.crew.length+' crew')),
     isDraft&&e('div',{className:'draft-hint'},'◌ Draft — not sent to crew yet. Tap to open and publish.'),
-    !isDraft&&job.status==='Active'&&p.daysWorked>0&&e('div',null,e('div',{className:'jlc-pr'},e('span',null,fmtSplit(p.sh,p.cr)+' — Day '+p.daysWorked+' of '+job.daysAllocated),e('span',{className:'pct-lbl'},Math.round(p.pct)+'%')),e('div',{className:'pbar'},e('div',{className:`pbar-f ${cls}`,style:{width:p.pct+'%'}}))),
+    !isDraft&&job.status==='Active'&&p.daysWorked>0&&e('div',null,e('div',{className:'jlc-pr'},e('span',null,fmtSplit(p.sh,p.cr)+' \u2014 '+fmtDays(p.daysWorked,job.daysAllocated)),e('span',{className:'pct-lbl'},Math.round(p.pct)+'%')),e('div',{className:'pbar'},e('div',{className:`pbar-f ${cls}`,style:{width:p.pct+'%'}}))),
     job.status==='Dispatched'&&e('div',{style:{fontSize:'12px',color:'var(--amber)',marginTop:'6px'}},'📱 Dispatched — starts '+fmtDateLong(job.startDate)),
     job.status==='Completed'&&e('div',{style:{fontSize:'12px',color:'var(--blue)',marginTop:'6px'}},'\u2713 '+fmtSplit(p.sh,p.cr))
   );
@@ -4210,7 +4265,7 @@ function ProgressTab({job}){
   });
   const maxT=Math.max(...shTots.map(x=>x.tot),1);
   return e('div',{className:'prog-wrap'},
-    e('div',{className:'pc'},e('div',{className:'pc-lbl'},'Job Progress'),e('div',{className:'prog-big'},e('div',null,e('div',{className:'prog-count',style:{fontSize:(p.sh>0&&p.cr>0)?'22px':undefined}},fmtSplit(p.sh,p.cr)),e('div',{className:'prog-of'},'of '+(job.totalSheep||0).toLocaleString()+' sheep')),e('div',null,e('div',{className:'prog-pct'},Math.round(p.pct)+'%'),e('div',{className:'prog-day'},'Day '+p.daysWorked+' of '+job.daysAllocated))),e('div',{className:'pbar-lg'},e('div',{className:`pbar-lf ${pCls}`,style:{width:p.pct+'%'}})),e('div',{style:{fontSize:'13px',color:'var(--dim)',marginTop:6}},(((job.totalSheep||0)-p.shorn)).toLocaleString()+' remaining — '+(job.daysAllocated-p.daysWorked)+' day'+(job.daysAllocated-p.daysWorked!==1?'s':'')+' left')),
+    e('div',{className:'pc'},e('div',{className:'pc-lbl'},'Job Progress'),e('div',{className:'prog-big'},e('div',null,e('div',{className:'prog-count',style:{fontSize:(p.sh>0&&p.cr>0)?'22px':undefined}},fmtSplit(p.sh,p.cr)),e('div',{className:'prog-of'},'of '+(job.totalSheep||0).toLocaleString()+' sheep')),e('div',null,e('div',{className:'prog-pct'},Math.round(p.pct)+'%'),e('div',{className:'prog-day'},fmtDays(p.daysWorked,job.daysAllocated)))),e('div',{className:'pbar-lg'},e('div',{className:`pbar-lf ${pCls}`,style:{width:p.pct+'%'}})),e('div',{style:{fontSize:'13px',color:'var(--dim)',marginTop:6}},(((job.totalSheep||0)-p.shorn)).toLocaleString()+' remaining — '+(job.daysAllocated-p.daysWorked)+' day'+(job.daysAllocated-p.daysWorked!==1?'s':'')+' left')),
     e('div',{className:'pc'},e('div',{className:'pc-lbl'},'By Shearer — Job Total'),shTots.map(({id,shT,crT,tot,shAvg,crAvg})=>{const c=gc(id);if(!c)return null;return e('div',{key:id,className:'spr'},e('div',{className:'spr-name'},sn(c.name)),e('div',{className:'spr-bar'},e('div',{className:'spr-bar-f',style:{width:(tot/maxT*100)+'%'}})),e('div',{className:'spr-tot',style:{fontSize:'12px',lineHeight:1.35}},fmtSplit(shT,crT)),e('div',{className:'spr-avg',style:{fontSize:'11px',lineHeight:1.35}},[shT>0?shAvg+'/day sh':null,crT>0?crAvg+'/day cr':null].filter(Boolean).join(' \u00b7 ')));}))
   );
 }
@@ -4345,7 +4400,7 @@ function EditFarmModal({farm,onSave,onClose}){
     let farmerPin=clearPin?null:(farm.farmerPin||null); /* v4.6.15 - plaintext kept for re-sends */
     const pinVal=rFarmerPin.current?.value?.trim();
     if(pinVal){
-      if(!/^\d{4,6}$/.test(pinVal)){alert('Farmer PIN must be 4-6 digits');return;}
+      if(!/^\d{6}$/.test(pinVal)){alert('Farmer PIN must be 6 digits');return;}
       farmerPinHash=await hashPin(pinVal);
       farmerPin=pinVal;
     }
@@ -4368,7 +4423,7 @@ function EditFarmModal({farm,onSave,onClose}){
         e('div',{style:{fontSize:12,color:'var(--muted)',fontWeight:700}},'FARMER PIN'),
         e('div',{style:{fontFamily:'var(--m)',fontSize:24,fontWeight:800,letterSpacing:2}},farm.farmerPin),
         e('div',{style:{fontSize:12,color:'var(--muted)',marginTop:2}},'Sent with every job card for this farm.')),
-      e(FF,{label:farm.farmerPinHash?'Change farmer PIN (4-6 digits)':'Farmer PIN (4-6 digits \u2014 turns on farmer app access)'},
+      e(FF,{label:farm.farmerPinHash?'Change farmer PIN (6 digits)':'Farmer PIN (6 digits \u2014 turns on farmer app access)'},
         e('input',{type:'text',inputMode:'numeric',pattern:'[0-9]*',maxLength:6,className:'fi',placeholder:farm.farmerPinHash?'\u2022\u2022\u2022\u2022':'e.g. 4321',ref:rFarmerPin})),
       farm.farmerPinHash&&e('label',{style:{display:'flex',alignItems:'center',gap:8,fontSize:13,color:'var(--muted)',marginTop:4}},
         e('input',{type:'checkbox',checked:clearPin,onChange:ev=>setClearPin(ev.target.checked)}),'Remove farmer access (clear PIN)')
@@ -5517,7 +5572,8 @@ function MyTallies({myId,me,jobs}){
         crDays>0?stat('Crutching / day',crAvg):null),
       e('div',{style:{color:'var(--muted)',fontSize:12,margin:'14px 0 6px',fontWeight:700,letterSpacing:.4}},'SHEDS'),
       shedList.map(sd=>e('div',{key:sd.id,style:{display:'flex',justifyContent:'space-between',alignItems:'center',
-        borderBottom:'1px solid var(--border)',padding:'9px 0'}},
+        borderBottom:'1px solid var(--border)',padding:'9px 12px',gap:16,maxWidth:640,
+        background:'var(--card)',borderRadius:6,marginBottom:2}},
         e('div',{style:{minWidth:0,paddingRight:10}},
           e('div',{style:{fontWeight:700,fontSize:14,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},jname(sd.id)),
           e('div',{style:{color:'var(--muted)',fontSize:12}},fmt(sd.last))),
@@ -5627,7 +5683,20 @@ function HomeScreen({jobs:allJobs,role,setRole,onJob,onNew,onDatabase,onSchedule
         e('div',{style:{color:'var(--muted)',fontSize:13,marginBottom:12}},'Pick your name to see your jobs. Leads and admins: use the role switch top-right.'),
         e('input',{type:'text',placeholder:'Search name…',value:crewSearch,onChange:ev=>setCrewSearch(ev.target.value),className:'fi',style:{marginBottom:10}}),
         pinErr&&e('div',{style:{color:'var(--red)',fontSize:13,fontWeight:600,marginBottom:8}},pinErr),
-        (CREW||[]).filter(c=>!crewSearch.trim()||(c.name||'').toLowerCase().includes(crewSearch.trim().toLowerCase())).map(c=>
+        /* v4.6.16 - grouped by role. One flat list is fine at 8 names and unreadable
+           at 50; four short labelled lists can be scanned. Search still spans all. */
+        (function(){
+          const q=crewSearch.trim().toLowerCase();
+          const hits=(CREW||[]).filter(c=>!q||(c.name||'').toLowerCase().includes(q));
+          const ORDER=['Shearer','Crutcher','Wool Handler','Wool Classer','Presser','Penner'];
+          const groups=ORDER.map(r=>({role:r,members:hits.filter(c=>c.role===r)})).filter(g=>g.members.length);
+          const other=hits.filter(c=>!ORDER.includes(c.role));
+          if(other.length)groups.push({role:'Other',members:other});
+          if(!hits.length)return e('div',{style:{color:'var(--muted)',fontSize:13,padding:'20px 0',textAlign:'center'}},'No names match.');
+          return groups.map(g=>e('div',{key:g.role},
+            e('div',{style:{fontSize:11,fontWeight:800,color:'var(--muted)',letterSpacing:'.5px',
+              textTransform:'uppercase',margin:'12px 0 6px'}},g.role+' ('+g.members.length+')'),
+            g.members.map(c=>
           e('button',{key:c.id,onClick:()=>{
             /* v4.6.12 - PIN gate: a name with a PIN always challenges; requireCrewPin
                blocks pinless names entirely; neither -> bind as v4.6.10. */
@@ -5635,8 +5704,9 @@ function HomeScreen({jobs:allJobs,role,setRole,onJob,onNew,onDatabase,onSchedule
             if(c.pin)setPinClaim(c);
             else if((lsGet(LS_APP_SETTINGS)||{}).requireCrewPin===true)setPinErr('No PIN set for '+c.name+' yet. Ask your contractor.');
             else{lsSet(LS_MY_ID,c.id);setMyId(c.id);}
-          },style:{display:'block',width:'100%',textAlign:'left',background:'var(--card)',border:'1px solid var(--border)',borderRadius:10,padding:'12px 14px',color:'inherit',fontWeight:700,marginBottom:8,cursor:'pointer'}},c.name,c.pin&&e('span',{style:{marginLeft:6,fontSize:11,opacity:.6}},'\ud83d\udd12'),e('span',{style:{color:'var(--muted)',fontWeight:400,marginLeft:8,fontSize:12}},c.role||''))
-        )
+          },style:{display:'block',width:'100%',textAlign:'left',background:'var(--card)',border:'1px solid var(--border)',borderRadius:10,padding:'12px 14px',color:'inherit',fontWeight:700,marginBottom:8,cursor:'pointer'}},c.name,c.pin&&e('span',{style:{marginLeft:6,fontSize:11,opacity:.6}},'\ud83d\udd12'))
+            )));
+        })()
       ):(function(){
         const me=(CREW||[]).find(c=>c.id===myId);
         const from=addDays(localToday(),-2),to=addDays(localToday(),7);
