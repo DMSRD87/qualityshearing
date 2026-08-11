@@ -561,7 +561,7 @@ const LS_TALLY_QUEUE='mg_tally_queue_'+CONTRACTOR_SLUG; /* per-cell offline queu
 const LS_TALLY_DEAD='mg_tally_dead_'+CONTRACTOR_SLUG; /* v4.6.3g — quarantined cells (permanent rejection). Replayed once on boot in case the server-side blocker (e.g. missing kind constraint) was since fixed. */
 const LS_TALLY_META_QUEUE='mg_tally_meta_queue_'+CONTRACTOR_SLUG; /* v4.6.4 — offline/failed mob metadata (type/desc) updates to existing count cells; flushed alongside the tally queue. */
 const ROLE_TIMEOUT_HOURS=12; /* auto-reset after 12h inactivity */
-const APP_VERSION='v4.6.16';
+const APP_VERSION='v4.6.16a';
 const SUPER_RATE=0.12; /* SG rate, 12% from 1 Jul 2025. One-line change if legislated rate moves. */
 /* v4.6.12a (26 Jul 2026): fleet-alignment rebuild - feature content identical to v4.6.12; new version string per one-build-one-version discipline. */
 /* v4.6.12 (20 Jul 2026): PER-CREW PIN, contractor-controlled (design settled with the founder before any deploy; an earlier worker-self-set draft was discarded - self-set has a bootstrap race where an imposter claims a name first and sets its PIN). MODEL: every worker is AUTO-ASSIGNED a random 4-digit PIN (genCrewPin at creation; existing crew backfilled via SQL per contractor at rollout). The PIN is stored READABLE at crew_members.data.pin and shown on the worker's card in My Database (admin-only surface) with a regenerate button and a 'Text PIN' button (plain GSM-7 SMS via /api/send-sms so the worker has it on file). DELIBERATE ENGINEERING CALL, not an oversight: with the shared anon key and a 4-digit space, a hash is brute-forced in under a second by anyone determined, so hashing here is theatre; readable storage buys contractor look-up-ability at no real security cost. This is a visibility gate against casual wrong-name claims - real authentication is v5 (Supabase Auth + RLS). CLAIM FLOW: picking a name with a PIN demands it (CrewPinVerifyModal, direct compare, works offline once the record is synced; names with PINs show a lock in the picker); 'Not you?' re-challenges; app_settings.requireCrewPin=true blocks claiming names with NO pin ('ask your contractor') for hard-lockdown contractors, off = pinless names bind as before. Workers never set or change their own PIN; contractor regenerates on request (specific chosen PINs = SRD via SQL). Lead/Admin PINs and the per-job PIN untouched. */
@@ -4664,6 +4664,11 @@ function BroadcastModal({job,onClose,farmList,crewList}){
   const [msg,setMsg]=useState('');
   const [status,setStatus]=useState('idle');
   const [sentCount,setSentCount]=useState(0);
+  /* v4.6.16a - the farmer is NOT in job.crew, so broadcasts never reached him. Most
+     updates are crew-only ("bring your own lunch"), so this is OFF by default and
+     ticked deliberately for the ones he does need - wet sheep, start delayed. */
+  const [alsoFarmer,setAlsoFarmer]=useState(false);
+  const farmerPhone=(farm&&farm.farmerPhone||'').trim();
   const crewWithPhone=job.crew.filter(id=>{const c=gcl(id);return c&&c.phone;});
 
   const doSend=async()=>{
@@ -4678,6 +4683,7 @@ function BroadcastModal({job,onClose,farmList,crewList}){
       '- '+CONTRACTOR_NAME+' via myGang'
     ].join('\n');
     const messages=crewWithPhone.map(id=>{const c=gcl(id);return{to:c.phone,body};});
+    if(alsoFarmer&&farmerPhone)messages.push({to:farmerPhone,body});
     try{
       const res=await fetch('/api/send-sms',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages})});
       const data=await res.json();
@@ -4698,6 +4704,22 @@ function BroadcastModal({job,onClose,farmList,crewList}){
       status==='idle'&&e('div',null,
         e('div',{style:{padding:'8px 16px 12px',fontSize:'13px',color:'var(--muted)'}},
           'Send a free-text update to all '+crewWithPhone.length+' crew with a phone number.'
+        ),
+        e('div',{style:{margin:'0 16px 12px',padding:'10px 12px',background:'var(--card)',
+          border:'1px solid var(--border)',borderRadius:8}},
+          e('label',{style:{display:'flex',alignItems:'center',gap:10,cursor:farmerPhone?'pointer':'not-allowed',opacity:farmerPhone?1:.55}},
+            e('button',{type:'button',disabled:!farmerPhone,
+              onClick:()=>{if(farmerPhone)setAlsoFarmer(p=>!p);},
+              style:{width:22,height:22,borderRadius:4,border:'2px solid var(--amber)',flexShrink:0,
+                background:alsoFarmer?'var(--amber)':'none',cursor:farmerPhone?'pointer':'not-allowed',
+                color:'#000',fontWeight:800,lineHeight:1,padding:0}},alsoFarmer?'\u2713':''),
+            e('div',null,
+              e('div',{style:{fontWeight:700,fontSize:14}},'Also send to farmer'),
+              e('div',{style:{fontSize:12,color:'var(--muted)'}},
+                farmerPhone
+                  ?((farm.farmerName||'Farmer')+' \u00b7 '+farmerPhone)
+                  :'No farmer number on this farm \u2014 add one in Edit Farm.'))
+          )
         ),
         e('textarea',{
           className:'fi',rows:5,
@@ -4735,7 +4757,7 @@ function BroadcastModal({job,onClose,farmList,crewList}){
         className:'btn-p',
         onClick:doSend,
         style:{flex:2,opacity:msg.trim()&&crewWithPhone.length>0?1:0.4}
-      },'📢 Send to '+crewWithPhone.length+' crew')
+      },'📢 Send to '+crewWithPhone.length+' crew'+(alsoFarmer&&farmerPhone?' + farmer':''))
     )
   ));
 }
@@ -5814,7 +5836,11 @@ function HomeScreen({jobs:allJobs,role,setRole,onJob,onNew,onDatabase,onSchedule
     ),
     e('div',{className:'fab-stack',style:{position:'fixed',bottom:24,right:20,display:'flex',flexDirection:'column',gap:10,alignItems:'flex-end',zIndex:40}},
       /* v4.6.11j - field preference: + on top, then Pay Week, then My Database */
-      (role==='admin'||role==='shed_lead')&&e('button',{className:'fab',onClick:onNew},'+'),
+      /* v4.6.16a - creating a shed is contractor work: it needs a farm, rates, days
+         allocated, sheep numbers and a crew list. A lead's job is running the shed in
+         front of them, and the one thing they genuinely need - putting a body on a
+         running job - lives on Overview as + Add crew. Admin only. */
+      role==='admin'&&e('button',{className:'fab',onClick:onNew},'+'),
       role==='admin'&&e('button',{onClick:()=>{setPwOffset(0);setShowPayWeek(true);},style:{background:'var(--hdr)',border:'1px solid rgba(255,255,255,.2)',borderRadius:24,padding:'10px 18px',color:'#ffffff',fontWeight:700,fontSize:13,cursor:'pointer',boxShadow:'0 4px 14px rgba(0,0,0,.3)'}},'💰 Pay Week'),
       role==='admin'&&e('button',{onClick:onDatabase,style:{background:'var(--hdr)',border:'1px solid rgba(255,255,255,.2)',borderRadius:24,padding:'10px 18px',color:'#ffffff',fontWeight:700,fontSize:13,cursor:'pointer',boxShadow:'0 4px 14px rgba(0,0,0,.3)'}},'📂 My Database')
     ),
@@ -6292,7 +6318,7 @@ function ScheduleScreen({jobs,role,setRole,onBack,onJob,onNew,onNewDraft}){
       )
     ),
     /* New-draft FAB — admin/lead only */
-    (role==='admin'||role==='shed_lead')&&onNewDraft&&e('button',{className:'fab',onClick:onNewDraft,title:'Plan a new job'},'+')
+    role==='admin'&&onNewDraft&&e('button',{className:'fab',onClick:onNewDraft,title:'Plan a new job'},'+')
   );
 }
 
