@@ -526,7 +526,7 @@ textarea.fi{resize:none;line-height:1.5}
 </head>
 <body>
 <div id="root"></div>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3"></script>
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script>
@@ -538,6 +538,8 @@ const SUPABASE_ANON_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYm
 const CONTRACTOR_SLUG='quality-shearing';
 const CONTRACTOR_NAME='Quality Shearing';
 const CONTRACTOR_URL='https://qualityshearing.vercel.app';
+/* v4.6.16d - diagnostic telemetry off by default. See logSaveFailure. */
+const DIAG_TELEMETRY=false;
 
 const sb=supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
 
@@ -561,7 +563,7 @@ const LS_TALLY_QUEUE='mg_tally_queue_'+CONTRACTOR_SLUG; /* per-cell offline queu
 const LS_TALLY_DEAD='mg_tally_dead_'+CONTRACTOR_SLUG; /* v4.6.3g — quarantined cells (permanent rejection). Replayed once on boot in case the server-side blocker (e.g. missing kind constraint) was since fixed. */
 const LS_TALLY_META_QUEUE='mg_tally_meta_queue_'+CONTRACTOR_SLUG; /* v4.6.4 — offline/failed mob metadata (type/desc) updates to existing count cells; flushed alongside the tally queue. */
 const ROLE_TIMEOUT_HOURS=12; /* auto-reset after 12h inactivity */
-const APP_VERSION='v4.6.16a';
+const APP_VERSION='v4.6.18';
 const SUPER_RATE=0.12; /* SG rate, 12% from 1 Jul 2025. One-line change if legislated rate moves. */
 /* v4.6.12a (26 Jul 2026): fleet-alignment rebuild - feature content identical to v4.6.12; new version string per one-build-one-version discipline. */
 /* v4.6.12 (20 Jul 2026): PER-CREW PIN, contractor-controlled (design settled with the founder before any deploy; an earlier worker-self-set draft was discarded - self-set has a bootstrap race where an imposter claims a name first and sets its PIN). MODEL: every worker is AUTO-ASSIGNED a random 4-digit PIN (genCrewPin at creation; existing crew backfilled via SQL per contractor at rollout). The PIN is stored READABLE at crew_members.data.pin and shown on the worker's card in My Database (admin-only surface) with a regenerate button and a 'Text PIN' button (plain GSM-7 SMS via /api/send-sms so the worker has it on file). DELIBERATE ENGINEERING CALL, not an oversight: with the shared anon key and a 4-digit space, a hash is brute-forced in under a second by anyone determined, so hashing here is theatre; readable storage buys contractor look-up-ability at no real security cost. This is a visibility gate against casual wrong-name claims - real authentication is v5 (Supabase Auth + RLS). CLAIM FLOW: picking a name with a PIN demands it (CrewPinVerifyModal, direct compare, works offline once the record is synced; names with PINs show a lock in the picker); 'Not you?' re-challenges; app_settings.requireCrewPin=true blocks claiming names with NO pin ('ask your contractor') for hard-lockdown contractors, off = pinless names bind as before. Workers never set or change their own PIN; contractor regenerates on request (specific chosen PINs = SRD via SQL). Lead/Admin PINs and the per-job PIN untouched. */
@@ -1029,6 +1031,13 @@ function hydrateTallies(job,tallyRows){
     });
   }
   job.shedTallies={};
+  job.shedRoleRuns={}; /* v4.6.18 */
+  /* v4.6.18 — shed_runs rows are staged rather than applied inline, because a
+     crew-day can legitimately hold BOTH a legacy run_id='' row and role-coded
+     rows. Summing them blind would double-count runs (real pay). Resolved after
+     the loop: if any coded row exists for that crew-day, the coded rows ARE the
+     day and the stale '' row is ignored. */
+  const _shedStage={};
   job.baleTallies={};
   job.baleWeights={};
   job.travelTallies={};
@@ -1055,8 +1064,17 @@ function hydrateTallies(job,tallyRows){
       if(row.mob_type!=null&&row.mob_type!=='')mob.type=row.mob_type;
       if(row.mob_desc!=null)mob.desc=row.mob_desc;
     }else if(row.kind==='shed_runs'){
-      if(!job.shedTallies[row.crew_id])job.shedTallies[row.crew_id]={};
-      job.shedTallies[row.crew_id][row.cell_date]=v;
+      if(!_shedStage[row.crew_id])_shedStage[row.crew_id]={};
+      const _st=_shedStage[row.crew_id];
+      if(!_st[row.cell_date])_st[row.cell_date]={legacy:0,byRole:{},coded:false};
+      const _code=row.run_id||'';
+      if(_code&&SHED_CODE_ROLE[_code]){
+        const _role=SHED_CODE_ROLE[_code];
+        _st[row.cell_date].byRole[_role]=(_st[row.cell_date].byRole[_role]||0)+v;
+        _st[row.cell_date].coded=true;
+      }else{
+        _st[row.cell_date].legacy+=v;
+      }
     }else if(row.kind==='bales'){
       if(!job.baleTallies[row.crew_id])job.baleTallies[row.crew_id]={};
       job.baleTallies[row.crew_id][row.cell_date]=v;
@@ -1070,6 +1088,24 @@ function hydrateTallies(job,tallyRows){
       if(!job.messTallies[row.crew_id])job.messTallies[row.crew_id]={};
       job.messTallies[row.crew_id][row.cell_date]=v;
     }
+  });
+  /* v4.6.18 — resolve staged shed_runs. shedTallies keeps the DAY TOTAL so every
+     pre-existing reader is untouched; shedRoleRuns carries the split for the pay
+     engine. Coded rows win outright over a leftover legacy row for the same day. */
+  Object.keys(_shedStage).forEach(cid=>{
+    Object.keys(_shedStage[cid]).forEach(date=>{
+      const st=_shedStage[cid][date];
+      let total;
+      if(st.coded){
+        total=Object.keys(st.byRole).reduce((a,r)=>a+st.byRole[r],0);
+        if(!job.shedRoleRuns[cid])job.shedRoleRuns[cid]={};
+        job.shedRoleRuns[cid][date]={...st.byRole};
+      }else{
+        total=st.legacy;
+      }
+      if(!job.shedTallies[cid])job.shedTallies[cid]={};
+      job.shedTallies[cid][date]=total;
+    });
   });
   return job;
 }
@@ -1235,6 +1271,13 @@ function withTimeout(promise,ms,label){
    we can investigate later. The log call itself has its OWN short timeout
    and any failure is swallowed — logging must NEVER affect the save flow. */
 function logSaveFailure(reason,jobId,details){
+  /* v4.6.16d - DIAGNOSTIC GATE. The diag_* reasons were added during the sync
+     incidents and did their job. Left on, they wrote ~1,600 rows a day across
+     the fleet and grew with every contractor: 96% of save_failures was diag
+     chatter, burying the 377 real failures in 11,800 rows of noise. Real
+     failures - error, timeout, snapshot_timeout - are ALWAYS logged. Flip
+     DIAG_TELEMETRY back to true to re-arm the firehose while chasing a bug. */
+  if(!DIAG_TELEMETRY&&/^diag_/.test(reason||''))return;
   try{
     const payload={
       contractor_slug:CONTRACTOR_SLUG,
@@ -1281,6 +1324,7 @@ function buildStrippedJobBlob(job){
     );
   }
   out.shedTallies={};
+  out.shedRoleRuns={}; /* v4.6.18: rebuilt from tally_entries run_id codes */
   out.baleTallies={};
   out.baleWeights={};
   out.travelTallies={};
@@ -1566,6 +1610,103 @@ const getJobRole=(job,id)=>{
   return c?c.role:null;
 };
 
+/* ══ v4.6.18 — MID-SHED ROLE CHANGE ══════════════════════════════════════════
+   A shed hand can change role mid-shed: classer for two runs then presser, or a
+   wool handler stepping onto a handpiece for one run. shedTallies[id][date] is a
+   bare run count with no role attached, so it cannot express "2 classing, 2
+   pressing" — and leads worked around that by creating a SECOND crew member for
+   the second role. 14 split identities across 6 contractors as at 20 Aug 2026,
+   6 of them with both identities active on the SAME day. The pay came out right;
+   the employee records did not (one human, two grosses, two super streams — an
+   STP blocker).
+
+   Role now rides in the tally_entries run_id slot, which is unused for shed_runs
+   rows (they write run_id=''). The natural key
+   (contractor_slug,job_id,cell_date,kind,run_id,mob_id,crew_id) then separates
+   the buckets for free: no new column, no primary-key change, no widening of
+   tally_entries_kind_check.
+
+   run_id='' on a legacy row means "the job-level role" and keeps its exact
+   pre-v4.6.18 behaviour, so every existing job prices identically.
+
+   DEBT: run_id holding a role code is semantically dirty. Always go through
+   shedRunKey()/roleFromShedKey() so it is never open-coded; the clean column
+   belongs in the v5 schema rebuild. */
+const SHED_ROLE_CODE={'Wool Handler':'WH','Wool Classer':'CL','Penner':'PE','Presser':'PR'};
+const SHED_CODE_ROLE={WH:'Wool Handler',CL:'Wool Classer',PE:'Penner',PR:'Presser'};
+const SHED_ROLES=['Wool Handler','Wool Classer','Penner','Presser'];
+const shedRunKey=role=>SHED_ROLE_CODE[role]||'';
+const roleFromShedKey=(code,job,id)=>SHED_CODE_ROLE[code]||getJobRole(job,id);
+
+/* Per-run rate for a shed role on this job. A per-person override in
+   crewOverrides is set against that worker's JOB role — when they step into a
+   different role for a few runs the override must NOT follow them, or a wool
+   handler on $95 would class at $95. Role default applies instead. For an
+   unsplit day role always equals the job role, so this is identical to the old
+   `ov||defR||80`. */
+function shedRunRate(job,id,role){
+  const rates=job.rates||{};
+  const ov=(rates.crewOverrides||{})[id];
+  if(ov&&role===getJobRole(job,id))return ov;
+  const defR=role==='Wool Classer'?rates.classerPerRun
+            :role==='Penner'?rates.pennerPerRun
+            :role==='Presser'?rates.presserPerRun
+            :rates.woolHandlerPerRun;
+  return defR||80;
+}
+
+/* The role→runs split for one worker-day, e.g. {'Wool Classer':2,'Presser':2}.
+   Falls back to the whole day at the job-level role whenever no split was
+   recorded — which is every legacy row and every day nobody switched. */
+function shedRunsByRole(job,id,date){
+  const split=(((job.shedRoleRuns||{})[id])||{})[date];
+  if(split&&typeof split==='object'){
+    const out={};let any=false;
+    Object.keys(split).forEach(r=>{const v=Number(split[r])||0;if(v>0){out[r]=v;any=true;}});
+    if(any)return out;
+  }
+  const total=(((job.shedTallies||{})[id])||{})[date]||0;
+  if(!total)return {};
+  const jr=getJobRole(job,id);
+  return jr?{[jr]:total}:{};
+}
+/* True when this worker-day was actually split across roles. A split day always
+   pays PER RUN for every bucket: the presser bale-threshold rule is a whole-day
+   rule for someone whose day WAS pressing, and paying 20 bales for two runs of
+   pressing would be wrong. Unsplit days keep the hybrid untouched. */
+function isSplitDay(job,id,date){
+  const split=(((job.shedRoleRuns||{})[id])||{})[date];
+  if(!split||typeof split!=='object')return false;
+  return Object.keys(split).filter(r=>(Number(split[r])||0)>0).length>1;
+}
+/* Piecework is driven by DATA, not role. A wool handler who shears run 2 has
+   count rows and must be paid for them; previously the piece list was
+   role-filtered and those counts were silently dropped — the money did not
+   appear anywhere on the summary, so nobody queried it.
+   NOTE deliberately NOT symmetric: a Shearer/Crutcher with shed_runs is left on
+   the piece side only. 7 such rows exist live across 2 shearers and paying them
+   would be a silent change to real pay. Open question for the contractor. */
+function hasPieceCounts(job,id){
+  return Object.values(job.runs||{}).some(dayRuns=>
+    (dayRuns||[]).some(run=>mobsOf(run).some(mob=>((mob.counts||{})[id]||0)>0)));
+}
+function pieceIds(job){
+  return (job.crew||[]).filter(id=>{
+    const r=getJobRole(job,id);
+    return r==='Shearer'||r==='Crutcher'||hasPieceCounts(job,id);
+  });
+}
+/* Stand fee stays strictly role-based. It is equipment hire for a shearer who
+   brought their own machine — a wool handler who shore one run on a borrowed
+   handpiece must not collect it. Under the old code shIds did this filtering
+   incidentally; pieceIds no longer does, so the guard has to be explicit. */
+function standFeeIds(job){
+  return (job.crew||[]).filter(id=>{
+    const r=getJobRole(job,id);
+    return r==='Shearer'||r==='Crutcher';
+  });
+}
+
 /* v4.6.3f — mess rate resolution. Per-person override in crewDetails wins;
    otherwise role-based default ($35 shearer/crutcher, $10 other staff).
    Deduction only ever applies when mess days were actually toggled. */
@@ -1662,7 +1803,7 @@ function jobDates(j){
      the last planned day. */
   if((j.status||'Active')==='Active'&&localToday()>=j.startDate)ensure(localToday());
   Object.keys(j.runs||{}).forEach(ensure);
-  ['shedTallies','baleTallies','baleWeights','travelTallies','messTallies'].forEach(k=>{
+  ['shedTallies','shedRoleRuns','baleTallies','baleWeights','travelTallies','messTallies'].forEach(k=>{
     const t=j[k];if(!t)return;
     Object.keys(t).forEach(cid=>{const per=t[cid];if(per&&typeof per==='object')Object.keys(per).forEach(ensure);});
   });
@@ -1705,7 +1846,7 @@ function calcProg(job){
      100 crutched is not 250 of anything. `sh` and `cr` are the real numbers.
      `shorn` remains the sum and exists ONLY to drive pct against totalSheep,
      which is a single "sheep through the shed" target. Never display `shorn`. */
-  const shIds=job.crew.filter(id=>{const r=getJobRole(job,id);return r==='Shearer'||r==='Crutcher';});
+  const shIds=pieceIds(job); /* v4.6.18 — data-driven: counts are paid to whoever entered them */
   let sh=0,cr=0,daysWorked=0;
   const shDays=new Set(),crDays=new Set();
   const anyRole=shIds.length===0;
@@ -1734,7 +1875,10 @@ function calcProg(job){
 function fmtDays(worked,allocated){
   const a=Number(allocated)||0;
   if(!a)return 'Day '+worked;
-  if(worked>a)return 'Day '+worked+' \u2014 '+(worked-a)+' over plan';
+  /* v4.6.16b - sheds run over for reasons outside the crew's control (rain, wet
+     sheep, power out). 'N over plan' read as a criticism of the gang. The overrun
+     day still counts and still shows; only the scolding is gone. */
+  if(worked>a)return 'Day '+worked+' of '+a;
   return 'Day '+worked+' of '+a;
 }
 function fmtSplit(sh,cr){
@@ -1798,7 +1942,7 @@ function fmtPeriodLabel(start,end){
   return dn[sdt.getDay()]+' '+sd+' '+mo[sm-1]+' \u2013 '+dn[edt.getDay()]+' '+ed+' '+mo[em-1];
 }
 function calcPeriodStats(job,period){
-  const shIds=job.crew.filter(id=>{const r=getJobRole(job,id);return r==='Shearer'||r==='Crutcher';});
+  const shIds=pieceIds(job); /* v4.6.18 — data-driven: counts are paid to whoever entered them */
   const rates=job.rates||{};
   let shorn=0,totalEarn=0;
   const inP=date=>date>=period.start&&date<=period.end;
@@ -1820,6 +1964,15 @@ function calcPeriodStats(job,period){
     const role=getJobRole(job,id);
     const defR=role==='Wool Classer'?rates.classerPerRun:role==='Penner'?rates.pennerPerRun:role==='Presser'?rates.presserPerRun:rates.woolHandlerPerRun;
     const rpr=ov||defR||80;
+    /* v4.6.18 — a day split across shed roles prices each bucket at its own
+       rate and always PER RUN (see isSplitDay). Unsplit days fall through to
+       the untouched paths below and are byte-identical to v4.6.16d. */
+    const splitDates=Object.keys((job.shedRoleRuns||{})[id]||{}).filter(d=>isSplitDay(job,id,d)&&inP(d));
+    splitDates.forEach(date=>{
+      const byRole=shedRunsByRole(job,id,date);
+      Object.keys(byRole).forEach(r=>{totalEarn+=byRole[r]*shedRunRate(job,id,r);});
+    });
+    const skip=d=>splitDates.indexOf(d)>=0;
     if(role==='Presser'){
       /* v4.6.3c: cpk mode pays kg × pressCpk; standard mode uses threshold logic
          v4.6.3d.1b: iterate union of shedTallies + baleTallies + baleWeights dates.
@@ -1833,7 +1986,7 @@ function calcPeriodStats(job,period){
         ...Object.keys((job.baleWeights||{})[id]||{}),
       ]);
       allDates.forEach(date=>{
-        if(!inP(date))return;
+        if(!inP(date)||skip(date))return;
         const runs=(job.shedTallies[id]||{})[date]||0;
         if(pressMode==='cpk'){
           const kg=((job.baleWeights||{})[id]||{})[date]||0;
@@ -1845,7 +1998,7 @@ function calcPeriodStats(job,period){
         }
       });
     }
-    else{Object.entries(job.shedTallies[id]||{}).forEach(([date,runs])=>{if(!inP(date))return;totalEarn+=runs*rpr;});}
+    else{Object.entries(job.shedTallies[id]||{}).forEach(([date,runs])=>{if(!inP(date)||skip(date))return;totalEarn+=runs*rpr;});}
     totalEarn+=travelEarn(id);
   });
   // Shearer travel
@@ -1853,8 +2006,10 @@ function calcPeriodStats(job,period){
   /* v4.6.5 - stand fees (BYO) included so header Est. Payroll matches printed gross */
   if(job.evos==='BYO'&&(rates.standFeePerDay||0)>0){
     const sd={};
-    Object.entries(job.runs||{}).forEach(([date,rs])=>{if(!inP(date))return;rs.forEach(run=>{mobsOf(run).forEach(mob=>{shIds.forEach(id=>{if(mob.counts[id])(sd[id]=sd[id]||{})[date]=1;});});});});
-    shIds.forEach(id=>{if((((rates.crewDetails||{})[id])||{}).standFee===false)return;totalEarn+=Object.keys(sd[id]||{}).length*(rates.standFeePerDay||0);});
+    /* v4.6.18 — stand-fee day-set is role-based, not shIds (see standFeeIds). */
+    const sfIds=standFeeIds(job);
+    Object.entries(job.runs||{}).forEach(([date,rs])=>{if(!inP(date))return;rs.forEach(run=>{mobsOf(run).forEach(mob=>{sfIds.forEach(id=>{if(mob.counts[id])(sd[id]=sd[id]||{})[date]=1;});});});});
+    sfIds.forEach(id=>{if((((rates.crewDetails||{})[id])||{}).standFee===false)return;totalEarn+=Object.keys(sd[id]||{}).length*(rates.standFeePerDay||0);});
   }
   /* v4.6.3f — deductions. Mess: per-day multiplier (0/0.5/1) × resolved
      $/day rate, summed over period days. Sundries: itemised amounts whose
@@ -1878,7 +2033,7 @@ function calcPeriodStats(job,period){
 const pad=(str,len)=>String(str).padEnd(len,' ');
 function generateFarmRecord(job){
   const farm=gf(job.farmId);
-  const shIds=job.crew.filter(id=>{const r=getJobRole(job,id);return r==='Shearer'||r==='Crutcher';});
+  const shIds=pieceIds(job); /* v4.6.18 — data-driven: counts are paid to whoever entered them */
   const shedIds=job.crew.filter(id=>{const r=getJobRole(job,id);return r&&r!=='Shearer'&&r!=='Crutcher';});
   const dash='\u2500'.repeat(56);
   const dashEq='\u2550'.repeat(56);
@@ -1941,8 +2096,10 @@ function generateFarmRecord(job){
   /* v4.6.5 - stand fees shown to farmer as a charge when shearers bring own machines */
   if(job.evos==='BYO'&&((job.rates||{}).standFeePerDay||0)>0){
     const sdF={};
-    Object.entries(job.runs||{}).forEach(([date,rs])=>{rs.forEach(run=>{mobsOf(run).forEach(mob=>{shIds.forEach(id=>{if(mob.counts[id])(sdF[id]=sdF[id]||{})[date]=1;});});});});
-    const sDays=shIds.reduce((a,id)=>a+(((((job.rates||{}).crewDetails||{})[id])||{}).standFee===false?0:Object.keys(sdF[id]||{}).length),0);
+    /* v4.6.18 — role-based; farmer is charged for own-machine SHEARER days only. */
+    const sfIdsF=standFeeIds(job);
+    Object.entries(job.runs||{}).forEach(([date,rs])=>{rs.forEach(run=>{mobsOf(run).forEach(mob=>{sfIdsF.forEach(id=>{if(mob.counts[id])(sdF[id]=sdF[id]||{})[date]=1;});});});});
+    const sDays=sfIdsF.reduce((a,id)=>a+(((((job.rates||{}).crewDetails||{})[id])||{}).standFee===false?0:Object.keys(sdF[id]||{}).length),0);
     const sRate=(job.rates||{}).standFeePerDay||0;
     if(sDays>0){L.push('Stand fees (BYO machines): '+sDays+' shearer-day'+(sDays===1?'':'s')+' x $'+sRate.toFixed(2)+' = $'+(sDays*sRate).toFixed(2));L.push('');}
   }
@@ -1960,7 +2117,7 @@ function generateFarmRecord(job){
 }
 function generateSummary(job,period){
   const farm=gf(job.farmId);const rates=job.rates||{};
-  const shIds=job.crew.filter(id=>{const r=getJobRole(job,id);return r==='Shearer'||r==='Crutcher';});
+  const shIds=pieceIds(job); /* v4.6.18 — data-driven: counts are paid to whoever entered them */
   const shedIds=job.crew.filter(id=>{const r=getJobRole(job,id);return r&&r!=='Shearer'&&r!=='Crutcher';});
   const dash='\u2500'.repeat(52);
   const inP=date=>!period||(date>=period.start&&date<=period.end);
@@ -2272,7 +2429,7 @@ function payWeekJobData(job,period){
   const inP=d=>d>=period.start&&d<=period.end;
   const out={};
   const W=id=>{if(!out[id]){const c=gc(id);out[id]={id,name:c?c.name:'Unknown',role:getJobRole(job,id)||(c?c.role:'')||'',lines:[],piece:0,teamLoad:0,staffEarn:0,travel:0,stand:0,standSuper:0,tax:0,mess:0,sundries:0,hasTeam:false};}return out[id];};
-  const shIds=job.crew.filter(id=>{const r=getJobRole(job,id);return r==='Shearer'||r==='Crutcher';});
+  const shIds=pieceIds(job); /* v4.6.18 — data-driven: counts are paid to whoever entered them */
   const stIds=job.crew.filter(id=>{const r=getJobRole(job,id);return r&&r!=='Shearer'&&r!=='Crutcher';});
   const dEt=id=>((rates.crewDetails||{})[id])||{};
   /* piecework: per date x type x effective rate (overrides + individual loadings baked in) */
@@ -2303,10 +2460,23 @@ function payWeekJobData(job,period){
     const ov=(rates.crewOverrides||{})[id];
     const defR=role==='Wool Classer'?rates.classerPerRun:role==='Penner'?rates.pennerPerRun:role==='Presser'?rates.presserPerRun:rates.woolHandlerPerRun;
     const rpr=ov||defR||80;
+    /* v4.6.18 — days split across shed roles: each bucket at its own rate, always
+       per run. Itemised one line per role so the payslip reads '2 runs Wool
+       Classer' / '2 runs Presser' rather than a single unexplained figure. */
+    const splitD=Object.keys((job.shedRoleRuns||{})[id]||{}).filter(dt=>isSplitDay(job,id,dt)&&inP(dt)).sort();
+    splitD.forEach(date=>{
+      const byRole=shedRunsByRole(job,id,date);
+      Object.keys(byRole).sort().forEach(r=>{
+        const rr=shedRunRate(job,id,r);const units=byRole[r];const earn=units*rr;const w=W(id);
+        w.staffEarn+=earn;
+        w.lines.push({date,shed,item:units+' run'+(units===1?'':'s')+' '+r,units,rate:rr,amount:earn,superable:true});
+      });
+    });
+    const skipD=dt=>splitD.indexOf(dt)>=0;
     if(role==='Presser'){
       const mode=d.pressMode||'standard';
       const dates=new Set([].concat(Object.keys((job.shedTallies||{})[id]||{}),Object.keys((job.baleTallies||{})[id]||{}),Object.keys(((job.baleWeights||{})[id])||{})));
-      Array.from(dates).filter(inP).sort().forEach(date=>{
+      Array.from(dates).filter(dt=>inP(dt)&&!skipD(dt)).sort().forEach(date=>{
         if(mode==='cpk'){
           const kg=(((job.baleWeights||{})[id])||{})[date]||0;
           if(kg>0){const earn=kg*(rates.pressCpk||0);const w=W(id);w.staffEarn+=earn;
@@ -2322,7 +2492,7 @@ function payWeekJobData(job,period){
         }
       });
     }else{
-      Object.entries((job.shedTallies||{})[id]||{}).filter(x=>inP(x[0])).sort((a,b)=>a[0]<b[0]?-1:1).forEach(x=>{
+      Object.entries((job.shedTallies||{})[id]||{}).filter(x=>inP(x[0])&&!skipD(x[0])).sort((a,b)=>a[0]<b[0]?-1:1).forEach(x=>{
         const date=x[0],runs=x[1];
         if(!runs)return;const earn=runs*rpr;const w=W(id);w.staffEarn+=earn;
         w.lines.push({date,shed,item:runs+' runs',units:runs,rate:rpr,amount:earn,superable:true});
@@ -2348,7 +2518,10 @@ function payWeekJobData(job,period){
   /* stand fee (BYO) - superable per rates.standFeeSuper (default ON) */
   if(job.evos==='BYO'&&(rates.standFeePerDay||0)>0){
     const superFlag=rates.standFeeSuper!==false;
-    shIds.forEach(id=>{if((((rates.crewDetails||{})[id])||{}).standFee===false)return;const n=Object.keys(daysSet[id]||{}).length;if(!n)return;
+    /* v4.6.18 — role-based, NOT shIds. Stand fee is equipment hire for a shearer
+       who brought their own machine; a wool handler who shore one run on a
+       borrowed handpiece must not collect it. */
+    standFeeIds(job).forEach(id=>{if((((rates.crewDetails||{})[id])||{}).standFee===false)return;const n=Object.keys(daysSet[id]||{}).length;if(!n)return;
       const earn=n*(rates.standFeePerDay||0);const w=W(id);w.stand+=earn;if(superFlag)w.standSuper+=earn;
       w.lines.push({date:'',shed,item:'Stand fee (BYO) '+n+' day'+(n===1?'':'s'),units:n,rate:rates.standFeePerDay||0,amount:earn,superable:superFlag});});
   }
@@ -2568,7 +2741,7 @@ function generateTallyTrends(jobs,endPeriod,fq,weeksN){
   const shear={},staff={};
   (jobs||[]).forEach(job=>{
     if(!job||!job.crew)return;
-    const shIds=job.crew.filter(id=>{const r=getJobRole(job,id);return r==='Shearer'||r==='Crutcher';});
+    const shIds=pieceIds(job); /* v4.6.18 — data-driven: counts are paid to whoever entered them */
     const stIds=job.crew.filter(id=>{const r=getJobRole(job,id);return r&&r!=='Shearer'&&r!=='Crutcher';});
     periods.forEach((p,pi)=>{
       const inP=d=>d>=p.start&&d<=p.end;
@@ -3039,8 +3212,13 @@ function TopBar({role,setRole,onBack,backLabel,onSchedule}){
 }
 /* ── WEEK BANNER ── */
 function WeekBanner({jobs,contractorName}){
-  const active=jobs.filter(j=>j.status==='Active');
-  const crew=new Set(jobs.filter(j=>j.status==='Active'||j.status==='Dispatched').flatMap(j=>j.crew)).size;
+  /* v4.6.16b - a job that starts next week is not running today. Header counts use
+     the same start-date gate as the Home list, or the banner says 9 while the list
+     shows 4. 'Crew Out' especially: nobody is out yet on a shed starting Tuesday. */
+  const _wbToday=localToday();
+  const _wbStarted=j=>!j.startDate||j.startDate<=_wbToday;
+  const active=jobs.filter(j=>j.status==='Active'&&_wbStarted(j));
+  const crew=new Set(jobs.filter(j=>(j.status==='Active'||j.status==='Dispatched')&&_wbStarted(j)).flatMap(j=>j.crew)).size;
   const progs=active.map(j=>calcProg(j));
   const shorn=progs.reduce((s,p)=>s+p.shorn,0);
   const bSh=progs.reduce((s,p)=>s+p.sh,0),bCr=progs.reduce((s,p)=>s+p.cr,0);
@@ -3062,6 +3240,10 @@ function JLC({job,onClick,wb}){
     isDraft&&e('div',{className:'draft-hint'},'◌ Draft — not sent to crew yet. Tap to open and publish.'),
     !isDraft&&job.status==='Active'&&p.daysWorked>0&&e('div',null,e('div',{className:'jlc-pr'},e('span',null,fmtSplit(p.sh,p.cr)+' \u2014 '+fmtDays(p.daysWorked,job.daysAllocated)),e('span',{className:'pct-lbl'},Math.round(p.pct)+'%')),e('div',{className:'pbar'},e('div',{className:`pbar-f ${cls}`,style:{width:p.pct+'%'}}))),
     job.status==='Dispatched'&&e('div',{style:{fontSize:'12px',color:'var(--amber)',marginTop:'6px'}},'📱 Dispatched — starts '+fmtDateLong(job.startDate)),
+    /* v4.6.16b - an Active job that has not started yet must say so. Gated off the main
+       Home list, so this renders in search results, Schedule and the crew board -
+       exactly the places a future shed is legitimately visible. */
+    job.status==='Active'&&job.startDate&&job.startDate>localToday()&&e('div',{style:{fontSize:'12px',color:'var(--amber)',marginTop:'6px',fontWeight:600}},'📅 Starts '+fmtDateLong(job.startDate)),
     job.status==='Completed'&&e('div',{style:{fontSize:'12px',color:'var(--blue)',marginTop:'6px'}},'\u2713 '+fmtSplit(p.sh,p.cr))
   );
 }
@@ -5653,7 +5835,22 @@ function HomeScreen({jobs:allJobs,role,setRole,onJob,onNew,onDatabase,onSchedule
   const matches=j=>!q||jobName(j).toLowerCase().includes(q)||j.type.toLowerCase().includes(q);
 
   const drafts=jobs.filter(j=>j.status==='Draft'&&matches(j));
-  const active=jobs.filter(j=>j.status==='Active'&&matches(j)).sort(sortFn);
+  /* v4.6.16b - START-DATE GATE. Published jobs appear on the board the morning they
+     start, not the moment they are created. At 5-10 jobs lined up, future sheds
+     were indistinguishable from sheds actually running (the card prints no date for
+     an Active job, and calcProg suppresses the progress bar at daysWorked 0).
+     START ONLY, never an end gate: an Active job stays on the board until it is
+     cycled to Completed, so a shed that runs two days over cannot vanish mid-job.
+     Missing/blank startDate counts as started - legacy or bad-data jobs can never
+     disappear off the board. Search escapes the gate (see below). */
+  const _homeToday=localToday();
+  const jobStarted=j=>!j.startDate||j.startDate<=_homeToday;
+  const _activeAll=jobs.filter(j=>j.status==='Active'&&matches(j)).sort(sortFn);
+  /* Searching drops the gate: hunting a job you know exists and getting nothing back
+     is worse than the clutter the gate removes. */
+  const active=q?_activeAll:_activeAll.filter(jobStarted);
+  const upcoming=_activeAll.filter(j=>!jobStarted(j))
+    .sort((a,b)=>String(a.startDate||'').localeCompare(String(b.startDate||'')));
   const completed=jobs.filter(j=>j.status==='Completed'&&matches(j)).sort(sortFn);
   const charged=jobs.filter(j=>j.status==='Charged Out'&&matches(j)).sort(sortFn);
   const isEmpty=jobs.length===0;
@@ -5780,6 +5977,19 @@ function HomeScreen({jobs:allJobs,role,setRole,onJob,onNew,onDatabase,onSchedule
           e('div',{className:'drafts-pill-s'},'Tap to open Schedule and publish')
         ),
         e('div',{className:'drafts-pill-arr'},'›')
+      ),
+
+      /* v4.6.16b - upcoming jobs are gated off the list but must not go silent, or a shed
+         set up three weeks out is forgotten and the crew never get an SMS. One row,
+         not a second list - it stays one row at 10 lined up. Hidden while searching,
+         because search already shows those jobs in the list above. */
+      upcoming.length>0&&!q&&onSchedule&&e('div',{className:'drafts-pill',style:{borderColor:'var(--amber)'},onClick:onSchedule},
+        e('div',{className:'drafts-pill-ic',style:{color:'var(--amber)'}},'📅'),
+        e('div',{className:'drafts-pill-body'},
+          e('div',{className:'drafts-pill-t'},upcoming.length+' job'+(upcoming.length>1?'s':'')+' coming up'),
+          e('div',{className:'drafts-pill-s'},'Next: '+(function(){const n=upcoming[0];const f=gf(n.farmId);return (n.jobName||(f?f.name:'Unnamed'))+' — '+fmtDateLong(n.startDate);})())
+        ),
+        e('div',{className:'drafts-pill-arr',style:{color:'var(--amber)'}},'›')
       ),
 
       isEmpty&&e('div',{style:{margin:'32px 16px 0',padding:'32px 24px',background:'var(--card)',border:'2px dashed var(--border)',borderRadius:'var(--r)',textAlign:'center'}},
