@@ -563,7 +563,7 @@ const LS_TALLY_QUEUE='mg_tally_queue_'+CONTRACTOR_SLUG; /* per-cell offline queu
 const LS_TALLY_DEAD='mg_tally_dead_'+CONTRACTOR_SLUG; /* v4.6.3g — quarantined cells (permanent rejection). Replayed once on boot in case the server-side blocker (e.g. missing kind constraint) was since fixed. */
 const LS_TALLY_META_QUEUE='mg_tally_meta_queue_'+CONTRACTOR_SLUG; /* v4.6.4 — offline/failed mob metadata (type/desc) updates to existing count cells; flushed alongside the tally queue. */
 const ROLE_TIMEOUT_HOURS=12; /* auto-reset after 12h inactivity */
-const APP_VERSION='v4.6.19';
+const APP_VERSION='v4.6.19a';
 const SUPER_RATE=0.12; /* SG rate, 12% from 1 Jul 2025. One-line change if legislated rate moves. */
 /* v4.6.12a (26 Jul 2026): fleet-alignment rebuild - feature content identical to v4.6.12; new version string per one-build-one-version discipline. */
 /* v4.6.12 (20 Jul 2026): PER-CREW PIN, contractor-controlled (design settled with the founder before any deploy; an earlier worker-self-set draft was discarded - self-set has a bootstrap race where an imposter claims a name first and sets its PIN). MODEL: every worker is AUTO-ASSIGNED a random 4-digit PIN (genCrewPin at creation; existing crew backfilled via SQL per contractor at rollout). The PIN is stored READABLE at crew_members.data.pin and shown on the worker's card in My Database (admin-only surface) with a regenerate button and a 'Text PIN' button (plain GSM-7 SMS via /api/send-sms so the worker has it on file). DELIBERATE ENGINEERING CALL, not an oversight: with the shared anon key and a 4-digit space, a hash is brute-forced in under a second by anyone determined, so hashing here is theatre; readable storage buys contractor look-up-ability at no real security cost. This is a visibility gate against casual wrong-name claims - real authentication is v5 (Supabase Auth + RLS). CLAIM FLOW: picking a name with a PIN demands it (CrewPinVerifyModal, direct compare, works offline once the record is synced; names with PINs show a lock in the picker); 'Not you?' re-challenges; app_settings.requireCrewPin=true blocks claiming names with NO pin ('ask your contractor') for hard-lockdown contractors, off = pinless names bind as before. Workers never set or change their own PIN; contractor regenerates on request (specific chosen PINs = SRD via SQL). Lead/Admin PINs and the per-job PIN untouched. */
@@ -1602,7 +1602,7 @@ const mkRates=(ov={})=>{
      keep the old carry-forward behaviour, so a partial default sheet never surprises. */
   const dflt=lsGet(LS_DEFAULT_RATES)||{};
   const pick=(k,hard)=>dflt[k]??last[k]??hard;
-  return {shearingPerHead:pick('shearingPerHead',4.80),crutchingPerHead:pick('crutchingPerHead',1.55),woolHandlerPerRun:pick('woolHandlerPerRun',80),classerPerRun:pick('classerPerRun',110),pennerPerRun:pick('pennerPerRun',85),presserPerRun:pick('presserPerRun',85),presserPerBale:pick('presserPerBale',14.20),baleThreshold:pick('baleThreshold',13),pressCpk:pick('pressCpk',0),travelKmDefault:pick('travelKmDefault',0.85),shedKm:pick('shedKm',0),standFeePerDay:pick('standFeePerDay',0),standFeeSuper:pick('standFeeSuper',true),crewOverrides:{},shearerLoadings:{},loadingType:{},travelRate:{},payDayOfWeek:pick('payDayOfWeek',5),payFrequency:pick('payFrequency','weekly'),farmerShearingRate:pick('farmerShearingRate',6.50),farmerCrutchingRate:pick('farmerCrutchingRate',2.00),cookDayRate:pick('cookDayRate',0),cookHalfDayRate:pick('cookHalfDayRate',0),cookPerHead:pick('cookPerHead',0),crewDetails:{},...ov};
+  return {shearingPerHead:pick('shearingPerHead',4.80),crutchingPerHead:pick('crutchingPerHead',1.55),woolHandlerPerRun:pick('woolHandlerPerRun',80),classerPerRun:pick('classerPerRun',110),pennerPerRun:pick('pennerPerRun',85),presserPerRun:pick('presserPerRun',85),presserPerBale:pick('presserPerBale',14.20),baleThreshold:pick('baleThreshold',13),pressCpk:pick('pressCpk',0),travelKmDefault:pick('travelKmDefault',0.85),shedKm:pick('shedKm',0),standFeePerDay:pick('standFeePerDay',0),standFeeSuper:pick('standFeeSuper',true),crewOverrides:{},shearerLoadings:{},loadingType:{},travelRate:{},payDayOfWeek:pick('payDayOfWeek',5),payFrequency:pick('payFrequency','weekly'),farmerShearingRate:pick('farmerShearingRate',6.50),farmerCrutchingRate:pick('farmerCrutchingRate',2.00),cookDayRate:pick('cookDayRate',400),cookHalfDayRate:pick('cookHalfDayRate',200),cookPerHead:pick('cookPerHead',0),crewDetails:{},...ov};
 };
 const INIT_JOBS=[];
 const gf=id=>FARMS.find(f=>f.id===id);
@@ -3843,7 +3843,7 @@ function TallyTab({job,setJob,role,viewDate,setViewDate}){
         const c=gc(id);if(!c)return null;
         const curD=Number(((job.cookDays||{})[id]||{})[viewDate])||0;
         const curH=Number(((job.cookHeads||{})[id]||{})[viewDate])||0;
-        const canEditCook=canEdit||isAdmin;
+        const canEditCook=isAdmin; /* v4.6.19a — admin only, NOT lead */
         const nextD=curD===0?0.5:curD===0.5?1:0;
         const glyphD=curD>=1?'\u25cf Full':curD>0?'\u00bd Half':'\u25cb None';
         const bgD=curD>=1?'var(--green)':curD>0?'var(--amber)':'var(--card2)';
