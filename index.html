@@ -25,6 +25,17 @@ html,body{background:var(--bg);color:var(--text);font-family:var(--b);min-height
 .back-btn{display:flex;align-items:center;gap:5px;font-size:14px;color:rgba(255,255,255,.75);cursor:pointer;background:none;border:none;padding:4px 0;flex-shrink:0}
 .back-arr{font-size:18px;line-height:1}
 .back-label{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px}
+.ptr-ind{position:fixed;top:0;left:0;right:0;height:0;display:flex;align-items:flex-end;justify-content:center;
+  pointer-events:none;z-index:9998;opacity:0;transition:opacity .15s ease;will-change:transform}
+.ptr-inner{display:flex;align-items:center;gap:8px;background:var(--card2,#1b1b1f);border:1px solid var(--border,#333);
+  border-radius:999px;padding:6px 14px;margin-bottom:6px;box-shadow:0 4px 14px rgba(0,0,0,.35);
+  font-family:var(--h);font-size:12px;font-weight:700;letter-spacing:.3px;color:var(--amber,#f59e0b);white-space:nowrap}
+.ptr-spin{width:12px;height:12px;border-radius:50%;border:2px solid var(--amber,#f59e0b);border-top-color:transparent;
+  opacity:.35;flex-shrink:0}
+.ptr-ind.busy .ptr-spin{opacity:1;animation:ptrspin .7s linear infinite}
+@keyframes ptrspin{to{transform:rotate(360deg)}}
+/* stop Chrome's native pull-to-refresh firing alongside ours (double reload) */
+html,body{overscroll-behavior-y:contain}
 .role-toggle{display:flex;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.15);border-radius:8px;overflow:hidden;flex-shrink:0}
 .rt-btn{padding:5px 8px;font-size:10px;font-weight:700;letter-spacing:.3px;text-transform:uppercase;cursor:pointer;border:none;background:none;color:rgba(255,255,255,.5);transition:.15s;white-space:nowrap}
 .rt-btn.active{background:var(--amber);color:#000}
@@ -563,7 +574,7 @@ const LS_TALLY_QUEUE='mg_tally_queue_'+CONTRACTOR_SLUG; /* per-cell offline queu
 const LS_TALLY_DEAD='mg_tally_dead_'+CONTRACTOR_SLUG; /* v4.6.3g — quarantined cells (permanent rejection). Replayed once on boot in case the server-side blocker (e.g. missing kind constraint) was since fixed. */
 const LS_TALLY_META_QUEUE='mg_tally_meta_queue_'+CONTRACTOR_SLUG; /* v4.6.4 — offline/failed mob metadata (type/desc) updates to existing count cells; flushed alongside the tally queue. */
 const ROLE_TIMEOUT_HOURS=12; /* auto-reset after 12h inactivity */
-const APP_VERSION='v4.6.19a';
+const APP_VERSION='v4.6.20';
 const SUPER_RATE=0.12; /* SG rate, 12% from 1 Jul 2025. One-line change if legislated rate moves. */
 /* v4.6.12a (26 Jul 2026): fleet-alignment rebuild - feature content identical to v4.6.12; new version string per one-build-one-version discipline. */
 /* v4.6.12 (20 Jul 2026): PER-CREW PIN, contractor-controlled (design settled with the founder before any deploy; an earlier worker-self-set draft was discarded - self-set has a bootstrap race where an imposter claims a name first and sets its PIN). MODEL: every worker is AUTO-ASSIGNED a random 4-digit PIN (genCrewPin at creation; existing crew backfilled via SQL per contractor at rollout). The PIN is stored READABLE at crew_members.data.pin and shown on the worker's card in My Database (admin-only surface) with a regenerate button and a 'Text PIN' button (plain GSM-7 SMS via /api/send-sms so the worker has it on file). DELIBERATE ENGINEERING CALL, not an oversight: with the shared anon key and a 4-digit space, a hash is brute-forced in under a second by anyone determined, so hashing here is theatre; readable storage buys contractor look-up-ability at no real security cost. This is a visibility gate against casual wrong-name claims - real authentication is v5 (Supabase Auth + RLS). CLAIM FLOW: picking a name with a PIN demands it (CrewPinVerifyModal, direct compare, works offline once the record is synced; names with PINs show a lock in the picker); 'Not you?' re-challenges; app_settings.requireCrewPin=true blocks claiming names with NO pin ('ask your contractor') for hard-lockdown contractors, off = pinless names bind as before. Workers never set or change their own PIN; contractor regenerates on request (specific chosen PINs = SRD via SQL). Lead/Admin PINs and the per-job PIN untouched. */
@@ -1857,6 +1868,84 @@ function jobDates(j){
   ds.sort(); /* ISO YYYY-MM-DD sorts correctly as strings */
   return ds;
 }
+/* v4.6.20 — PULL TO REFRESH.
+   Deliberately does NOT reload the page. A shed device on flaky signal that
+   reloads can land on a blank app, and the whole point of the offline queue is
+   that the shed never loses a day. Instead this runs the SAME resync as an
+   offline→online recovery: flush the queue, refetch jobs/farms/crew, re-hydrate
+   tallies from tally_entries.
+
+   Guards, because this is a document-level touch handler on a live app:
+     · only when the page is already scrolled to the top
+     · never while a modal/sheet is open (.overlay present)
+     · never when the gesture starts inside a scrolled container
+     · single-finger only; preventDefault ONLY once actually pulling down, so
+       normal scrolling and horizontal gestures are untouched
+     · offline says so instead of spinning forever */
+function usePullToRefresh(onRefresh){
+  useEffect(()=>{
+    if(!('ontouchstart' in window))return;
+    const TH=70,MAX=110,DAMP=0.5;
+    const ind=document.createElement('div');
+    ind.className='ptr-ind';
+    ind.innerHTML='<div class="ptr-inner"><span class="ptr-spin"></span><span class="ptr-txt"></span></div>';
+    document.body.appendChild(ind);
+    const txt=ind.querySelector('.ptr-txt');
+    let startY=0,dy=0,pulling=false,armed=false,busy=false;
+    const paint=(d,state)=>{
+      ind.style.transform='translateY('+Math.round(d)+'px)';
+      ind.style.opacity=d>4?'1':'0';
+      ind.classList.toggle('busy',state==='busy');
+      txt.textContent=state==='busy'?'Refreshing\u2026'
+        :state==='offline'?'Offline \u2014 saved on device'
+        :d*1>=TH?'Release to refresh':'Pull to refresh';
+    };
+    const inScrolled=el=>{
+      for(let n2=el;n2&&n2!==document.body;n2=n2.parentElement){
+        if(n2.scrollTop>0)return true;
+      }
+      return false;
+    };
+    const onStart=ev=>{
+      if(busy||ev.touches.length!==1)return;
+      if(document.querySelector('.overlay'))return;
+      if((window.scrollY||document.documentElement.scrollTop||0)>0)return;
+      if(inScrolled(ev.target))return;
+      startY=ev.touches[0].clientY;dy=0;pulling=true;armed=false;
+    };
+    const onMove=ev=>{
+      if(!pulling||busy)return;
+      dy=ev.touches[0].clientY-startY;
+      if(dy<=0){if(!armed)pulling=false;return;}
+      if((window.scrollY||document.documentElement.scrollTop||0)>0){pulling=false;paint(0);return;}
+      armed=true;
+      if(ev.cancelable)ev.preventDefault();
+      paint(Math.min(dy*DAMP,MAX));
+    };
+    const finish=()=>{
+      if(!pulling||busy){paint(0);return;}
+      pulling=false;
+      if(dy*DAMP<TH){paint(0);return;}
+      if(!navigator.onLine){paint(TH,'offline');setTimeout(()=>paint(0),1400);return;}
+      busy=true;paint(TH,'busy');
+      Promise.resolve().then(()=>onRefresh&&onRefresh())
+        .catch(()=>{})
+        .then(()=>{setTimeout(()=>{busy=false;paint(0);},500);});
+    };
+    document.addEventListener('touchstart',onStart,{passive:true});
+    document.addEventListener('touchmove',onMove,{passive:false});
+    document.addEventListener('touchend',finish,{passive:true});
+    document.addEventListener('touchcancel',finish,{passive:true});
+    return()=>{
+      document.removeEventListener('touchstart',onStart);
+      document.removeEventListener('touchmove',onMove);
+      document.removeEventListener('touchend',finish);
+      document.removeEventListener('touchcancel',finish);
+      if(ind.parentNode)ind.parentNode.removeChild(ind);
+    };
+  },[]);
+}
+
 /* Monday-start week helpers */
 function mondayOfWeek(dStr){const [y,mo,dy]=dStr.split('-').map(Number);const dt=new Date(y,mo-1,dy);const dow=dt.getDay();const diff=dow===0?-6:1-dow;dt.setDate(dt.getDate()+diff);return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;}
 function weekDatesFromMonday(mondayStr){const out=[];for(let i=0;i<7;i++)out.push(addDays(mondayStr,i));return out;}
@@ -3869,7 +3958,10 @@ function TallyTab({job,setJob,role,viewDate,setViewDate}){
                     style:{padding:'4px 12px',borderRadius:8,fontWeight:700,fontSize:13,cursor:'pointer',border:'none',background:bgD,color:fgD}},glyphD)
                 :e('div',{className:'s-val'},curD>=1?'\u25cf':curD>0?'\u00bd':'\u2014')
             ),
-            e('div',{className:'s-grp'},e('div',{className:'s-lbl'},'Meals'),
+            /* v4.6.19b — Meals only appears once a per-meal rate is set. At $0 it
+               changed nothing, so it read as a broken field. Any counts already
+               recorded are kept and start counting the moment a rate is entered. */
+            rP>0&&e('div',{className:'s-grp'},e('div',{className:'s-lbl'},'Meals'),
               canEditCook
                 ?e('input',{type:'text',inputMode:'numeric',className:'tal-inp',value:curH||'',
                     onChange:ev=>{const v=ev.target.value.replace(/[^0-9]/g,'');setCookHeads(id,v===''?0:parseInt(v,10));},
@@ -6810,6 +6902,12 @@ function App(){
      ALL save paths gate on this. If !isFresh, save paths become no-ops to prevent stale state from
      overwriting Supabase. This is the primary fix for the multi-contractor data wipe bug. */
   const isFreshRef=useRef(false);
+  /* v4.6.20 — holds the live goOnline resync so pull-to-refresh runs the SAME
+     path as an offline→online recovery, rather than a second implementation
+     that could drift from it. */
+  const resyncRef=useRef(null);
+  /* v4.6.20 — pull down at the top of any screen to resync. */
+  usePullToRefresh(()=>resyncRef.current&&resyncRef.current());
   /* isFreshState mirrors isFreshRef but as React state, so UI components can react to changes. */
   const [isFreshState,setIsFreshState]=useState(false);
   /* Helper to update both ref and state in sync */
@@ -7119,6 +7217,7 @@ function App(){
       }
     };
     const goOffline=()=>{setIsOnline(false);setSaveStatus('');};
+    resyncRef.current=goOnline; /* v4.6.20 — pull-to-refresh reuses this exact path */
     window.addEventListener('online',goOnline);
     window.addEventListener('offline',goOffline);
     return()=>{window.removeEventListener('online',goOnline);window.removeEventListener('offline',goOffline);};
