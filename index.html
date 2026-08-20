@@ -563,7 +563,7 @@ const LS_TALLY_QUEUE='mg_tally_queue_'+CONTRACTOR_SLUG; /* per-cell offline queu
 const LS_TALLY_DEAD='mg_tally_dead_'+CONTRACTOR_SLUG; /* v4.6.3g — quarantined cells (permanent rejection). Replayed once on boot in case the server-side blocker (e.g. missing kind constraint) was since fixed. */
 const LS_TALLY_META_QUEUE='mg_tally_meta_queue_'+CONTRACTOR_SLUG; /* v4.6.4 — offline/failed mob metadata (type/desc) updates to existing count cells; flushed alongside the tally queue. */
 const ROLE_TIMEOUT_HOURS=12; /* auto-reset after 12h inactivity */
-const APP_VERSION='v4.6.18';
+const APP_VERSION='v4.6.19';
 const SUPER_RATE=0.12; /* SG rate, 12% from 1 Jul 2025. One-line change if legislated rate moves. */
 /* v4.6.12a (26 Jul 2026): fleet-alignment rebuild - feature content identical to v4.6.12; new version string per one-build-one-version discipline. */
 /* v4.6.12 (20 Jul 2026): PER-CREW PIN, contractor-controlled (design settled with the founder before any deploy; an earlier worker-self-set draft was discarded - self-set has a bootstrap race where an imposter claims a name first and sets its PIN). MODEL: every worker is AUTO-ASSIGNED a random 4-digit PIN (genCrewPin at creation; existing crew backfilled via SQL per contractor at rollout). The PIN is stored READABLE at crew_members.data.pin and shown on the worker's card in My Database (admin-only surface) with a regenerate button and a 'Text PIN' button (plain GSM-7 SMS via /api/send-sms so the worker has it on file). DELIBERATE ENGINEERING CALL, not an oversight: with the shared anon key and a 4-digit space, a hash is brute-forced in under a second by anyone determined, so hashing here is theatre; readable storage buys contractor look-up-ability at no real security cost. This is a visibility gate against casual wrong-name claims - real authentication is v5 (Supabase Auth + RLS). CLAIM FLOW: picking a name with a PIN demands it (CrewPinVerifyModal, direct compare, works offline once the record is synced; names with PINs show a lock in the picker); 'Not you?' re-challenges; app_settings.requireCrewPin=true blocks claiming names with NO pin ('ask your contractor') for hard-lockdown contractors, off = pinless names bind as before. Workers never set or change their own PIN; contractor regenerates on request (specific chosen PINs = SRD via SQL). Lead/Admin PINs and the per-job PIN untouched. */
@@ -1042,6 +1042,8 @@ function hydrateTallies(job,tallyRows){
   job.baleWeights={};
   job.travelTallies={};
   job.messTallies={}; /* v4.6.3f: kind='mess' multiplier per (crew,date): 0 / 0.5 / 1 */
+  job.cookDays={};  /* v4.6.19: kind='cook_day'   1 = full, 0.5 = half */
+  job.cookHeads={}; /* v4.6.19: kind='cook_heads' mouths fed that day */
 
   /* Apply each row */
   (tallyRows||[]).forEach(row=>{
@@ -1084,6 +1086,12 @@ function hydrateTallies(job,tallyRows){
     }else if(row.kind==='travel'){
       if(!job.travelTallies[row.crew_id])job.travelTallies[row.crew_id]={};
       job.travelTallies[row.crew_id][row.cell_date]=v>0;
+    }else if(row.kind==='cook_day'){ /* v4.6.19 */
+      if(!job.cookDays[row.crew_id])job.cookDays[row.crew_id]={};
+      job.cookDays[row.crew_id][row.cell_date]=v;
+    }else if(row.kind==='cook_heads'){ /* v4.6.19 */
+      if(!job.cookHeads[row.crew_id])job.cookHeads[row.crew_id]={};
+      job.cookHeads[row.crew_id][row.cell_date]=v;
     }else if(row.kind==='mess'){ /* v4.6.3f */
       if(!job.messTallies[row.crew_id])job.messTallies[row.crew_id]={};
       job.messTallies[row.crew_id][row.cell_date]=v;
@@ -1329,6 +1337,8 @@ function buildStrippedJobBlob(job){
   out.baleWeights={};
   out.travelTallies={};
   out.messTallies={}; /* v4.6.3f: tally_entries kind='mess' is source of truth */
+  out.cookDays={};    /* v4.6.19 */
+  out.cookHeads={};   /* v4.6.19 */
   out.sundries=[];    /* v4.6.3f: sundries_entries table is source of truth — never duplicate into blob */
   return out;
 }
@@ -1592,7 +1602,7 @@ const mkRates=(ov={})=>{
      keep the old carry-forward behaviour, so a partial default sheet never surprises. */
   const dflt=lsGet(LS_DEFAULT_RATES)||{};
   const pick=(k,hard)=>dflt[k]??last[k]??hard;
-  return {shearingPerHead:pick('shearingPerHead',4.80),crutchingPerHead:pick('crutchingPerHead',1.55),woolHandlerPerRun:pick('woolHandlerPerRun',80),classerPerRun:pick('classerPerRun',110),pennerPerRun:pick('pennerPerRun',85),presserPerRun:pick('presserPerRun',85),presserPerBale:pick('presserPerBale',14.20),baleThreshold:pick('baleThreshold',13),pressCpk:pick('pressCpk',0),travelKmDefault:pick('travelKmDefault',0.85),shedKm:pick('shedKm',0),standFeePerDay:pick('standFeePerDay',0),standFeeSuper:pick('standFeeSuper',true),crewOverrides:{},shearerLoadings:{},loadingType:{},travelRate:{},payDayOfWeek:pick('payDayOfWeek',5),payFrequency:pick('payFrequency','weekly'),farmerShearingRate:pick('farmerShearingRate',6.50),farmerCrutchingRate:pick('farmerCrutchingRate',2.00),crewDetails:{},...ov};
+  return {shearingPerHead:pick('shearingPerHead',4.80),crutchingPerHead:pick('crutchingPerHead',1.55),woolHandlerPerRun:pick('woolHandlerPerRun',80),classerPerRun:pick('classerPerRun',110),pennerPerRun:pick('pennerPerRun',85),presserPerRun:pick('presserPerRun',85),presserPerBale:pick('presserPerBale',14.20),baleThreshold:pick('baleThreshold',13),pressCpk:pick('pressCpk',0),travelKmDefault:pick('travelKmDefault',0.85),shedKm:pick('shedKm',0),standFeePerDay:pick('standFeePerDay',0),standFeeSuper:pick('standFeeSuper',true),crewOverrides:{},shearerLoadings:{},loadingType:{},travelRate:{},payDayOfWeek:pick('payDayOfWeek',5),payFrequency:pick('payFrequency','weekly'),farmerShearingRate:pick('farmerShearingRate',6.50),farmerCrutchingRate:pick('farmerCrutchingRate',2.00),cookDayRate:pick('cookDayRate',0),cookHalfDayRate:pick('cookHalfDayRate',0),cookPerHead:pick('cookPerHead',0),crewDetails:{},...ov};
 };
 const INIT_JOBS=[];
 const gf=id=>FARMS.find(f=>f.id===id);
@@ -1707,6 +1717,43 @@ function standFeeIds(job){
   });
 }
 
+/* ══ v4.6.19 — COOK ═════════════════════════════════════════════════════════
+   A cook is neither piecework nor a per-run shed hand. Paid per DAY, and the day
+   is WHICHEVER IS GREATER of the flat day rate or the per-head (per mouth fed)
+   amount — never a threshold. A threshold would silently underpay whenever the
+   crossover sat the wrong side of the numbers; the presser carries the same
+   design hole and is unhit only because its figures happen to work out.
+
+   Full day and half day are INDEPENDENT rate fields, not a 50% derivation — half
+   a day of cooking is not half the work.
+
+   Storage mirrors mess: one row per crew-day, run_id and mob_id both ''.
+     kind='cook_day'   value 1 (full) or 0.5 (half)
+     kind='cook_heads' value = mouths fed that day
+   BOTH kinds must be in tally_entries_kind_check BEFORE this deploys or the rows
+   are permanently quarantined to LS_TALLY_DEAD. */
+function cookIds(job){
+  return (job.crew||[]).filter(id=>getJobRole(job,id)==='Cook');
+}
+/* Earnings for one cook-day. Returns {earn,basis,rate,units,half} — basis names
+   which arm won so the pay summary can show WHY, not an unexplained figure. */
+function cookDayEarn(job,id,date){
+  const rates=job.rates||{};
+  const frac=Number(((job.cookDays||{})[id]||{})[date])||0;
+  if(frac<=0)return null;
+  const heads=Number(((job.cookHeads||{})[id]||{})[date])||0;
+  const half=frac<1;
+  const dayRate=half?(Number(rates.cookHalfDayRate)||0):(Number(rates.cookDayRate)||0);
+  const perHeadRate=Number(rates.cookPerHead)||0;
+  const headsEarn=heads*perHeadRate;
+  if(headsEarn>dayRate)return{earn:headsEarn,basis:'heads',rate:perHeadRate,units:heads,half};
+  return{earn:dayRate,basis:'day',rate:dayRate,units:1,half};
+}
+function cookDates(job,id,inP){
+  const d=(job.cookDays||{})[id]||{};
+  return Object.keys(d).filter(x=>(!inP||inP(x))&&(Number(d[x])||0)>0).sort();
+}
+
 /* v4.6.3f — mess rate resolution. Per-person override in crewDetails wins;
    otherwise role-based default ($35 shearer/crutcher, $10 other staff).
    Deduction only ever applies when mess days were actually toggled. */
@@ -1803,7 +1850,7 @@ function jobDates(j){
      the last planned day. */
   if((j.status||'Active')==='Active'&&localToday()>=j.startDate)ensure(localToday());
   Object.keys(j.runs||{}).forEach(ensure);
-  ['shedTallies','shedRoleRuns','baleTallies','baleWeights','travelTallies','messTallies'].forEach(k=>{
+  ['shedTallies','shedRoleRuns','baleTallies','baleWeights','travelTallies','messTallies','cookDays','cookHeads'].forEach(k=>{
     const t=j[k];if(!t)return;
     Object.keys(t).forEach(cid=>{const per=t[cid];if(per&&typeof per==='object')Object.keys(per).forEach(ensure);});
   });
@@ -1959,7 +2006,7 @@ function calcPeriodStats(job,period){
   };
   Object.entries(job.runs||{}).forEach(([date,rs])=>{if(!inP(date))return;rs.forEach(run=>{mobsOf(run).forEach(mob=>{const br=mob.rateOverride!=null?mob.rateOverride:(mob.type==='Shearing'?rates.shearingPerHead:rates.crutchingPerHead)||0;shIds.forEach(id=>{const cnt=mob.counts[id]||0;if(!cnt)return;shorn+=cnt;const load=(rates.shearerLoadings||{})[id]||0;totalEarn+=cnt*(br+load);});});});});
   // Shed staff
-  job.crew.filter(id=>{const r=getJobRole(job,id);return r&&r!=='Shearer'&&r!=='Crutcher';}).forEach(id=>{
+  job.crew.filter(id=>{const r=getJobRole(job,id);return r&&r!=='Shearer'&&r!=='Crutcher'&&r!=='Cook';}).forEach(id=>{
     const ov=(rates.crewOverrides||{})[id];const c=gc(id);if(!c)return;
     const role=getJobRole(job,id);
     const defR=role==='Wool Classer'?rates.classerPerRun:role==='Penner'?rates.pennerPerRun:role==='Presser'?rates.presserPerRun:rates.woolHandlerPerRun;
@@ -2001,6 +2048,14 @@ function calcPeriodStats(job,period){
     else{Object.entries(job.shedTallies[id]||{}).forEach(([date,runs])=>{if(!inP(date)||skip(date))return;totalEarn+=runs*rpr;});}
     totalEarn+=travelEarn(id);
   });
+  /* v4.6.19 — cook: per day, whichever is greater of day rate vs per head.
+     No travel (a cook is not a travelling shed hand under this arrangement). */
+  cookIds(job).forEach(id=>{
+    cookDates(job,id,inP).forEach(date=>{
+      const cd=cookDayEarn(job,id,date);
+      if(cd)totalEarn+=cd.earn;
+    });
+  });
   // Shearer travel
   shIds.forEach(id=>{totalEarn+=travelEarn(id);});
   /* v4.6.5 - stand fees (BYO) included so header Est. Payroll matches printed gross */
@@ -2034,7 +2089,7 @@ const pad=(str,len)=>String(str).padEnd(len,' ');
 function generateFarmRecord(job){
   const farm=gf(job.farmId);
   const shIds=pieceIds(job); /* v4.6.18 — data-driven: counts are paid to whoever entered them */
-  const shedIds=job.crew.filter(id=>{const r=getJobRole(job,id);return r&&r!=='Shearer'&&r!=='Crutcher';});
+  const shedIds=job.crew.filter(id=>{const r=getJobRole(job,id);return r&&r!=='Shearer'&&r!=='Crutcher'&&r!=='Cook';});
   const dash='\u2500'.repeat(56);
   const dashEq='\u2550'.repeat(56);
   /* Group mobs by type+desc across entire job */
@@ -2118,7 +2173,7 @@ function generateFarmRecord(job){
 function generateSummary(job,period){
   const farm=gf(job.farmId);const rates=job.rates||{};
   const shIds=pieceIds(job); /* v4.6.18 — data-driven: counts are paid to whoever entered them */
-  const shedIds=job.crew.filter(id=>{const r=getJobRole(job,id);return r&&r!=='Shearer'&&r!=='Crutcher';});
+  const shedIds=job.crew.filter(id=>{const r=getJobRole(job,id);return r&&r!=='Shearer'&&r!=='Crutcher'&&r!=='Cook';});
   const dash='\u2500'.repeat(52);
   const inP=date=>!period||(date>=period.start&&date<=period.end);
   const shornBy={};shIds.forEach(id=>{shornBy[id]={sh:0,shEarn:0,cr:0,crEarn:0,mobs:[],daysSet:{}};});
@@ -2335,6 +2390,49 @@ function generateSummary(job,period){
       });
     }
   }
+  /* ══ v4.6.19 — COOK ═══════════════════════════════════════════════════════
+     Per day, WHICHEVER IS GREATER of the flat day rate or mouths x per-head.
+     Each day prints the arm that won so the figure is explainable. No travel.
+     Superable; mess and sundries deduct exactly as for any other staff. */
+  cookIds(job).forEach(id=>{
+    const c=gc(id);if(!c)return;
+    const dates=cookDates(job,id,inP);
+    if(!dates.length)return;
+    let earn=0,fullN=0,halfN=0,headsN=0;
+    const dayLines=[];
+    dates.forEach(date=>{
+      const cd=cookDayEarn(job,id,date);
+      if(!cd)return;
+      earn+=cd.earn;
+      if(cd.half)halfN++;else fullN++;
+      if(cd.basis==='heads')headsN+=cd.units;
+      dayLines.push('    '+fmtDate(date)+'  '
+        +(cd.basis==='heads'
+            ? cd.units+' meal'+(cd.units===1?'':'s')+' x $'+cd.rate.toFixed(2)
+            : (cd.half?'half day':'full day')+' $'+cd.rate.toFixed(2))
+        +(cd.half&&cd.basis==='heads'?' (half day)':'')
+        +'  = $'+cd.earn.toFixed(2)
+        +(cd.earn<=0.005?'   << COOK RATES NOT SET':''));
+    });
+    const taxPctK=parseFloat((((rates.crewDetails||{})[id])||{}).taxRate||0)||0;
+    const taxAmtK=taxPctK>0?earn*(taxPctK/100):0;
+    totalShedEarn+=earn;totalSuperable+=earn;
+    const dayStr=[fullN?fullN+' full':null,halfN?halfN+' half':null].filter(Boolean).join(' + ');
+    L.push('');L.push(c.name+' \u2014 Cook');
+    L.push('  Cooking: '+dayStr+' day'+((fullN+halfN)===1?'':'s')
+      +(headsN?' \u00b7 '+headsN+' meals on per-head days':'')+' = $'+earn.toFixed(2));
+    dayLines.forEach(l=>L.push(l));
+    L.push('  GROSS TOTAL: $'+earn.toFixed(2));
+    if(earn>0.005){L.push('  Superable earnings: $'+earn.toFixed(2));L.push('  Super guarantee ('+(SUPER_RATE*100).toFixed(0)+'%): $'+(earn*SUPER_RATE).toFixed(2));}
+    if(taxPctK>0)L.push('  Tax withheld ('+taxPctK+'%): -$'+taxAmtK.toFixed(2));
+    const mzK=messFor(id),szK=sundriesFor(id);
+    totalMess+=mzK.amount;totalSundries+=szK.amount;
+    mzK.lines.forEach(l=>L.push(l));
+    szK.lines.forEach(l=>L.push(l));
+    if(taxPctK>0||mzK.amount>0||szK.amount>0)L.push('  NET TOTAL: $'+(earn-taxAmtK-mzK.amount-szK.amount).toFixed(2));
+    if(!staffRoleTot['Cook'])staffRoleTot['Cook']={n:0,runs:0,wage:0};
+    staffRoleTot['Cook'].n++;staffRoleTot['Cook'].wage+=earn;
+  });
   const totalShorn=shIds.reduce((s,id)=>s+(shornBy[id].sh+shornBy[id].cr),0);
   const jobTotal=totalShEarn+totalTeamLoad+totalShedEarn+totalTravel+totalStand;
   /* MOB TOTALS - grower-invoice view, base rates only. Loadings shown as a separate line. */
@@ -2430,7 +2528,7 @@ function payWeekJobData(job,period){
   const out={};
   const W=id=>{if(!out[id]){const c=gc(id);out[id]={id,name:c?c.name:'Unknown',role:getJobRole(job,id)||(c?c.role:'')||'',lines:[],piece:0,teamLoad:0,staffEarn:0,travel:0,stand:0,standSuper:0,tax:0,mess:0,sundries:0,hasTeam:false};}return out[id];};
   const shIds=pieceIds(job); /* v4.6.18 — data-driven: counts are paid to whoever entered them */
-  const stIds=job.crew.filter(id=>{const r=getJobRole(job,id);return r&&r!=='Shearer'&&r!=='Crutcher';});
+  const stIds=job.crew.filter(id=>{const r=getJobRole(job,id);return r&&r!=='Shearer'&&r!=='Crutcher'&&r!=='Cook';});
   const dEt=id=>((rates.crewDetails||{})[id])||{};
   /* piecework: per date x type x effective rate (overrides + individual loadings baked in) */
   const agg={};const daysSet={};
@@ -2499,8 +2597,23 @@ function payWeekJobData(job,period){
       });
     }
   });
+  /* v4.6.19 — cook: one line per day, naming which arm of the greater-of rule
+     won so the figure is explainable on a payslip. Superable; deductions apply
+     normally downstream. */
+  cookIds(job).forEach(id=>{
+    cookDates(job,id,inP).forEach(date=>{
+      const cd=cookDayEarn(job,id,date);
+      if(!cd)return;
+      const w=W(id);w.staffEarn+=cd.earn;
+      const item=cd.basis==='heads'
+        ? cd.units+' meal'+(cd.units===1?'':'s')+(cd.half?' (half day)':'')
+        : (cd.half?'Half day cooking':'Full day cooking');
+      w.lines.push({date,shed,item,units:cd.units,rate:cd.rate,amount:cd.earn,superable:true});
+    });
+  });
   /* travel (mode-aware) */
   job.crew.forEach(id=>{
+    if(getJobRole(job,id)==='Cook')return; /* v4.6.19 — cook excluded from travel */
     const d=dEt(id);
     const tDays=Object.entries((job.travelTallies||{})[id]||{}).filter(x=>x[1]&&inP(x[0])).length;
     if(tDays>0){
@@ -2742,7 +2855,7 @@ function generateTallyTrends(jobs,endPeriod,fq,weeksN){
   (jobs||[]).forEach(job=>{
     if(!job||!job.crew)return;
     const shIds=pieceIds(job); /* v4.6.18 — data-driven: counts are paid to whoever entered them */
-    const stIds=job.crew.filter(id=>{const r=getJobRole(job,id);return r&&r!=='Shearer'&&r!=='Crutcher';});
+    const stIds=job.crew.filter(id=>{const r=getJobRole(job,id);return r&&r!=='Shearer'&&r!=='Crutcher'&&r!=='Cook';});
     periods.forEach((p,pi)=>{
       const inP=d=>d>=p.start&&d<=p.end;
       Object.entries(job.runs||{}).forEach(([date,rs])=>{if(!inP(date))return;(rs||[]).forEach(run=>{mobsOf(run).forEach(mob=>{
@@ -3484,6 +3597,19 @@ function TallyTab({job,setJob,role,viewDate,setViewDate}){
     setJob(prev=>({...prev,messTallies:{...(prev.messTallies||{}),[cid]:{...((prev.messTallies||{})[cid]||{}),[viewDate]:val}}}));
     writeTallyCell({jobId:job.id,kind:'mess',crewId:cid,date:viewDate,value:val});
   };
+  /* v4.6.19 — cook day 3-state per (person,day): 0 none, 0.5 half, 1 full.
+     Cycles None→Half→Full→None, same gesture as Mess so there is nothing new
+     to learn. Meal count is a separate free number (mouths fed that day). */
+  const setCookDay=(cid,val)=>{
+    setJob(prev=>({...prev,cookDays:{...(prev.cookDays||{}),[cid]:{...((prev.cookDays||{})[cid]||{}),[viewDate]:val}}}));
+    writeTallyCell({jobId:job.id,kind:'cook_day',crewId:cid,date:viewDate,value:val});
+  };
+  const setCookHeads=(cid,val)=>{
+    setJob(prev=>({...prev,cookHeads:{...(prev.cookHeads||{}),[cid]:{...((prev.cookHeads||{})[cid]||{}),[viewDate]:val}}}));
+    writeTallyCell({jobId:job.id,kind:'cook_heads',crewId:cid,date:viewDate,value:val});
+  };
+  const cookDayBF=id=>Object.entries((job.cookDays||{})[id]||{}).filter(([d])=>d<viewDate).reduce((a,[,b])=>a+(Number(b)||0),0);
+  const cookDayTotal=id=>Object.values((job.cookDays||{})[id]||{}).reduce((a,b)=>a+(Number(b)||0),0);
   const messDayTotal=id=>Object.values((job.messTallies||{})[id]||{}).reduce((a,b)=>a+(Number(b)||0),0);
   const messBF=id=>Object.entries((job.messTallies||{})[id]||{}).filter(([d])=>d<viewDate).reduce((a,[,b])=>a+(Number(b)||0),0);
   const hasCrutch=Object.values(job.runs||{}).flat().some(run=>mobsOf(run).some(m=>m.type==='Crutching'));
@@ -3702,6 +3828,59 @@ function TallyTab({job,setJob,role,viewDate,setViewDate}){
             e('div',{className:'s-grp'},e('div',{className:'s-lbl'},'B/F'),e('div',{className:'s-val'},bf)),
             e('div',{className:'s-grp'},e('div',{className:'s-lbl'},'Total'),e('div',{className:`s-val${total?' hi':''}`},total)),
             isAdmin&&perDayAmt>0&&total>0&&e('div',{className:'s-grp'},e('div',{className:'s-lbl',style:{fontSize:10}},'Amount'),e('div',{className:'s-val',style:{color:'var(--amber)',fontWeight:700}},'$'+(total*perDayAmt).toFixed(2)))
+          )
+        );
+      })
+    ),
+    /* v4.6.19 — COOK SECTION. Only renders when the job actually has a cook,
+       so no contractor sees a section they don't use. Day toggle mirrors Mess;
+       meals is mouths fed that day. Pay is whichever is GREATER of the day rate
+       or meals x per-head, so entering meals can only ever help the cook —
+       leaving it blank still pays the day rate. */
+    cookIds(job).length>0&&e('div',{className:'shed-section'},
+      e('div',{className:'shed-sec-hdr'},'COOK'),
+      cookIds(job).map(id=>{
+        const c=gc(id);if(!c)return null;
+        const curD=Number(((job.cookDays||{})[id]||{})[viewDate])||0;
+        const curH=Number(((job.cookHeads||{})[id]||{})[viewDate])||0;
+        const canEditCook=canEdit||isAdmin;
+        const nextD=curD===0?0.5:curD===0.5?1:0;
+        const glyphD=curD>=1?'\u25cf Full':curD>0?'\u00bd Half':'\u25cb None';
+        const bgD=curD>=1?'var(--green)':curD>0?'var(--amber)':'var(--card2)';
+        const fgD=curD>0?'#000':'var(--muted)';
+        const fmtD=n=>n%1===0?String(n):n.toFixed(1);
+        const rD=Number((job.rates||{}).cookDayRate)||0;
+        const rH=Number((job.rates||{}).cookHalfDayRate)||0;
+        const rP=Number((job.rates||{}).cookPerHead)||0;
+        const ratesUnset=rD<=0&&rH<=0&&rP<=0;
+        const dayRate=curD>0&&curD<1?rH:rD;
+        const todayEarn=curD>0?Math.max(dayRate,curH*rP):0;
+        return e('div',{key:id,className:'staff-row'},
+          e(Av,{name:c.name,size:32}),
+          e('div',{className:'staff-info'},
+            e('div',{className:'staff-name'},c.name),
+            e('div',{className:'staff-rate-lbl'},
+              'Cook'+(isAdmin?(ratesUnset?' \u00b7 rates not set':' \u00b7 $'+rD.toFixed(0)+'/day \u00b7 $'+rP.toFixed(2)+'/meal'):''))
+          ),
+          e('div',{className:'staff-stats'},
+            e('div',{className:'s-grp'},e('div',{className:'s-lbl'},'Day'),
+              canEditCook
+                ?e('button',{type:'button',onClick:ev=>{ev.stopPropagation();setCookDay(id,nextD);},
+                    style:{padding:'4px 12px',borderRadius:8,fontWeight:700,fontSize:13,cursor:'pointer',border:'none',background:bgD,color:fgD}},glyphD)
+                :e('div',{className:'s-val'},curD>=1?'\u25cf':curD>0?'\u00bd':'\u2014')
+            ),
+            e('div',{className:'s-grp'},e('div',{className:'s-lbl'},'Meals'),
+              canEditCook
+                ?e('input',{type:'text',inputMode:'numeric',className:'tal-inp',value:curH||'',
+                    onChange:ev=>{const v=ev.target.value.replace(/[^0-9]/g,'');setCookHeads(id,v===''?0:parseInt(v,10));},
+                    style:{width:52,textAlign:'center'}})
+                :e('div',{className:'s-val'},curH||'\u2014')
+            ),
+            e('div',{className:'s-grp'},e('div',{className:'s-lbl'},'B/F'),e('div',{className:'s-val'},fmtD(cookDayBF(id)))),
+            e('div',{className:'s-grp'},e('div',{className:'s-lbl'},'Days'),e('div',{className:`s-val${cookDayTotal(id)?' hi':''}`},fmtD(cookDayTotal(id)))),
+            isAdmin&&curD>0&&e('div',{className:'s-grp'},
+              e('div',{className:'s-lbl',style:{fontSize:10}},'Today'),
+              e('div',{className:'s-val'},ratesUnset?'set rates':'$'+todayEarn.toFixed(0)))
           )
         );
       })
@@ -4087,7 +4266,7 @@ function AdminTab({job,setJob,onEdit,onDeleteFarm,onDeleteJob,onPublish}){
 
   const shearers=job.crew.filter(id=>{const r=getJobRole(job,id);return r==='Shearer'||r==='Crutcher';});
   const loadingCrew=shearers; /* shearers + crutchers get $/head loadings — already included in `shearers` */
-  const shedStaff=job.crew.filter(id=>{const r=getJobRole(job,id);return r&&r!=='Shearer'&&r!=='Crutcher';});
+  const shedStaff=job.crew.filter(id=>{const r=getJobRole(job,id);return r&&r!=='Shearer'&&r!=='Crutcher'&&r!=='Cook';});
   const DAY_FULL_=['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
 
   return e('div',{className:'admin-wrap'},
@@ -4132,6 +4311,21 @@ function AdminTab({job,setJob,onEdit,onDeleteFarm,onDeleteJob,onPublish}){
         e(RCell,{lbl:'Presser $/bale',k:'presserPerBale',prefix:'$',hi:true,draft,onSet:set}),
         e(RCell,{lbl:'Bale threshold/day',k:'baleThreshold',hi:true,draft,onSet:set}),
         e(RCell,{lbl:'Presser $/kg',k:'pressCpk',prefix:'$',hi:true,draft,onSet:set})
+      )
+    ),
+
+    /* v4.6.19 — COOK RATES. Only shown when the job has a cook. Full and half
+       day are INDEPENDENT figures, not a 50% derivation. Pay is whichever is
+       GREATER of the day rate or meals x per-head, so a quiet day still pays the
+       day rate and a big crew day pays the cook properly. */
+    cookIds(job).length>0&&e('div',{className:'admin-section'},
+      e('div',{className:'admin-sec-hdr'},
+        e('div',{className:'admin-sec-title'},'Cook Rates'),
+        e('div',{className:'admin-sec-sub'},'Paid whichever is greater: day rate, or meals \u00d7 per head')),
+      e('div',{className:'rate-grid'},
+        e(RCell,{lbl:'Cook full day',k:'cookDayRate',prefix:'$',draft,onSet:set}),
+        e(RCell,{lbl:'Cook half day',k:'cookHalfDayRate',prefix:'$',draft,onSet:set}),
+        e(RCell,{lbl:'Cook $/meal',k:'cookPerHead',prefix:'$',hi:true,draft,onSet:set})
       )
     ),
 
@@ -4299,7 +4493,7 @@ function AdminTab({job,setJob,onEdit,onDeleteFarm,onDeleteJob,onPublish}){
         const hasCar=det.hasVehicle!=null?det.hasVehicle:c.hasVehicle;
         const taxRate=det.taxRate??'';
         const role=det.role||c.role;
-        const ROLES=['Shearer','Crutcher','Wool Handler','Wool Classer','Presser','Penner'];
+        const ROLES=['Shearer','Crutcher','Wool Handler','Wool Classer','Presser','Penner','Cook'];
         return e('div',{key:id,className:'crew-detail-row'},
           e('div',{className:'cd-top'},e(Av,{name:c.name,size:36}),e('div',{className:'cd-name'},c.name),e('button',{className:`cd-car-btn${hasCar?' on':''}`,onClick:()=>setDet(id,'hasVehicle',!hasCar)},hasCar?'🚗 Has car':'🚗 No car')),
           e('div',{className:'cd-fields'},
@@ -5251,7 +5445,7 @@ function AddFarmForm({onAdd,onCancel}){
 }
 
 function AddCrewForm({onAdd,onCancel}){
-  const ROLES=['Shearer','Crutcher','Wool Handler','Wool Classer','Presser','Penner'];
+  const ROLES=['Shearer','Crutcher','Wool Handler','Wool Classer','Presser','Penner','Cook'];
   const [name,setName]=useState('');
   const [role,setRole]=useState('Shearer');
   const [phone,setPhone]=useState('');
@@ -6106,7 +6300,7 @@ function EditCrewForm({member,onSave,onClose}){
   const [role,setRole]=useState(member.role||'Shearer');
   const [phone,setPhone]=useState(member.phone||'');
   const [hasVehicle,setHasVehicle]=useState(!!member.hasVehicle);
-  const ROLES=['Shearer','Crutcher','Wool Handler','Wool Classer','Presser','Penner'];
+  const ROLES=['Shearer','Crutcher','Wool Handler','Wool Classer','Presser','Penner','Cook'];
   const doSave=()=>{
     if(!name.trim())return;
     onSave({...member,name:name.trim(),role,phone:phone.trim(),hasVehicle});
