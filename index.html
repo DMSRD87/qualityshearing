@@ -574,7 +574,7 @@ const LS_TALLY_QUEUE='mg_tally_queue_'+CONTRACTOR_SLUG; /* per-cell offline queu
 const LS_TALLY_DEAD='mg_tally_dead_'+CONTRACTOR_SLUG; /* v4.6.3g — quarantined cells (permanent rejection). Replayed once on boot in case the server-side blocker (e.g. missing kind constraint) was since fixed. */
 const LS_TALLY_META_QUEUE='mg_tally_meta_queue_'+CONTRACTOR_SLUG; /* v4.6.4 — offline/failed mob metadata (type/desc) updates to existing count cells; flushed alongside the tally queue. */
 const ROLE_TIMEOUT_HOURS=12; /* auto-reset after 12h inactivity */
-const APP_VERSION='v4.6.21';
+const APP_VERSION='v4.6.21a';
 const SUPER_RATE=0.12; /* SG rate, 12% from 1 Jul 2025. One-line change if legislated rate moves. */
 /* v4.6.12a (26 Jul 2026): fleet-alignment rebuild - feature content identical to v4.6.12; new version string per one-build-one-version discipline. */
 /* v4.6.12 (20 Jul 2026): PER-CREW PIN, contractor-controlled (design settled with the founder before any deploy; an earlier worker-self-set draft was discarded - self-set has a bootstrap race where an imposter claims a name first and sets its PIN). MODEL: every worker is AUTO-ASSIGNED a random 4-digit PIN (genCrewPin at creation; existing crew backfilled via SQL per contractor at rollout). The PIN is stored READABLE at crew_members.data.pin and shown on the worker's card in My Database (admin-only surface) with a regenerate button and a 'Text PIN' button (plain GSM-7 SMS via /api/send-sms so the worker has it on file). DELIBERATE ENGINEERING CALL, not an oversight: with the shared anon key and a 4-digit space, a hash is brute-forced in under a second by anyone determined, so hashing here is theatre; readable storage buys contractor look-up-ability at no real security cost. This is a visibility gate against casual wrong-name claims - real authentication is v5 (Supabase Auth + RLS). CLAIM FLOW: picking a name with a PIN demands it (CrewPinVerifyModal, direct compare, works offline once the record is synced; names with PINs show a lock in the picker); 'Not you?' re-challenges; app_settings.requireCrewPin=true blocks claiming names with NO pin ('ask your contractor') for hard-lockdown contractors, off = pinless names bind as before. Workers never set or change their own PIN; contractor regenerates on request (specific chosen PINs = SRD via SQL). Lead/Admin PINs and the per-job PIN untouched. */
@@ -2371,7 +2371,14 @@ function generateSummary(job,period){
     const travel=trvl(id);
     /* v4.6.5 - stand fee: equipment hire when shearers bring own machines (job EVOs = BYO). Per tallied day. */
     const standDays=Object.keys(s.daysSet||{}).length;
-    const standEarn=(job.evos==='BYO'&&((((rates.crewDetails||{})[id])||{}).standFee!==false))?standDays*(rates.standFeePerDay||0):0;
+    /* v4.6.21a — role gate. This loop iterates shIds, which since v4.6.18 is
+       pieceIds: it now includes anyone holding count rows, so a wool handler who
+       shore a run was collecting a BYO stand fee here. calcPeriodStats,
+       payWeekJobData and the farm record were already guarded via standFeeIds;
+       this site was missed, and it made the printed summary disagree with the
+       pay week report by the value of the fee. */
+    const standEligible=standFeeIds(job).indexOf(id)>=0;
+    const standEarn=(standEligible&&job.evos==='BYO'&&((((rates.crewDetails||{})[id])||{}).standFee!==false))?standDays*(rates.standFeePerDay||0):0;
     const gross=s.shEarn+s.crEarn+travel+standEarn+(loadType==='team'?teamLoadEarn:0);
     /* v4.6.6 - superable base: piecework + loadings, plus stand fee when rates.standFeeSuper
        (DEFAULT ON per pilot contractor payroll officer). Travel always excluded (reimbursement).
@@ -2383,7 +2390,13 @@ function generateSummary(job,period){
     const badges=[];
     if(travelMode(id)==='km')badges.push('km');
     const badgeStr=badges.length?' ['+badges.join(' \u00b7 ')+']':'';
-    L.push('');L.push(c.name+' \u2014 '+(det.role||c.role)+badgeStr);
+    /* v4.6.21a — a non-shearer who stepped onto a handpiece appears in BOTH
+       sections: piecework here, per-run below. Two identical headings with two
+       GROSS TOTALs reads like a double payment on a printed slip, so label this
+       one as the piecework portion. */
+    const pieceRole=(det.role||c.role);
+    const isSh2=pieceRole==='Shearer'||pieceRole==='Crutcher';
+    L.push('');L.push(c.name+' \u2014 '+pieceRole+(isSh2?'':' (piecework)')+badgeStr);
     /* Split mobs by type. If a type has >1 mob OR any override, show detailed breakdown; else simple one-liner. */
     const shMobs=s.mobs.filter(m=>m.type==='Shearing');
     const crMobs=s.mobs.filter(m=>m.type==='Crutching');
@@ -2476,6 +2489,39 @@ function generateSummary(job,period){
         else{earnLine='  '+paidRuns+' runs @ $'+rpr.toFixed(2)+'/run = $'+earn.toFixed(2);}
       }
     }else{earn=totalRuns*rpr;earnLine='  '+totalRuns+' runs @ $'+rpr.toFixed(2)+'/run = $'+earn.toFixed(2);}
+    /* v4.6.21a — split shed-role days. v4.6.18 added these to calcPeriodStats and
+       payWeekJobData but NOT here, so the printed summary priced a split day at
+       the job-level role for every run — a classer who pressed for two runs was
+       shown 4 x $110 instead of 2 x $110 + 2 x $85. Recompute from
+       shedRoleRuns and itemise per role. Days with no split are untouched. */
+    {
+      const splitDs=Object.keys((job.shedRoleRuns||{})[id]||{}).filter(dt=>isSplitDay(job,id,dt)&&inP(dt)).sort();
+      if(splitDs.length){
+        let splitEarn=0,splitRuns=0;const splitLines=[];const byRoleTot={};
+        splitDs.forEach(date=>{
+          const byRole=shedRunsByRole(job,id,date);
+          Object.keys(byRole).forEach(r=>{
+            const rr=shedRunRate(job,id,r);
+            splitEarn+=byRole[r]*rr;splitRuns+=byRole[r];
+            if(!byRoleTot[r])byRoleTot[r]={runs:0,earn:0};
+            byRoleTot[r].runs+=byRole[r];byRoleTot[r].earn+=byRole[r]*rr;
+          });
+        });
+        /* strip the split days out of the flat figure computed above, then add
+           the correctly-priced ones back */
+        let flatRemoved=0;
+        splitDs.forEach(date=>{flatRemoved+=((job.shedTallies||{})[id]||{})[date]||0;});
+        earn=earn-(flatRemoved*rpr)+splitEarn;
+        const keep=totalRuns-flatRemoved;
+        const parts=[];
+        if(keep>0)parts.push('  '+keep+' run'+(keep===1?'':'s')+' @ $'+rpr.toFixed(2)+'/run = $'+(keep*rpr).toFixed(2));
+        Object.keys(byRoleTot).sort().forEach(r=>{
+          parts.push('  '+byRoleTot[r].runs+' run'+(byRoleTot[r].runs===1?'':'s')+' '+r+' @ $'
+            +shedRunRate(job,id,r).toFixed(2)+'/run = $'+byRoleTot[r].earn.toFixed(2));
+        });
+        earnLine=parts.join('\n');
+      }
+    }
     const gross=earn+travel;totalShedEarn+=earn;totalTravel+=travel;totalSuperable+=earn;
     const det=(rates.crewDetails||{})[id]||{};
     const taxPct=parseFloat(det.taxRate||0)||0;
