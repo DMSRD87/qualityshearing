@@ -574,7 +574,7 @@ const LS_TALLY_QUEUE='mg_tally_queue_'+CONTRACTOR_SLUG; /* per-cell offline queu
 const LS_TALLY_DEAD='mg_tally_dead_'+CONTRACTOR_SLUG; /* v4.6.3g — quarantined cells (permanent rejection). Replayed once on boot in case the server-side blocker (e.g. missing kind constraint) was since fixed. */
 const LS_TALLY_META_QUEUE='mg_tally_meta_queue_'+CONTRACTOR_SLUG; /* v4.6.4 — offline/failed mob metadata (type/desc) updates to existing count cells; flushed alongside the tally queue. */
 const ROLE_TIMEOUT_HOURS=12; /* auto-reset after 12h inactivity */
-const APP_VERSION='v4.6.23c';
+const APP_VERSION='v4.6.24';
 const SUPER_RATE=0.12; /* SG rate, 12% from 1 Jul 2025. One-line change if legislated rate moves. */
 /* v4.6.12a (26 Jul 2026): fleet-alignment rebuild - feature content identical to v4.6.12; new version string per one-build-one-version discipline. */
 /* v4.6.12 (20 Jul 2026): PER-CREW PIN, contractor-controlled (design settled with the founder before any deploy; an earlier worker-self-set draft was discarded - self-set has a bootstrap race where an imposter claims a name first and sets its PIN). MODEL: every worker is AUTO-ASSIGNED a random 4-digit PIN (genCrewPin at creation; existing crew backfilled via SQL per contractor at rollout). The PIN is stored READABLE at crew_members.data.pin and shown on the worker's card in My Database (admin-only surface) with a regenerate button and a 'Text PIN' button (plain GSM-7 SMS via /api/send-sms so the worker has it on file). DELIBERATE ENGINEERING CALL, not an oversight: with the shared anon key and a 4-digit space, a hash is brute-forced in under a second by anyone determined, so hashing here is theatre; readable storage buys contractor look-up-ability at no real security cost. This is a visibility gate against casual wrong-name claims - real authentication is v5 (Supabase Auth + RLS). CLAIM FLOW: picking a name with a PIN demands it (CrewPinVerifyModal, direct compare, works offline once the record is synced; names with PINs show a lock in the picker); 'Not you?' re-challenges; app_settings.requireCrewPin=true blocks claiming names with NO pin ('ask your contractor') for hard-lockdown contractors, off = pinless names bind as before. Workers never set or change their own PIN; contractor regenerates on request (specific chosen PINs = SRD via SQL). Lead/Admin PINs and the per-job PIN untouched. */
@@ -1082,9 +1082,15 @@ function hydrateTallies(job,tallyRows){
       if(!_st[row.cell_date])_st[row.cell_date]={legacy:0,byRole:{},coded:false};
       const _code=row.run_id||'';
       if(_code&&SHED_CODE_ROLE[_code]){
+        /* v4.6.24 — only a NON-ZERO coded row makes the day "coded". Clearing a
+           split zeroes the coded rows and rewrites the legacy row; if a zeroed
+           coded row still counted, the day would resolve to 0 and silently wipe
+           the runs. Zero here means "this role no longer applies". */
         const _role=SHED_CODE_ROLE[_code];
-        _st[row.cell_date].byRole[_role]=(_st[row.cell_date].byRole[_role]||0)+v;
-        _st[row.cell_date].coded=true;
+        if(v>0){
+          _st[row.cell_date].byRole[_role]=(_st[row.cell_date].byRole[_role]||0)+v;
+          _st[row.cell_date].coded=true;
+        }
       }else{
         _st[row.cell_date].legacy+=v;
       }
@@ -3276,6 +3282,59 @@ function markAccessVerified(){
 }
 
 /* ── PIN PAD (reusable) ── */
+/* ══ v4.6.24 — SHED ROLE SPLIT EDITOR ═════════════════════════════════════════
+   One day, one person, runs allocated across shed roles. Opens seeded from the
+   day's existing runs sitting entirely on the job-level role, so the common case
+   is: tap Split, move two runs to the other role, Save.
+
+   Total is derived from the buckets rather than fixed — a lead who realises the
+   day was 5 runs, not 4, should not have to leave and re-enter it first.
+
+   Saving with one role holding everything clears the split and writes a normal
+   run row, so this is also how you undo. */
+function ShedSplitEditor({crewId,jobRole,current,dayTotal,onSave,onCancel}){
+  const seed={};
+  if(current&&Object.keys(current).length){
+    SHED_ROLES.forEach(r=>{seed[r]=Number(current[r])||0;});
+  }else{
+    SHED_ROLES.forEach(r=>{seed[r]=0;});
+    if(jobRole&&seed[jobRole]!==undefined)seed[jobRole]=Number(dayTotal)||0;
+  }
+  const [v,setV]=useState(seed);
+  const total=SHED_ROLES.reduce((a,r)=>a+(Number(v[r])||0),0);
+  const liveRoles=SHED_ROLES.filter(r=>(Number(v[r])||0)>0);
+  const bump=(r,d)=>setV(prev=>({...prev,[r]:Math.max(0,(Number(prev[r])||0)+d)}));
+  return e('div',{style:{flexBasis:'100%',margin:'8px 0 4px 48px',padding:12,borderRadius:10,
+      background:'var(--card2)',border:'1px solid var(--border)'}},
+    e('div',{style:{fontSize:11,fontWeight:800,letterSpacing:'.5px',color:'var(--dim)',
+      textTransform:'uppercase',marginBottom:8}},'Runs by role \u2014 this day'),
+    SHED_ROLES.map(r=>e('div',{key:r,style:{display:'flex',alignItems:'center',
+        justifyContent:'space-between',padding:'5px 0'}},
+      e('div',{style:{fontSize:13,fontWeight:600,
+        color:(Number(v[r])||0)>0?'var(--text)':'var(--dim)'}},r),
+      e('div',{className:'rs'},
+        e('button',{className:'rs-btn',disabled:(Number(v[r])||0)<=0,onClick:()=>bump(r,-1)},'\u2212'),
+        e('div',{className:'rs-val'},Number(v[r])||0),
+        e('button',{className:'rs-btn',onClick:()=>bump(r,1)},'+'))
+    )),
+    e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',
+      borderTop:'1px solid var(--border)',marginTop:8,paddingTop:8,fontSize:12}},
+      e('div',{style:{color:'var(--dim)'}},'Total'),
+      e('div',{style:{fontWeight:800,color:'var(--amber)'}},total+' run'+(total===1?'':'s'))),
+    liveRoles.length<2&&e('div',{style:{fontSize:11,color:'var(--dim)',marginTop:6}},
+      liveRoles.length===0?'All zero \u2014 saving clears the day.'
+        :'One role only \u2014 saving clears the split.'),
+    e('div',{style:{display:'flex',gap:8,marginTop:10}},
+      e('button',{onClick:()=>onSave(v),
+        style:{flex:1,padding:'9px',borderRadius:6,border:'none',background:'var(--amber)',
+          color:'#000',fontWeight:800,fontSize:13,cursor:'pointer'}},'Save'),
+      e('button',{onClick:onCancel,
+        style:{padding:'9px 14px',borderRadius:6,border:'1px solid var(--border)',
+          background:'var(--card)',color:'var(--dim)',fontWeight:700,fontSize:13,cursor:'pointer'}},
+        'Cancel'))
+  );
+}
+
 function PinPad({onSuccess,onCancel,label,subtitle,allowChange,changeLabel,_overridePin,_validateAsync,_startInChangeMode,_pinType,_onChanged}){
   const [entry,setEntry]=useState('');
   const [err,setErr]=useState('');
@@ -3844,6 +3903,45 @@ function TallyTab({job,setJob,role,viewDate,setViewDate}){
     setJob(prev=>({...prev,shedTallies:{...prev.shedTallies,[cid]:{...(prev.shedTallies[cid]||{}),[viewDate]:val}}}));
     writeTallyCell({jobId:job.id,kind:'shed_runs',crewId:cid,date:viewDate,value:val});
   };
+  /* ══ v4.6.24 — MID-SHED ROLE CHANGE, write path ═══════════════════════════
+     Records a day split across shed roles, e.g. 2 runs classing then 2 pressing.
+     Everything is an UPSERT — writeTallyCell has no delete, and inventing one
+     would need its own offline-queue path. Not needed, because hydrate resolves
+     a crew-day by letting non-zero coded rows win outright over the legacy row:
+
+       setting a split  -> write coded rows, zero the legacy row
+       clearing a split -> zero every coded row, rewrite the legacy row
+
+     A zeroed coded row reads as "this role no longer applies", so clearing falls
+     back to the legacy value instead of resolving to nothing. */
+  const setShedSplit=(cid,byRole)=>{
+    const roles=Object.keys(byRole||{}).filter(r=>SHED_ROLE_CODE[r]);
+    const live={};let total=0;
+    roles.forEach(r=>{const v=Math.max(0,Number(byRole[r])||0);if(v>0){live[r]=v;total+=v;}});
+    const isSplit=Object.keys(live).length>1;
+    setJob(prev=>{
+      const nextRole={...(prev.shedRoleRuns||{})};
+      const forCid={...(nextRole[cid]||{})};
+      if(isSplit)forCid[viewDate]=live; else delete forCid[viewDate];
+      nextRole[cid]=forCid;
+      return {...prev,
+        shedRoleRuns:nextRole,
+        shedTallies:{...prev.shedTallies,[cid]:{...(prev.shedTallies[cid]||{}),[viewDate]:total}}};
+    });
+    /* Zero every role bucket first so a role dropped from the split is cleared,
+       then write the ones that remain. */
+    SHED_ROLES.forEach(r=>{
+      const code=shedRunKey(r);if(!code)return;
+      const v=isSplit?(live[r]||0):0;
+      writeTallyCell({jobId:job.id,kind:'shed_runs',runId:code,crewId:cid,date:viewDate,value:v});
+    });
+    /* Legacy row: 0 while split (coded rows own the day), otherwise the total. */
+    writeTallyCell({jobId:job.id,kind:'shed_runs',crewId:cid,date:viewDate,value:isSplit?0:total});
+  };
+  const [splitFor,setSplitFor]=useState(null); /* v4.6.24 — crew id whose split editor is open */
+  const shedSplitFor=(cid)=>(((job.shedRoleRuns||{})[cid])||{})[viewDate]||null;
+  const isShedSplit=(cid)=>{const sp=shedSplitFor(cid);
+    return !!sp&&Object.keys(sp).filter(r=>(Number(sp[r])||0)>0).length>1;};
   const setBale=(cid,v)=>{
     const val=Math.max(0,v);
     setJob(prev=>({...prev,baleTallies:{...prev.baleTallies,[cid]:{...(prev.baleTallies[cid]||{}),[viewDate]:val}}}));
@@ -3994,9 +4092,25 @@ function TallyTab({job,setJob,role,viewDate,setViewDate}){
       roleGroups.map(({lbl,ids})=>e('div',{key:lbl},
         e('div',{className:'role-grp-lbl'},lbl),
         ids.map(id=>{const c=gc(id);if(!c)return null;const runs=(job.shedTallies[id]||{})[viewDate]||0;const allRuns=Object.values(job.shedTallies[id]||{}).reduce((a,b)=>a+b,0);const bf=allRuns-runs;const ov=(rates.crewOverrides||{})[id];const defR=lbl==='CLASSER'?rates.classerPerRun:lbl==='PENNER'?rates.pennerPerRun:rates.woolHandlerPerRun;const rdisp=ov||(defR||80);
-          return e('div',{key:id,className:'staff-row'},e(Av,{name:c.name,size:36}),e('div',{className:'staff-info'},e('div',{className:'staff-name'},c.name),isAdmin&&e('div',{className:'staff-rate-lbl'},'$'+rdisp+'/run')),
-            e('div',{className:'staff-stats'},e('div',{className:'s-grp'},e('div',{className:'s-lbl'},'Runs'),canEdit?e('div',{className:'rs'},e('button',{className:'rs-btn',disabled:runs<=0,onClick:()=>setShed(id,runs-1)},'−'),e('div',{className:'rs-val'},runs),e('button',{className:'rs-btn',onClick:()=>setShed(id,runs+1)},'+'))
-              :e('div',{className:'s-val'},runs)),e('div',{className:'s-div'}),e('div',{className:'s-grp'},e('div',{className:'s-lbl'},'B/F'),e('div',{className:'s-val'},bf)),e('div',{className:'s-grp'},e('div',{className:'s-lbl'},'Today'),e('div',{className:'s-val'},runs)),e('div',{className:'s-grp'},e('div',{className:'s-lbl'},'To Date'),e('div',{className:'s-val hi'},allRuns)))
+          /* v4.6.24 — on a day split across roles the stepper is hidden. Tapping
+             it would write a legacy row that hydrate deliberately ignores, so the
+             number would not move and it would look broken. The editor is the
+             only way to change a split day. */
+          const sp=shedSplitFor(id); const split=isShedSplit(id);
+          const splitTxt=split?Object.keys(sp).filter(r=>sp[r]>0).sort()
+            .map(r=>sp[r]+' '+(SHED_ROLE_CODE[r]||r)).join(' + '):'';
+          return e('div',{key:id,className:'staff-row',style:{flexWrap:'wrap'}},e(Av,{name:c.name,size:36}),e('div',{className:'staff-info'},e('div',{className:'staff-name'},c.name),isAdmin&&e('div',{className:'staff-rate-lbl'},split?splitTxt:'$'+rdisp+'/run')),
+            e('div',{className:'staff-stats'},e('div',{className:'s-grp'},e('div',{className:'s-lbl'},'Runs'),split?e('div',{className:'s-val hi',onClick:()=>canEdit&&setSplitFor(splitFor===id?null:id),style:{cursor:canEdit?'pointer':'default'}},runs):canEdit?e('div',{className:'rs'},e('button',{className:'rs-btn',disabled:runs<=0,onClick:()=>setShed(id,runs-1)},'−'),e('div',{className:'rs-val'},runs),e('button',{className:'rs-btn',onClick:()=>setShed(id,runs+1)},'+'))
+              :e('div',{className:'s-val'},runs)),e('div',{className:'s-div'}),e('div',{className:'s-grp'},e('div',{className:'s-lbl'},'B/F'),e('div',{className:'s-val'},bf)),e('div',{className:'s-grp'},e('div',{className:'s-lbl'},'Today'),e('div',{className:'s-val'},runs)),e('div',{className:'s-grp'},e('div',{className:'s-lbl'},'To Date'),e('div',{className:'s-val hi'},allRuns))),
+            canEdit&&e('button',{onClick:()=>setSplitFor(splitFor===id?null:id),
+              style:{marginLeft:48,marginTop:2,padding:'3px 9px',borderRadius:6,fontSize:11,fontWeight:700,
+                border:'1px solid var(--border)',background:split?'var(--amberD)':'var(--card2)',
+                color:split?'var(--amber)':'var(--dim)',cursor:'pointer'}},
+              split?('Split \u00b7 '+splitTxt):'Split roles'),
+            splitFor===id&&e(ShedSplitEditor,{crewId:id,jobRole:getJobRole(job,id),
+              current:sp,dayTotal:runs,
+              onSave:byRole=>{setShedSplit(id,byRole);setSplitFor(null);},
+              onCancel:()=>setSplitFor(null)})
           );
         })
       )),
