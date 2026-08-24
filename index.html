@@ -574,7 +574,7 @@ const LS_TALLY_QUEUE='mg_tally_queue_'+CONTRACTOR_SLUG; /* per-cell offline queu
 const LS_TALLY_DEAD='mg_tally_dead_'+CONTRACTOR_SLUG; /* v4.6.3g — quarantined cells (permanent rejection). Replayed once on boot in case the server-side blocker (e.g. missing kind constraint) was since fixed. */
 const LS_TALLY_META_QUEUE='mg_tally_meta_queue_'+CONTRACTOR_SLUG; /* v4.6.4 — offline/failed mob metadata (type/desc) updates to existing count cells; flushed alongside the tally queue. */
 const ROLE_TIMEOUT_HOURS=12; /* auto-reset after 12h inactivity */
-const APP_VERSION='v4.6.23a';
+const APP_VERSION='v4.6.23b';
 const SUPER_RATE=0.12; /* SG rate, 12% from 1 Jul 2025. One-line change if legislated rate moves. */
 /* v4.6.12a (26 Jul 2026): fleet-alignment rebuild - feature content identical to v4.6.12; new version string per one-build-one-version discipline. */
 /* v4.6.12 (20 Jul 2026): PER-CREW PIN, contractor-controlled (design settled with the founder before any deploy; an earlier worker-self-set draft was discarded - self-set has a bootstrap race where an imposter claims a name first and sets its PIN). MODEL: every worker is AUTO-ASSIGNED a random 4-digit PIN (genCrewPin at creation; existing crew backfilled via SQL per contractor at rollout). The PIN is stored READABLE at crew_members.data.pin and shown on the worker's card in My Database (admin-only surface) with a regenerate button and a 'Text PIN' button (plain GSM-7 SMS via /api/send-sms so the worker has it on file). DELIBERATE ENGINEERING CALL, not an oversight: with the shared anon key and a 4-digit space, a hash is brute-forced in under a second by anyone determined, so hashing here is theatre; readable storage buys contractor look-up-ability at no real security cost. This is a visibility gate against casual wrong-name claims - real authentication is v5 (Supabase Auth + RLS). CLAIM FLOW: picking a name with a PIN demands it (CrewPinVerifyModal, direct compare, works offline once the record is synced; names with PINs show a lock in the picker); 'Not you?' re-challenges; app_settings.requireCrewPin=true blocks claiming names with NO pin ('ask your contractor') for hard-lockdown contractors, off = pinless names bind as before. Workers never set or change their own PIN; contractor regenerates on request (specific chosen PINs = SRD via SQL). Lead/Admin PINs and the per-job PIN untouched. */
@@ -3094,7 +3094,7 @@ const DEFAULT_ADMIN_PIN='987654';
    ROTATING IT: run the generator (mygang-master-keygen.html), paste the new
    MASTER_KEY here, redeploy all 13. The passphrase never needs to leave your
    machine — only the derived key does. */
-const MASTER_KEY='85010ae3480b7f29c4bdf23723fc8fa8da76fe7096308dc4dfedc12b1cc803fd';
+const MASTER_KEY='5066e5d1ec6aade953f18f928447a97b075b825c977ace5857667bd39106739d';
 const MASTER_SALT='mygang-master-v1';
 const MASTER_ITER=250000;
 
@@ -3102,7 +3102,7 @@ const MASTER_ITER=250000;
    is what makes an offline attack hopeless. It is therefore only ever called
    AFTER a normal PIN check has already failed, so contractors never pay for it. */
 async function checkMaster(entered){
-  if(!entered||entered.length<8)return false;
+  if(!entered||entered.length<6)return false;
   try{
     const enc=new TextEncoder();
     const km=await crypto.subtle.importKey('raw',enc.encode(entered),{name:'PBKDF2'},false,['deriveBits']);
