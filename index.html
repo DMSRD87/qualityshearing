@@ -574,7 +574,7 @@ const LS_TALLY_QUEUE='mg_tally_queue_'+CONTRACTOR_SLUG; /* per-cell offline queu
 const LS_TALLY_DEAD='mg_tally_dead_'+CONTRACTOR_SLUG; /* v4.6.3g — quarantined cells (permanent rejection). Replayed once on boot in case the server-side blocker (e.g. missing kind constraint) was since fixed. */
 const LS_TALLY_META_QUEUE='mg_tally_meta_queue_'+CONTRACTOR_SLUG; /* v4.6.4 — offline/failed mob metadata (type/desc) updates to existing count cells; flushed alongside the tally queue. */
 const ROLE_TIMEOUT_HOURS=12; /* auto-reset after 12h inactivity */
-const APP_VERSION='v4.6.24';
+const APP_VERSION='v4.6.25';
 const SUPER_RATE=0.12; /* SG rate, 12% from 1 Jul 2025. One-line change if legislated rate moves. */
 /* v4.6.12a (26 Jul 2026): fleet-alignment rebuild - feature content identical to v4.6.12; new version string per one-build-one-version discipline. */
 /* v4.6.12 (20 Jul 2026): PER-CREW PIN, contractor-controlled (design settled with the founder before any deploy; an earlier worker-self-set draft was discarded - self-set has a bootstrap race where an imposter claims a name first and sets its PIN). MODEL: every worker is AUTO-ASSIGNED a random 4-digit PIN (genCrewPin at creation; existing crew backfilled via SQL per contractor at rollout). The PIN is stored READABLE at crew_members.data.pin and shown on the worker's card in My Database (admin-only surface) with a regenerate button and a 'Text PIN' button (plain GSM-7 SMS via /api/send-sms so the worker has it on file). DELIBERATE ENGINEERING CALL, not an oversight: with the shared anon key and a 4-digit space, a hash is brute-forced in under a second by anyone determined, so hashing here is theatre; readable storage buys contractor look-up-ability at no real security cost. This is a visibility gate against casual wrong-name claims - real authentication is v5 (Supabase Auth + RLS). CLAIM FLOW: picking a name with a PIN demands it (CrewPinVerifyModal, direct compare, works offline once the record is synced; names with PINs show a lock in the picker); 'Not you?' re-challenges; app_settings.requireCrewPin=true blocks claiming names with NO pin ('ask your contractor') for hard-lockdown contractors, off = pinless names bind as before. Workers never set or change their own PIN; contractor regenerates on request (specific chosen PINs = SRD via SQL). Lead/Admin PINs and the per-job PIN untouched. */
@@ -2191,10 +2191,18 @@ function generateFarmRecord(job){
   const shornGroups={};const crutchGroups={};
   Object.values(job.runs||{}).forEach(dayRuns=>{dayRuns.forEach(run=>{mobsOf(run).forEach(mob=>{
     const cnt=shIds.reduce((s,id)=>s+(mob.counts[id]||0),0);if(!cnt)return;
-    const desc=mob.desc||'Unspecified';
+    /* v4.6.25 — key on a NORMALISED description so "Mixed ewes", "Mixed ewes "
+       and "MIXED EWES" are one mob line, matching mobTotals() on the Tally tab.
+       Keying on the raw string split them, and the grower's record was the one
+       place that showed it. Display keeps the longest variant seen — the
+       fully-typed one. Note this cannot merge genuinely truncated text like
+       "Mixe"; that is a data problem, fixed at source by the debounce. */
+    const descRaw=mob.desc||'Unspecified';
+    const dkey=descRaw.trim().toLowerCase()||'unspecified';
     const target=mob.type==='Shearing'?shornGroups:crutchGroups;
-    if(!target[desc])target[desc]=0;
-    target[desc]+=cnt;
+    if(!target[dkey])target[dkey]={label:descRaw,n:0};
+    else if(descRaw.trim().length>target[dkey].label.trim().length)target[dkey].label=descRaw;
+    target[dkey].n+=cnt;
   });});});
   /* Total bales */
   const pressers=job.crew.filter(id=>(getJobRole(job,id)||gc(id)?.role)==='Presser');
@@ -2220,10 +2228,10 @@ function generateFarmRecord(job){
   L.push('Status: '+job.status.toUpperCase());
   L.push('');L.push(dash);L.push('WORK COMPLETED');L.push(dash);L.push('');
   /* Sheep shorn */
-  const totalShorn=Object.values(shornGroups).reduce((a,b)=>a+b,0);
+  const totalShorn=Object.values(shornGroups).reduce((a,b)=>a+b.n,0);
   if(totalShorn>0){
     L.push('Sheep shorn:');
-    Object.entries(shornGroups).forEach(([desc,cnt])=>{L.push('  '+pad(desc,34)+pad(cnt.toLocaleString(),6)+' head');});
+    Object.values(shornGroups).forEach(g=>{L.push('  '+pad(g.label,34)+pad(g.n.toLocaleString(),6)+' head');});
     if(Object.keys(shornGroups).length>1){
       L.push('  '+pad('',34)+'\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500');
       L.push('  '+pad('Total shorn:',34)+pad(totalShorn.toLocaleString(),6)+' head');
@@ -2231,10 +2239,10 @@ function generateFarmRecord(job){
     L.push('');
   }
   /* Sheep crutched */
-  const totalCrutch=Object.values(crutchGroups).reduce((a,b)=>a+b,0);
+  const totalCrutch=Object.values(crutchGroups).reduce((a,b)=>a+b.n,0);
   if(totalCrutch>0){
     L.push('Sheep crutched:');
-    Object.entries(crutchGroups).forEach(([desc,cnt])=>{L.push('  '+pad(desc,34)+pad(cnt.toLocaleString(),6)+' head');});
+    Object.values(crutchGroups).forEach(g=>{L.push('  '+pad(g.label,34)+pad(g.n.toLocaleString(),6)+' head');});
     if(Object.keys(crutchGroups).length>1){
       L.push('  '+pad('',34)+'\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500');
       L.push('  '+pad('Total crutched:',34)+pad(totalCrutch.toLocaleString(),6)+' head');
@@ -2614,9 +2622,15 @@ function generateSummary(job,period){
     if(!inP(date))return;
     dayRuns.forEach(run=>{mobsOf(run).forEach(mob=>{
       const baseRate=mob.rateOverride!=null?mob.rateOverride:(mob.type==='Shearing'?rates.shearingPerHead:rates.crutchingPerHead)||0;
+      /* v4.6.25 — group on a NORMALISED description, matching mobTotals() on the
+         Tally tab. Grouping on the raw string meant "Mixed ewes" and
+         "Mixed ewes " (trailing space) printed as two mob lines on the grower's
+         record while the app showed one. Display keeps the longest variant seen,
+         which is the fully-typed one. */
       const desc=mob.desc||'Unspecified';
-      const key=mob.type+'|'+desc+'|'+baseRate.toFixed(4);
+      const key=mob.type+'|'+desc.trim().toLowerCase()+'|'+baseRate.toFixed(4);
       if(!mobTotals[key])mobTotals[key]={type:mob.type,desc,rate:baseRate,count:0,earn:0};
+      else if(desc.trim().length>mobTotals[key].desc.trim().length)mobTotals[key].desc=desc;
       shIds.forEach(id=>{
         const cnt=mob.counts[id]||0;if(!cnt)return;
         mobTotals[key].count+=cnt;mobTotals[key].earn+=cnt*baseRate;
@@ -3883,7 +3897,31 @@ function TallyTab({job,setJob,role,viewDate,setViewDate}){
       }
     })();
   };
-  const setMobDesc=(rid,mid,v)=>{setRuns(r=>r.map(run=>run.id===rid?{...run,mobs:mobsOf(run).map(m=>m.id===mid?{...m,desc:v}:m)}:run));updateMobMeta(mid,{mob_desc:v});};
+  /* v4.6.25 — mob description writes are DEBOUNCED.
+   This previously fired updateMobMeta on every keystroke, so typing "Mixed ewes"
+   sent ten writes: M, Mi, Mix, Mixe, Mixed... On shed 4G those do not arrive in
+   order, and the row is last-write-wins — so an early partial landing late
+   overwrote the finished text. Live proof at Knights FUNN-0060: six mobs on one
+   job reading "Mixed ewes", "Mixed e" and "Mixe", which then printed on the
+   farmer's record as three separate mob lines.
+
+   Local state still updates on every keystroke — the input stays controlled, so
+   the v4.6.10 input-drift fix is untouched. Only the network write waits. */
+const MOB_DESC_DEBOUNCE={};
+const setMobDesc=(rid,mid,v)=>{
+  setRuns(r=>r.map(run=>run.id===rid?{...run,mobs:mobsOf(run).map(m=>m.id===mid?{...m,desc:v}:m)}:run));
+  if(MOB_DESC_DEBOUNCE[mid])clearTimeout(MOB_DESC_DEBOUNCE[mid]);
+  MOB_DESC_DEBOUNCE[mid]=setTimeout(()=>{
+    delete MOB_DESC_DEBOUNCE[mid];
+    updateMobMeta(mid,{mob_desc:v});
+  },700);
+};
+/* Commit immediately when the field loses focus, so leaving the screen inside
+   the debounce window cannot lose the last edit. */
+const flushMobDesc=(mid,v)=>{
+  if(MOB_DESC_DEBOUNCE[mid]){clearTimeout(MOB_DESC_DEBOUNCE[mid]);delete MOB_DESC_DEBOUNCE[mid];}
+  updateMobMeta(mid,{mob_desc:v});
+};
   const setMobType=(rid,mid,t)=>{setRuns(r=>r.map(run=>run.id===rid?{...run,mobs:mobsOf(run).map(m=>m.id===mid?{...m,type:t}:m)}:run));updateMobMeta(mid,{mob_type:t});};
   const setMobRate=(rid,mid,v)=>setRuns(r=>r.map(run=>run.id===rid?{...run,mobs:mobsOf(run).map(m=>m.id===mid?{...m,rateOverride:v===''?null:parseFloat(v)||null}:m)}:run));
   const setMobCnt=(rid,mid,cid,v)=>{
@@ -4036,7 +4074,7 @@ function TallyTab({job,setJob,role,viewDate,setViewDate}){
           return e('div',{key:mob.id,className:'mob-entry'},
             e('div',{className:'mob-type-row'},
               e('span',{className:`mob-type-btn${mob.type==='Shearing'?' sh':' cr'}`},mob.type),
-              e('input',{className:'mob-desc',placeholder:'Mob description (e.g. Merino Ewes red tag)',value:mob.desc||'',disabled:!canEdit,onChange:ev=>setMobDesc(run.id,mob.id,ev.target.value)}),
+              e('input',{className:'mob-desc',placeholder:'Mob description (e.g. Merino Ewes red tag)',value:mob.desc||'',disabled:!canEdit,onChange:ev=>setMobDesc(run.id,mob.id,ev.target.value),onBlur:ev=>flushMobDesc(mob.id,ev.target.value)}),
               canEdit&&mobsOf(run).length>1&&e('button',{className:'mob-del-btn',onClick:()=>{if(window.confirm('Delete this mob and its tallies for '+fmtDateLong(viewDate)+'?'))delMob(run.id,mob.id);}},'✕')
             ),
             isAdmin&&e('div',{className:'rate-override-row'},
