@@ -574,7 +574,7 @@ const LS_TALLY_QUEUE='mg_tally_queue_'+CONTRACTOR_SLUG; /* per-cell offline queu
 const LS_TALLY_DEAD='mg_tally_dead_'+CONTRACTOR_SLUG; /* v4.6.3g — quarantined cells (permanent rejection). Replayed once on boot in case the server-side blocker (e.g. missing kind constraint) was since fixed. */
 const LS_TALLY_META_QUEUE='mg_tally_meta_queue_'+CONTRACTOR_SLUG; /* v4.6.4 — offline/failed mob metadata (type/desc) updates to existing count cells; flushed alongside the tally queue. */
 const ROLE_TIMEOUT_HOURS=12; /* auto-reset after 12h inactivity */
-const APP_VERSION='v4.6.25a';
+const APP_VERSION='v4.6.26';
 const SUPER_RATE=0.12; /* SG rate, 12% from 1 Jul 2025. One-line change if legislated rate moves. */
 /* v4.6.12a (26 Jul 2026): fleet-alignment rebuild - feature content identical to v4.6.12; new version string per one-build-one-version discipline. */
 /* v4.6.12 (20 Jul 2026): PER-CREW PIN, contractor-controlled (design settled with the founder before any deploy; an earlier worker-self-set draft was discarded - self-set has a bootstrap race where an imposter claims a name first and sets its PIN). MODEL: every worker is AUTO-ASSIGNED a random 4-digit PIN (genCrewPin at creation; existing crew backfilled via SQL per contractor at rollout). The PIN is stored READABLE at crew_members.data.pin and shown on the worker's card in My Database (admin-only surface) with a regenerate button and a 'Text PIN' button (plain GSM-7 SMS via /api/send-sms so the worker has it on file). DELIBERATE ENGINEERING CALL, not an oversight: with the shared anon key and a 4-digit space, a hash is brute-forced in under a second by anyone determined, so hashing here is theatre; readable storage buys contractor look-up-ability at no real security cost. This is a visibility gate against casual wrong-name claims - real authentication is v5 (Supabase Auth + RLS). CLAIM FLOW: picking a name with a PIN demands it (CrewPinVerifyModal, direct compare, works offline once the record is synced; names with PINs show a lock in the picker); 'Not you?' re-challenges; app_settings.requireCrewPin=true blocks claiming names with NO pin ('ask your contractor') for hard-lockdown contractors, off = pinless names bind as before. Workers never set or change their own PIN; contractor regenerates on request (specific chosen PINs = SRD via SQL). Lead/Admin PINs and the per-job PIN untouched. */
@@ -6469,8 +6469,23 @@ function HomeScreen({jobs:allJobs,role,setRole,onJob,onNew,onDatabase,onSchedule
      cycled to Completed, so a shed that runs two days over cannot vanish mid-job.
      Missing/blank startDate counts as started - legacy or bad-data jobs can never
      disappear off the board. Search escapes the gate (see below). */
+  /* v4.6.26 — the started-gate now has a HORIZON rather than being start-only.
+     Start-only was written for a contractor with 5-10 jobs lined up. Applied to a
+     contractor who books months ahead it does not declutter the board, it empties
+     it: one contractor went from 56 Active jobs to 1 overnight, because only a
+     single shed had reached its start date.
+
+     Two weeks is what a shed plans against. Jobs starting inside the horizon show
+     on the board and already carry a '📅 Starts <date>' line in amber (see JLC),
+     so a future shed is still never confused with a running one. Anything beyond
+     the horizon stays in the 'coming up' pill.
+
+     Contractors whose jobs all start on or before today see no change at all —
+     which, on current fleet data, is 14 of 15. */
+  const HOME_HORIZON_DAYS=14;
   const _homeToday=localToday();
-  const jobStarted=j=>!j.startDate||j.startDate<=_homeToday;
+  const _homeHorizon=addDays(_homeToday,HOME_HORIZON_DAYS);
+  const jobStarted=j=>!j.startDate||j.startDate<=_homeHorizon;
   const _activeAll=jobs.filter(j=>j.status==='Active'&&matches(j)).sort(sortFn);
   /* Searching drops the gate: hunting a job you know exists and getting nothing back
      is worse than the clutter the gate removes. */
@@ -6612,7 +6627,7 @@ function HomeScreen({jobs:allJobs,role,setRole,onJob,onNew,onDatabase,onSchedule
       upcoming.length>0&&!q&&onSchedule&&e('div',{className:'drafts-pill',style:{borderColor:'var(--amber)'},onClick:onSchedule},
         e('div',{className:'drafts-pill-ic',style:{color:'var(--amber)'}},'📅'),
         e('div',{className:'drafts-pill-body'},
-          e('div',{className:'drafts-pill-t'},upcoming.length+' job'+(upcoming.length>1?'s':'')+' coming up'),
+          e('div',{className:'drafts-pill-t'},upcoming.length+' job'+(upcoming.length>1?'s':'')+' further ahead'),
           e('div',{className:'drafts-pill-s'},'Next: '+(function(){const n=upcoming[0];const f=gf(n.farmId);return (n.jobName||(f?f.name:'Unnamed'))+' — '+fmtDateLong(n.startDate);})())
         ),
         e('div',{className:'drafts-pill-arr',style:{color:'var(--amber)'}},'›')
