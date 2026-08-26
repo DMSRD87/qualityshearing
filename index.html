@@ -574,7 +574,7 @@ const LS_TALLY_QUEUE='mg_tally_queue_'+CONTRACTOR_SLUG; /* per-cell offline queu
 const LS_TALLY_DEAD='mg_tally_dead_'+CONTRACTOR_SLUG; /* v4.6.3g — quarantined cells (permanent rejection). Replayed once on boot in case the server-side blocker (e.g. missing kind constraint) was since fixed. */
 const LS_TALLY_META_QUEUE='mg_tally_meta_queue_'+CONTRACTOR_SLUG; /* v4.6.4 — offline/failed mob metadata (type/desc) updates to existing count cells; flushed alongside the tally queue. */
 const ROLE_TIMEOUT_HOURS=12; /* auto-reset after 12h inactivity */
-const APP_VERSION='v4.6.26';
+const APP_VERSION='v4.6.27';
 const SUPER_RATE=0.12; /* SG rate, 12% from 1 Jul 2025. One-line change if legislated rate moves. */
 /* v4.6.12a (26 Jul 2026): fleet-alignment rebuild - feature content identical to v4.6.12; new version string per one-build-one-version discipline. */
 /* v4.6.12 (20 Jul 2026): PER-CREW PIN, contractor-controlled (design settled with the founder before any deploy; an earlier worker-self-set draft was discarded - self-set has a bootstrap race where an imposter claims a name first and sets its PIN). MODEL: every worker is AUTO-ASSIGNED a random 4-digit PIN (genCrewPin at creation; existing crew backfilled via SQL per contractor at rollout). The PIN is stored READABLE at crew_members.data.pin and shown on the worker's card in My Database (admin-only surface) with a regenerate button and a 'Text PIN' button (plain GSM-7 SMS via /api/send-sms so the worker has it on file). DELIBERATE ENGINEERING CALL, not an oversight: with the shared anon key and a 4-digit space, a hash is brute-forced in under a second by anyone determined, so hashing here is theatre; readable storage buys contractor look-up-ability at no real security cost. This is a visibility gate against casual wrong-name claims - real authentication is v5 (Supabase Auth + RLS). CLAIM FLOW: picking a name with a PIN demands it (CrewPinVerifyModal, direct compare, works offline once the record is synced; names with PINs show a lock in the picker); 'Not you?' re-challenges; app_settings.requireCrewPin=true blocks claiming names with NO pin ('ask your contractor') for hard-lockdown contractors, off = pinless names bind as before. Workers never set or change their own PIN; contractor regenerates on request (specific chosen PINs = SRD via SQL). Lead/Admin PINs and the per-job PIN untouched. */
@@ -1178,11 +1178,14 @@ async function dbLoad(){
     /* v4.6.3f — hydrate sundries from sundries_entries. Null result = load
        failed (offline/timeout): keep whatever the cached job already had
        rather than wiping a previously-loaded list. */
-    await Promise.all(result.jobs.map(async j=>{
-      const s=await loadSundriesForJob(j.id);
-      if(s!==null)j.sundries=s;
+    /* v4.6.27 — single request for all jobs. null = the load failed
+       (offline/timeout): keep whatever the cached job already had rather than
+       wiping a previously-loaded list, exactly as the per-job version did. */
+    const _sundriesByJob=await loadSundriesAll();
+    result.jobs.forEach(j=>{
+      if(_sundriesByJob!==null)j.sundries=_sundriesByJob[j.id]||[];
       else if(!Array.isArray(j.sundries))j.sundries=[];
-    }));
+    });
     /* v4.6.3 — self-heal step. If tally_entries has run_ids or (date,run,mob)
        combos that aren't in the job's runs structure, the cells are
        orphaned: present in the DB, invisible in the UI. This happens when
@@ -1365,6 +1368,35 @@ function buildStrippedJobBlob(job){
    run on this contractor), stop re-querying it every load. Avoids the per-load
    error spam seen in the field and a pointless round-trip. Reset on full reload. */
 let _sundriesTableMissing=false;
+/* v4.6.27 — load EVERY job's sundries in ONE request.
+   This used to be called once per job from a Promise.all, so a full load fired
+   one HTTP request per job: 102 for the largest contractor, 62 for the next,
+   all in parallel from a phone on shed 4G. They saturated the connection and a
+   share of them timed out at 5s — 188 sundries_load_timeouts in 36 hours on one
+   contractor, which dragged the tally and job loads down with them and left the
+   board rendering stale or empty.
+
+   The entire sundries_entries table is under a hundred rows fleet-wide, so one
+   query per contractor is cheaper than one query per job by any measure. */
+async function loadSundriesAll(){
+  if(_sundriesTableMissing)return {};
+  try{
+    const r=await withTimeout(sb.from('sundries_entries')
+      .select('id,job_id,crew_id,occurred_date,description,amount,updated_at')
+      .eq('contractor_slug',CONTRACTOR_SLUG)
+      .order('occurred_date',{ascending:true}),8000,'sundries_load_timeout');
+    if(r&&r.error){
+      const m=r.error.message||'';
+      if(/sundries_entries/i.test(m)&&/schema cache|does not exist|not find/i.test(m)){
+        if(!_sundriesTableMissing){_sundriesTableMissing=true;logSaveFailure('error','sundries_table_missing','migration_not_run');}
+      }else{logSaveFailure('error','sundries_load',m);}
+      return null;
+    }
+    const byJob={};
+    (r.data||[]).forEach(row=>{(byJob[row.job_id]||(byJob[row.job_id]=[])).push(row);});
+    return byJob;
+  }catch(e){logSaveFailure(e.message==='sundries_load_timeout'?'timeout':'error','sundries_load',e.message);return null;}
+}
 async function loadSundriesForJob(jobId){
   if(_sundriesTableMissing)return [];
   try{
