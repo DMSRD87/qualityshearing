@@ -599,7 +599,7 @@ const LS_TALLY_QUEUE='mg_tally_queue_'+CONTRACTOR_SLUG; /* per-cell offline queu
 const LS_TALLY_DEAD='mg_tally_dead_'+CONTRACTOR_SLUG; /* v4.6.3g — quarantined cells (permanent rejection). Replayed once on boot in case the server-side blocker (e.g. missing kind constraint) was since fixed. */
 const LS_TALLY_META_QUEUE='mg_tally_meta_queue_'+CONTRACTOR_SLUG; /* v4.6.4 — offline/failed mob metadata (type/desc) updates to existing count cells; flushed alongside the tally queue. */
 const ROLE_TIMEOUT_HOURS=12; /* auto-reset after 12h inactivity */
-const APP_VERSION='v4.6.31-quality-trial';
+const APP_VERSION='v4.6.33-quality-trial';
 const SUPER_RATE=0.12; /* SG rate, 12% from 1 Jul 2025. One-line change if legislated rate moves. */
 /* v4.6.12a (26 Jul 2026): fleet-alignment rebuild - feature content identical to v4.6.12; new version string per one-build-one-version discipline. */
 /* v4.6.12 (20 Jul 2026): PER-CREW PIN, contractor-controlled (design settled with the founder before any deploy; an earlier worker-self-set draft was discarded - self-set has a bootstrap race where an imposter claims a name first and sets its PIN). MODEL: every worker is AUTO-ASSIGNED a random 4-digit PIN (genCrewPin at creation; existing crew backfilled via SQL per contractor at rollout). The PIN is stored READABLE at crew_members.data.pin and shown on the worker's card in My Database (admin-only surface) with a regenerate button and a 'Text PIN' button (plain GSM-7 SMS via /api/send-sms so the worker has it on file). DELIBERATE ENGINEERING CALL, not an oversight: with the shared anon key and a 4-digit space, a hash is brute-forced in under a second by anyone determined, so hashing here is theatre; readable storage buys contractor look-up-ability at no real security cost. This is a visibility gate against casual wrong-name claims - real authentication is v5 (Supabase Auth + RLS). CLAIM FLOW: picking a name with a PIN demands it (CrewPinVerifyModal, direct compare, works offline once the record is synced; names with PINs show a lock in the picker); 'Not you?' re-challenges; app_settings.requireCrewPin=true blocks claiming names with NO pin ('ask your contractor') for hard-lockdown contractors, off = pinless names bind as before. Workers never set or change their own PIN; contractor regenerates on request (specific chosen PINs = SRD via SQL). Lead/Admin PINs and the per-job PIN untouched. */
@@ -1188,7 +1188,11 @@ async function dbLoad(){
       };
     }
     const result={
-      jobs:(jr.data||[]).map(r=>r.data),
+      /* v4.6.32 — stamp status and rates as the server has them right now, so a
+         save can tell a deliberate change from a stale copy. Stripped on write. */
+      jobs:(jr.data||[]).map(r=>({...r.data,
+        _srvStatus:(r.data||{}).status,
+        _srvRates:JSON.stringify((r.data||{}).rates||{})})),
       farms:(fr.data||[]).map(r=>r.data),
       crew:(cr.data||[]).map(r=>r.data),
       fromCache:false,
@@ -1392,6 +1396,8 @@ function buildStrippedJobBlob(job){
   out.cookDays={};    /* v4.6.19 */
   out.cookHeads={};   /* v4.6.19 */
   out.sundries=[];    /* v4.6.3f: sundries_entries table is source of truth — never duplicate into blob */
+  delete out._srvStatus; /* v4.6.32 — transient load-time markers, never persisted */
+  delete out._srvRates;
   return out;
 }
 
@@ -1543,14 +1549,88 @@ async function dbSaveJob(job){
        counts within mobs are emptied), so the guard still functions as
        designed: rejects writes that would shrink the run-date history. */
     const incomingRunDates=Object.keys((jobForBlob&&jobForBlob.runs)||{}).length;
-    if(incomingRunDates>0){
+    /* v4.6.32 — was `incomingRunDates>0`, so a job with crew but no runs yet was
+       never compared against the server and could lose crew unseen. */
+    {
       const guardCheck=await withTimeout(
         sb.from('jobs').select('data').eq('id',job.id).eq('contractor_slug',CONTRACTOR_SLUG).maybeSingle(),
         3000,
         'guard_timeout'
       ).catch(err=>({error:{message:'guard_check_failed:'+err.message}}));
       if(guardCheck&&!guardCheck.error&&guardCheck.data&&guardCheck.data.data){
-        const supabaseRunDates=Object.keys((guardCheck.data.data.runs)||{}).length;
+        const srv=guardCheck.data.data;
+        /* ══ v4.6.30 — STALE-DEVICE CREW WIPE ════════════════════════════════
+           A job is stored as one blob and written whole, last write wins. A
+           second device holding an older copy can therefore delete a crew member
+           who was added on another device — and the run guard below never sees
+           it, because it only compares RUN ids.
+
+           That is exactly what happened on 25 Aug: a device still holding the
+           23rd's 10-person crew pressed Completed. The save wrote its whole copy,
+           the crew went 11 back to 10, and a wool handler with 5 runs recorded
+           silently vanished from the pay summary. Her tally rows were never
+           touched — tally_entries is a separate table — so the work was there the
+           whole time and only the crew list lost her. She was not paid.
+
+           Fix: anyone on the SERVER's crew list who holds tally rows for this job
+           is merged back into the outgoing blob. Never refuses the save — a
+           refusal here would make a job unsaveable, which is worse than the bug.
+           Someone with no recorded work can still be removed normally. */
+        try{
+          const srvCrew=Array.isArray(srv.crew)?srv.crew:[];
+          const outCrew=Array.isArray(jobForBlob.crew)?jobForBlob.crew.slice():[];
+          const dropped=srvCrew.filter(cid=>cid&&outCrew.indexOf(cid)<0);
+          if(dropped.length>0){
+            const held=await withTimeout(
+              sb.from('tally_entries').select('crew_id')
+                .eq('contractor_slug',CONTRACTOR_SLUG).eq('job_id',job.id)
+                .in('crew_id',dropped).limit(200),
+              3000,'guard_crew_timeout'
+            ).catch(err=>({error:{message:'guard_crew_failed:'+err.message}}));
+            if(held&&!held.error&&Array.isArray(held.data)){
+              const withWork=[...new Set(held.data.map(r=>r.crew_id).filter(Boolean))];
+              const restore=withWork.filter(cid=>outCrew.indexOf(cid)<0);
+              if(restore.length>0){
+                restore.forEach(cid=>outCrew.push(cid));
+                jobForBlob.crew=outCrew;
+                logSaveFailure('guard_crew_restored',job.id,
+                  'restored='+restore.join(',')+';srv='+srvCrew.length+';incoming='+
+                  ((job.crew||[]).length));
+              }
+            }
+          }
+        }catch(crewErr){
+          logSaveFailure('guard_crew_error',job.id,(crewErr&&crewErr.message)||'unknown');
+        }
+        /* ══ v4.6.30 — STATUS FLAPPING ═══════════════════════════════════════
+           Same root cause: a stale device kept reverting a Completed job to
+           Active. _srvStatus is the status this device last saw on the server.
+           If it still matches what we are about to write, this device is not
+           changing the status — it is carrying an old value — so keep whatever
+           the server has now. A genuine change by this user differs from the
+           stamp and is written through untouched. */
+        if(job._srvStatus&&jobForBlob.status===job._srvStatus&&srv.status&&srv.status!==jobForBlob.status){
+          logSaveFailure('guard_status_kept',job.id,
+            'device_had='+job._srvStatus+';server_now='+srv.status);
+          jobForBlob.status=srv.status;
+        }
+        /* v4.6.30 — rates carry the same exposure and it is the one that moves
+           money: a stale device reverting a rate change would silently reprice
+           the whole job for everyone on it. Same rule — if this device did not
+           touch the rates, it has no business overwriting them. */
+        try{
+          if(job._srvRates&&srv.rates){
+            const outRates=JSON.stringify(jobForBlob.rates||{});
+            const srvRates=JSON.stringify(srv.rates||{});
+            if(outRates===job._srvRates&&srvRates!==outRates){
+              logSaveFailure('guard_rates_kept',job.id,'device_unchanged;server_differs');
+              jobForBlob.rates=srv.rates;
+            }
+          }
+        }catch(rateErr){
+          logSaveFailure('guard_rates_error',job.id,(rateErr&&rateErr.message)||'unknown');
+        }
+        const supabaseRunDates=Object.keys((srv.runs)||{}).length;
         if(supabaseRunDates>incomingRunDates){
           logSaveFailure(
             'guard_rejected_save',
