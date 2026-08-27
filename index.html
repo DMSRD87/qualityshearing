@@ -574,7 +574,7 @@ const LS_TALLY_QUEUE='mg_tally_queue_'+CONTRACTOR_SLUG; /* per-cell offline queu
 const LS_TALLY_DEAD='mg_tally_dead_'+CONTRACTOR_SLUG; /* v4.6.3g — quarantined cells (permanent rejection). Replayed once on boot in case the server-side blocker (e.g. missing kind constraint) was since fixed. */
 const LS_TALLY_META_QUEUE='mg_tally_meta_queue_'+CONTRACTOR_SLUG; /* v4.6.4 — offline/failed mob metadata (type/desc) updates to existing count cells; flushed alongside the tally queue. */
 const ROLE_TIMEOUT_HOURS=12; /* auto-reset after 12h inactivity */
-const APP_VERSION='v4.6.27';
+const APP_VERSION='v4.6.28';
 const SUPER_RATE=0.12; /* SG rate, 12% from 1 Jul 2025. One-line change if legislated rate moves. */
 /* v4.6.12a (26 Jul 2026): fleet-alignment rebuild - feature content identical to v4.6.12; new version string per one-build-one-version discipline. */
 /* v4.6.12 (20 Jul 2026): PER-CREW PIN, contractor-controlled (design settled with the founder before any deploy; an earlier worker-self-set draft was discarded - self-set has a bootstrap race where an imposter claims a name first and sets its PIN). MODEL: every worker is AUTO-ASSIGNED a random 4-digit PIN (genCrewPin at creation; existing crew backfilled via SQL per contractor at rollout). The PIN is stored READABLE at crew_members.data.pin and shown on the worker's card in My Database (admin-only surface) with a regenerate button and a 'Text PIN' button (plain GSM-7 SMS via /api/send-sms so the worker has it on file). DELIBERATE ENGINEERING CALL, not an oversight: with the shared anon key and a 4-digit space, a hash is brute-forced in under a second by anyone determined, so hashing here is theatre; readable storage buys contractor look-up-ability at no real security cost. This is a visibility gate against casual wrong-name claims - real authentication is v5 (Supabase Auth + RLS). CLAIM FLOW: picking a name with a PIN demands it (CrewPinVerifyModal, direct compare, works offline once the record is synced; names with PINs show a lock in the picker); 'Not you?' re-challenges; app_settings.requireCrewPin=true blocks claiming names with NO pin ('ask your contractor') for hard-lockdown contractors, off = pinless names bind as before. Workers never set or change their own PIN; contractor regenerates on request (specific chosen PINs = SRD via SQL). Lead/Admin PINs and the per-job PIN untouched. */
@@ -716,7 +716,7 @@ async function flushQueue(){
       else if(item.type==='crew')call=sb.from('crew_members').upsert({id:item.id,contractor_slug:CONTRACTOR_SLUG,data:item.data},{onConflict:'id'});
       /* Cap each upsert at 5s — prevents one hanging item from stalling
          the whole queue flush. */
-      const res=await withTimeout(call,5000,'flush_timeout');
+      const res=await withTimeout(call,12000,'flush_timeout');
       /* Check for Supabase error in response body — don't count as flushed if error */
       if(res&&res.error){
         failed.push(item);
@@ -931,7 +931,7 @@ async function flushTallyMetaQueue(){
         sb.from('tally_entries').update(item.patch)
           .eq('contractor_slug',CONTRACTOR_SLUG).eq('job_id',item.job_id)
           .eq('mob_id',item.mob_id).eq('kind','count'),
-        5000,'meta_flush_timeout');
+        12000,'meta_flush_timeout');
       if(r&&r.error){
         const msg=r.error.message||'';
         /* permanent (column missing etc.) — drop rather than pin the queue;
@@ -1287,6 +1287,13 @@ async function dbLoad(){
    to queue + log. The original work may still complete in the background;
    that's fine — at worst we have a duplicate write to localStorage which
    the queue dedupes by id. */
+/* v4.6.28 — WRITE timeouts raised 5s -> 12s.
+   A shed on one bar of 4G could not complete a tally upsert inside 5 seconds. A
+   full day's tallies sat unsent on a lead's phone while the app looked like it
+   was saving: tally_upsert_timeout and flush_timeout firing from 09:08 through
+   11:46, and the crew only found out at knock-off.
+   Writes get 12s because a write that times out risks data; loads stay at 8s
+   because a load that times out simply retries and a long hang feels broken. */
 function withTimeout(promise,ms,label){
   let timer;
   const timeout=new Promise((_,reject)=>{
@@ -1418,7 +1425,7 @@ async function addSundryEntry(jobId,crewId,date,desc,amount){
   const r=await withTimeout(sb.from('sundries_entries').insert({
     contractor_slug:CONTRACTOR_SLUG,job_id:jobId,crew_id:crewId,
     occurred_date:date,description:desc,amount:Number(amount)||0,
-  }).select().single(),5000,'sundries_add_timeout');
+  }).select().single(),12000,'sundries_add_timeout');
   if(r&&r.error)throw new Error(r.error.message);
   return r.data;
 }
@@ -1426,11 +1433,11 @@ async function updateSundryEntry(id,date,desc,amount){
   const r=await withTimeout(sb.from('sundries_entries').update({
     occurred_date:date,description:desc,amount:Number(amount)||0,
     updated_at:new Date().toISOString(),
-  }).eq('id',id),5000,'sundries_upd_timeout');
+  }).eq('id',id),12000,'sundries_upd_timeout');
   if(r&&r.error)throw new Error(r.error.message);
 }
 async function deleteSundryEntry(id){
-  const r=await withTimeout(sb.from('sundries_entries').delete().eq('id',id),5000,'sundries_del_timeout');
+  const r=await withTimeout(sb.from('sundries_entries').delete().eq('id',id),12000,'sundries_del_timeout');
   if(r&&r.error)throw new Error(r.error.message);
 }
 
@@ -1534,7 +1541,7 @@ async function dbSaveJob(job){
       {id:job.id,contractor_slug:CONTRACTOR_SLUG,data:jobForBlob,updated_at:new Date().toISOString()},
       {onConflict:'id'}
     );
-    const result=await withTimeout(upsertCall,5000,'upsert_timeout');
+    const result=await withTimeout(upsertCall,12000,'upsert_timeout');
     if(result&&result.error)throw new Error(result.error.message);
     dequeue('job',job.id);
     /* PATCH A — Snapshot system. Snapshots use the FULL job (including
@@ -1584,7 +1591,7 @@ async function dbSaveFarm(farm){
   if(!navigator.onLine){queueWrite('farm',farm.id,farm);return;}
   try{
     const upsertCall=sb.from('farms').upsert({id:farm.id,contractor_slug:CONTRACTOR_SLUG,data:farm},{onConflict:'id'});
-    const result=await withTimeout(upsertCall,5000,'upsert_timeout');
+    const result=await withTimeout(upsertCall,12000,'upsert_timeout');
     if(result&&result.error)throw new Error(result.error.message);
     dequeue('farm',farm.id);
   }catch(e){
@@ -1609,7 +1616,7 @@ async function dbSaveCrew(member){
   if(!navigator.onLine){queueWrite('crew',member.id,member);return;}
   try{
     const upsertCall=sb.from('crew_members').upsert({id:member.id,contractor_slug:CONTRACTOR_SLUG,data:member},{onConflict:'id'});
-    const result=await withTimeout(upsertCall,5000,'upsert_timeout');
+    const result=await withTimeout(upsertCall,12000,'upsert_timeout');
     if(result&&result.error)throw new Error(result.error.message);
     dequeue('crew',member.id);
   }catch(e){
@@ -3851,7 +3858,7 @@ function TallyTab({job,setJob,role,viewDate,setViewDate}){
             .eq('job_id',job.id)
             .eq('run_id',rid)
             .eq('cell_date',viewDate), /* v4.6.3e: scope to current day — run_id-only delete destroyed same-run cells on OTHER dates (6 Jun) */
-          5000,'cascade_timeout');
+          12000,'cascade_timeout');
         if(res&&res.error)logSaveFailure('error','delRun_cascade','run='+rid+';err='+res.error.message);
         else try{logSaveFailure('diag_cascade',job.id,'delRun_ok:run='+rid);}catch(e){}
       }catch(e){logSaveFailure('error','delRun_cascade_throw','run='+rid+';err='+(e&&e.message||'unknown'));}
@@ -3887,7 +3894,7 @@ function TallyTab({job,setJob,role,viewDate,setViewDate}){
             .eq('run_id',rid)
             .eq('mob_id',mid)
             .eq('cell_date',viewDate), /* v4.6.3e: scope to current day — same cross-date hazard as delRun */
-          5000,'cascade_timeout');
+          12000,'cascade_timeout');
         if(res&&res.error)logSaveFailure('error','delMob_cascade','mob='+mid+';err='+res.error.message);
         else try{logSaveFailure('diag_cascade',job.id,'delMob_ok:mob='+mid);}catch(e){}
       }catch(e){logSaveFailure('error','delMob_cascade_throw','mob='+mid+';err='+(e&&e.message||'unknown'));}
@@ -3917,7 +3924,7 @@ function TallyTab({job,setJob,role,viewDate,setViewDate}){
           sb.from('tally_entries').update(patch)
             .eq('contractor_slug',CONTRACTOR_SLUG).eq('job_id',job.id)
             .eq('mob_id',mid).eq('kind','count'),
-          5000,'meta_update_timeout');
+          12000,'meta_update_timeout');
         if(r&&r.error)throw new Error(r.error.message);
       }catch(e){
         try{
@@ -6309,6 +6316,223 @@ function EditJobScreen({job,onSave,onClose,farmList,addFarm,crewList,addCrew}){
    Pay lives on the payslip; this is "what have I done".
    Shearing vs Crutching comes from tally_entries.mob_type, which must be
    backfilled for the contractor before this reads correctly. */
+/* ══ v4.6.28 — SEASON STATS (admin only) ═══════════════════════════════════════
+   The same idea as a shearer seeing their own tally, widened to the whole gang
+   and the whole season. One query for the period, aggregated on the device —
+   the biggest contractor holds ~3,500 tally rows for a full season, so pulling
+   them beats maintaining a server-side rollup that can drift from the truth.
+
+   Everything is derived from tally_entries, the same source the pay engine uses,
+   so a number here can always be traced back to a cell someone typed.
+
+   Legacy rows written before v4.6.4 carry no mob_type; those fall back to the
+   job's own type rather than being dropped, which is what the pay engine does. */
+function SeasonStats({jobs,onClose}){
+  const [period,setPeriod]=useState('season');
+  const [cFrom,setCFrom]=useState(''); const [cTo,setCTo]=useState('');
+  const [view,setView]=useState('person');   /* person | shed | month */
+  const [roleFilt,setRoleFilt]=useState('all');
+  const [q,setQ]=useState('');
+  const [rows,setRows]=useState(null);
+  const [busy,setBusy]=useState(false); const [err,setErr]=useState('');
+
+  const seasonStart=()=>{const t=localToday();const y=parseInt(t.slice(0,4),10),m=parseInt(t.slice(5,7),10);
+    return (m>=7?y:y-1)+'-07-01';};
+  const range=()=>{const t=localToday();
+    if(period==='7')return[addDays(t,-6),t];
+    if(period==='30')return[addDays(t,-29),t];
+    if(period==='season')return[seasonStart(),t];
+    if(period==='custom')return[cFrom||'2000-01-01',cTo||t];
+    return['2000-01-01',t];};
+
+  useEffect(()=>{
+    if(period==='custom'&&(!cFrom||!cTo))return;
+    let dead=false; const [f,t]=range();
+    setBusy(true); setErr('');
+    (async()=>{
+      try{
+        const r=await withTimeout(
+          sb.from('tally_entries')
+            .select('job_id,cell_date,kind,value,mob_type,mob_desc,crew_id')
+            .eq('contractor_slug',CONTRACTOR_SLUG)
+            .gte('cell_date',f).lte('cell_date',t),
+          12000,'seasonstats_timeout');
+        if(dead)return;
+        if(r&&r.error)throw new Error(r.error.message);
+        setRows((r&&r.data)||[]);
+      }catch(ex){ if(!dead)setErr(ex.message==='seasonstats_timeout'?'Timed out — try a shorter period':(ex.message||'Load failed')); }
+      finally{ if(!dead)setBusy(false); }
+    })();
+    return ()=>{dead=true;};
+  },[period,cFrom,cTo]);
+
+  const jobById={}; (jobs||[]).forEach(j=>{jobById[j.id]=j;});
+  const shedName=jid=>{const j=jobById[jid];if(!j)return'(unknown job)';
+    const f=gf(j.farmId);return (f&&f.name)||j.jobName||j.jobNumber||'(unnamed)';};
+
+  /* ── aggregate ──────────────────────────────────────────────────────────── */
+  const agg=(()=>{
+    const base={sh:0,cr:0,runs:0,bales:0,days:{},best:0,bestDay:null};
+    const byPerson={},byShed={},byMonth={};
+    let tot={sh:0,cr:0,runs:0,bales:0,days:{},sheds:{}};
+    const dayHead={};   /* crew|date -> head, for best-day */
+    (rows||[]).forEach(r=>{
+      const v=Number(r.value)||0; if(!v)return;
+      const j=jobById[r.job_id];
+      const bucket=(m,k)=>m[k]||(m[k]={...base,days:{}});
+      const p=bucket(byPerson,r.crew_id);
+      const sName=shedName(r.job_id);
+      const sh=bucket(byShed,sName);
+      const mo=bucket(byMonth,String(r.cell_date).slice(0,7));
+      if(r.kind==='count'){
+        /* legacy rows have no mob_type — fall back to the job's own type */
+        const type=r.mob_type||(j&&j.type)||'Shearing';
+        const key=type==='Crutching'?'cr':'sh';
+        [p,sh,mo].forEach(o=>{o[key]+=v;});
+        tot[key]+=v;
+        const dk=r.crew_id+'|'+r.cell_date;
+        dayHead[dk]=(dayHead[dk]||0)+v;
+        [p,sh,mo].forEach(o=>{o.days[r.cell_date]=1;});
+        tot.days[r.cell_date]=1; tot.sheds[sName]=1;
+      }else if(r.kind==='shed_runs'){
+        [p,sh,mo].forEach(o=>{o.runs+=v;o.days[r.cell_date]=1;});
+        tot.runs+=v; tot.days[r.cell_date]=1; tot.sheds[sName]=1;
+      }else if(r.kind==='bales'){
+        [p,sh,mo].forEach(o=>{o.bales+=v;});
+        tot.bales+=v;
+      }
+    });
+    Object.keys(dayHead).forEach(dk=>{
+      const [cid,d]=dk.split('|'); const p=byPerson[cid]; if(!p)return;
+      if(dayHead[dk]>p.best){p.best=dayHead[dk];p.bestDay=d;}
+    });
+    return {byPerson,byShed,byMonth,tot};
+  })();
+
+  const roleOf=id=>{const c=gc(id);return (c&&c.role)||'—';};
+  const nameOf=id=>{const c=gc(id);return (c&&c.name)||'(removed crew)';};
+  const isShearer=rl=>rl==='Shearer'||rl==='Crutcher';
+
+  const personRows=Object.keys(agg.byPerson).map(id=>({id,name:nameOf(id),role:roleOf(id),...agg.byPerson[id]}))
+    .filter(r=>roleFilt==='all'||(roleFilt==='shearers'?isShearer(r.role):roleFilt==='cook'?r.role==='Cook':(!isShearer(r.role)&&r.role!=='Cook')))
+    .filter(r=>!q||r.name.toLowerCase().includes(q.toLowerCase())||r.role.toLowerCase().includes(q.toLowerCase()))
+    .sort((a,b)=>(b.sh+b.cr)-(a.sh+a.cr)||b.runs-a.runs);
+  const shedRows=Object.keys(agg.byShed).map(k=>({name:k,...agg.byShed[k]}))
+    .filter(r=>!q||r.name.toLowerCase().includes(q.toLowerCase()))
+    .sort((a,b)=>(b.sh+b.cr)-(a.sh+a.cr));
+  const monthRows=Object.keys(agg.byMonth).sort().map(k=>({name:k,...agg.byMonth[k]}));
+
+  const nDays=o=>Object.keys(o.days||{}).length;
+  const num=n=>(Number(n)||0).toLocaleString();
+  const cell=(txt,w,bold)=>e('div',{style:{width:w,textAlign:'right',fontVariantNumeric:'tabular-nums',
+    fontWeight:bold?800:600,fontSize:13,color:bold?'var(--amber)':'var(--text)'}},txt);
+  const hcell=(txt,w)=>e('div',{style:{width:w,textAlign:'right',fontSize:10,letterSpacing:'.4px',
+    textTransform:'uppercase',color:'var(--dim)',fontWeight:700}},txt);
+
+  const [f0,t0]=range();
+  const btn=(k,l)=>e('button',{key:k,onClick:()=>setPeriod(k),
+    style:{flex:1,padding:'8px 0',fontSize:12,fontWeight:period===k?800:600,cursor:'pointer',
+      background:period===k?'var(--amber)':'var(--card2)',color:period===k?'#000':'var(--muted)',
+      border:'1px solid '+(period===k?'var(--amber)':'var(--border)'),borderRadius:7}},l);
+  const tab=(k,l)=>e('button',{key:k,onClick:()=>setView(k),
+    style:{flex:1,padding:'9px 0',fontSize:13,fontWeight:view===k?800:600,cursor:'pointer',
+      background:view===k?'var(--card2)':'transparent',color:view===k?'var(--amber)':'var(--muted)',
+      border:'none',borderBottom:'2px solid '+(view===k?'var(--amber)':'transparent')}},l);
+
+  return e('div',{className:'overlay'},e('div',{className:'sheet',style:{maxWidth:760}},
+    e('div',{className:'sheet-handle'}),
+    e('div',{className:'sheet-title'},'Season stats'),
+    e('div',{className:'sheet-scroll'},
+
+      e('div',{style:{display:'flex',gap:6,marginBottom:8}},
+        btn('7','7 days'),btn('30','30 days'),btn('season','Season'),btn('custom','Custom')),
+      period==='custom'&&e('div',{style:{display:'flex',gap:8,marginBottom:8}},
+        e('input',{type:'date',value:cFrom,onChange:ev=>setCFrom(ev.target.value),className:'fi',style:{flex:1}}),
+        e('input',{type:'date',value:cTo,onChange:ev=>setCTo(ev.target.value),className:'fi',style:{flex:1}})),
+      e('div',{style:{fontSize:11,color:'var(--dim)',marginBottom:10}},fmtDate(f0)+'  \u2192  '+fmtDate(t0)),
+
+      busy&&e('div',{style:{textAlign:'center',color:'var(--muted)',padding:'30px 0'}},'Loading\u2026'),
+      err&&e('div',{style:{color:'var(--red)',fontSize:13,padding:'10px 0'}},err),
+
+      !busy&&!err&&rows&&e('div',null,
+        /* headline */
+        e('div',{style:{display:'flex',gap:8,flexWrap:'wrap',marginBottom:14}},
+          [['Shorn',num(agg.tot.sh)],['Crutched',num(agg.tot.cr)],
+           ['Shed runs',num(agg.tot.runs)],['Bales',num(agg.tot.bales)],
+           ['Days',num(Object.keys(agg.tot.days).length)],['Sheds',num(Object.keys(agg.tot.sheds).length)]]
+          .map(([l,v])=>e('div',{key:l,style:{flex:'1 1 30%',minWidth:96,background:'var(--card2)',
+              border:'1px solid var(--border)',borderRadius:9,padding:'9px 11px'}},
+            e('div',{style:{fontSize:10,textTransform:'uppercase',letterSpacing:'.4px',color:'var(--dim)',fontWeight:700}},l),
+            e('div',{style:{fontSize:19,fontWeight:800,fontVariantNumeric:'tabular-nums'}},v)))),
+
+        e('div',{style:{display:'flex',borderBottom:'1px solid var(--border)',marginBottom:10}},
+          tab('person','By person'),tab('shed','By shed'),tab('month','By month')),
+
+        (view==='person')&&e('div',{style:{display:'flex',gap:6,marginBottom:10}},
+          [['all','All'],['shearers','Shearers'],['staff','Shed staff'],['cook','Cook']].map(([k,l])=>
+            e('button',{key:k,onClick:()=>setRoleFilt(k),
+              style:{padding:'6px 11px',fontSize:12,borderRadius:14,cursor:'pointer',
+                background:roleFilt===k?'var(--amberD)':'var(--card2)',
+                color:roleFilt===k?'var(--amber)':'var(--muted)',
+                border:'1px solid '+(roleFilt===k?'var(--amber)':'var(--border)'),fontWeight:700}},l))),
+
+        view!=='month'&&e('input',{className:'fi',placeholder:view==='person'?'Search name or role\u2026':'Search shed\u2026',
+          value:q,onChange:ev=>setQ(ev.target.value),style:{marginBottom:10}}),
+
+        view==='person'&&e('div',null,
+          e('div',{style:{display:'flex',gap:6,padding:'0 2px 6px'}},
+            e('div',{style:{flex:1}},hcell('','0')),
+            hcell('Shorn',66),hcell('Crut',56),hcell('Runs',48),hcell('Days',44),hcell('Avg/day',60),hcell('Best',52)),
+          personRows.length===0&&e('div',{style:{textAlign:'center',color:'var(--muted)',padding:'26px 0'}},'Nothing in this period.'),
+          personRows.map(r=>e('div',{key:r.id,style:{display:'flex',alignItems:'center',gap:6,
+              padding:'8px 2px',borderTop:'1px solid var(--border)'}},
+            e('div',{style:{flex:1,minWidth:0}},
+              e('div',{style:{fontSize:14,fontWeight:700,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}},r.name),
+              e('div',{style:{fontSize:11,color:'var(--dim)'}},r.role)),
+            cell(num(r.sh),66,true),cell(r.cr?num(r.cr):'\u2014',56),
+            cell(r.runs?num(r.runs):'\u2014',48),cell(num(nDays(r)),44),
+            cell(nDays(r)?num(Math.round((r.sh+r.cr)/nDays(r))):'\u2014',60),
+            cell(r.best?num(r.best):'\u2014',52)))),
+
+        view==='shed'&&e('div',null,
+          e('div',{style:{display:'flex',gap:6,padding:'0 2px 6px'}},
+            e('div',{style:{flex:1}},hcell('','0')),
+            hcell('Shorn',70),hcell('Crut',60),hcell('Bales',54),hcell('Days',46)),
+          shedRows.length===0&&e('div',{style:{textAlign:'center',color:'var(--muted)',padding:'26px 0'}},'Nothing in this period.'),
+          shedRows.map(r=>e('div',{key:r.name,style:{display:'flex',alignItems:'center',gap:6,
+              padding:'8px 2px',borderTop:'1px solid var(--border)'}},
+            e('div',{style:{flex:1,fontSize:14,fontWeight:700,minWidth:0,whiteSpace:'nowrap',
+              overflow:'hidden',textOverflow:'ellipsis'}},r.name),
+            cell(num(r.sh),70,true),cell(r.cr?num(r.cr):'\u2014',60),
+            cell(r.bales?num(r.bales):'\u2014',54),cell(num(nDays(r)),46)))),
+
+        view==='month'&&e('div',null,
+          e('div',{style:{display:'flex',gap:6,padding:'0 2px 6px'}},
+            e('div',{style:{flex:1}},hcell('','0')),
+            hcell('Shorn',70),hcell('Crut',60),hcell('Runs',52),hcell('Days',46)),
+          monthRows.length===0&&e('div',{style:{textAlign:'center',color:'var(--muted)',padding:'26px 0'}},'Nothing in this period.'),
+          monthRows.map(r=>e('div',{key:r.name,style:{display:'flex',alignItems:'center',gap:6,
+              padding:'8px 2px',borderTop:'1px solid var(--border)'}},
+            e('div',{style:{flex:1,fontSize:14,fontWeight:700}},fmtMonth(r.name)),
+            cell(num(r.sh),70,true),cell(r.cr?num(r.cr):'\u2014',60),
+            cell(r.runs?num(r.runs):'\u2014',52),cell(num(nDays(r)),46)))),
+
+        e('div',{style:{fontSize:11,color:'var(--dim)',marginTop:14,lineHeight:1.5}},
+          'Counts come straight from tally_entries \u2014 the same source the pay summary uses. '
+          +'Anyone removed from the crew list still shows their history here.')
+      )
+    ),
+    e('div',{className:'sheet-footer'},
+      e('button',{onClick:onClose,style:{width:'100%',padding:'12px',borderRadius:8,border:'none',
+        background:'var(--card2)',color:'var(--text)',fontWeight:700,fontSize:14,cursor:'pointer'}},'Close'))
+  ));
+}
+function fmtMonth(ym){
+  const [y,m]=String(ym).split('-').map(Number);
+  const N=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return (N[(m||1)-1]||'?')+' '+(y||'');
+}
+
 function MyTallies({myId,me,jobs}){
   const [period,setPeriod]=useState('season');
   const [cFrom,setCFrom]=useState('');
@@ -6446,6 +6670,7 @@ function MyTallies({myId,me,jobs}){
 }
 
 function HomeScreen({jobs:allJobs,role,setRole,onJob,onNew,onDatabase,onSchedule,contractorName}){
+  const [showSeason,setShowSeason]=useState(false); /* v4.6.28 — admin only */
   /* v4.6.13 - a designated lead sees ONLY the sheds they are lead on. Shadowing the prop
      here scopes every downstream list (active/completed/archive/banner) in one place, so
      no future list can quietly escape the filter. Admin is never scoped. Toggle off or no
@@ -6725,8 +6950,12 @@ function HomeScreen({jobs:allJobs,role,setRole,onJob,onNew,onDatabase,onSchedule
          running job - lives on Overview as + Add crew. Admin only. */
       role==='admin'&&e('button',{className:'fab',onClick:onNew},'+'),
       role==='admin'&&e('button',{onClick:()=>{setPwOffset(0);setShowPayWeek(true);},style:{background:'var(--hdr)',border:'1px solid rgba(255,255,255,.2)',borderRadius:24,padding:'10px 18px',color:'#ffffff',fontWeight:700,fontSize:13,cursor:'pointer',boxShadow:'0 4px 14px rgba(0,0,0,.3)'}},'💰 Pay Week'),
+      role==='admin'&&e('button',{onClick:()=>setShowSeason(true),style:{background:'var(--hdr)',border:'1px solid rgba(255,255,255,.2)',borderRadius:24,padding:'10px 18px',color:'#ffffff',fontWeight:700,fontSize:13,cursor:'pointer'}},'Season stats'),
       role==='admin'&&e('button',{onClick:onDatabase,style:{background:'var(--hdr)',border:'1px solid rgba(255,255,255,.2)',borderRadius:24,padding:'10px 18px',color:'#ffffff',fontWeight:700,fontSize:13,cursor:'pointer',boxShadow:'0 4px 14px rgba(0,0,0,.3)'}},'📂 My Database')
     ),
+    /* v4.6.28 - Season stats sheet (admin). `jobs` here is the full list, so a
+       shed that has since been Completed or Charged Out still counts. */
+    showSeason&&e(SeasonStats,{jobs:allJobs,onClose:()=>setShowSeason(false)}),
     /* v4.6.7 - Pay Week Report sheet (admin) */
     showPayWeek&&(function(){
       var last=lsGet(LS_LAST_RATES)||{};
