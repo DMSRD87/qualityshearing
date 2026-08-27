@@ -599,7 +599,7 @@ const LS_TALLY_QUEUE='mg_tally_queue_'+CONTRACTOR_SLUG; /* per-cell offline queu
 const LS_TALLY_DEAD='mg_tally_dead_'+CONTRACTOR_SLUG; /* v4.6.3g — quarantined cells (permanent rejection). Replayed once on boot in case the server-side blocker (e.g. missing kind constraint) was since fixed. */
 const LS_TALLY_META_QUEUE='mg_tally_meta_queue_'+CONTRACTOR_SLUG; /* v4.6.4 — offline/failed mob metadata (type/desc) updates to existing count cells; flushed alongside the tally queue. */
 const ROLE_TIMEOUT_HOURS=12; /* auto-reset after 12h inactivity */
-const APP_VERSION='v4.6.29';
+const APP_VERSION='v4.6.30-quality-trial';
 const SUPER_RATE=0.12; /* SG rate, 12% from 1 Jul 2025. One-line change if legislated rate moves. */
 /* v4.6.12a (26 Jul 2026): fleet-alignment rebuild - feature content identical to v4.6.12; new version string per one-build-one-version discipline. */
 /* v4.6.12 (20 Jul 2026): PER-CREW PIN, contractor-controlled (design settled with the founder before any deploy; an earlier worker-self-set draft was discarded - self-set has a bootstrap race where an imposter claims a name first and sets its PIN). MODEL: every worker is AUTO-ASSIGNED a random 4-digit PIN (genCrewPin at creation; existing crew backfilled via SQL per contractor at rollout). The PIN is stored READABLE at crew_members.data.pin and shown on the worker's card in My Database (admin-only surface) with a regenerate button and a 'Text PIN' button (plain GSM-7 SMS via /api/send-sms so the worker has it on file). DELIBERATE ENGINEERING CALL, not an oversight: with the shared anon key and a 4-digit space, a hash is brute-forced in under a second by anyone determined, so hashing here is theatre; readable storage buys contractor look-up-ability at no real security cost. This is a visibility gate against casual wrong-name claims - real authentication is v5 (Supabase Auth + RLS). CLAIM FLOW: picking a name with a PIN demands it (CrewPinVerifyModal, direct compare, works offline once the record is synced; names with PINs show a lock in the picker); 'Not you?' re-challenges; app_settings.requireCrewPin=true blocks claiming names with NO pin ('ask your contractor') for hard-lockdown contractors, off = pinless names bind as before. Workers never set or change their own PIN; contractor regenerates on request (specific chosen PINs = SRD via SQL). Lead/Admin PINs and the per-job PIN untouched. */
@@ -1761,14 +1761,21 @@ function shedRunsByRole(job,id,date){
   const jr=getJobRole(job,id);
   return jr?{[jr]:total}:{};
 }
-/* True when this worker-day was actually split across roles. A split day always
-   pays PER RUN for every bucket: the presser bale-threshold rule is a whole-day
-   rule for someone whose day WAS pressing, and paying 20 bales for two runs of
-   pressing would be wrong. Unsplit days keep the hybrid untouched. */
-function isSplitDay(job,id,date){
+/* v4.6.30 — true when this worker-day carries an explicit role allocation,
+   whether that is two roles or one.
+
+   This was ">1 role" and silently mispriced anyone placed alone in a section that
+   is not their own: the day fell through to the legacy path and paid at their JOB
+   role's rate. A wool handler covering the penner drew $80 instead of $85.
+
+   An allocation only ever exists when it means something — the writer stores a
+   plain row whenever the single role IS the job role — so anything here should be
+   priced by role, PER RUN. That also leaves the presser bale-threshold hybrid
+   alone: a job-role presser's ordinary day never reaches this path. */
+function hasRoleRuns(job,id,date){
   const split=(((job.shedRoleRuns||{})[id])||{})[date];
   if(!split||typeof split!=='object')return false;
-  return Object.keys(split).filter(r=>(Number(split[r])||0)>0).length>1;
+  return Object.keys(split).some(r=>(Number(split[r])||0)>0);
 }
 /* Piecework is driven by DATA, not role. A wool handler who shears run 2 has
    count rows and must be paid for them; previously the piece list was
@@ -2171,9 +2178,9 @@ function calcPeriodStats(job,period){
     const defR=role==='Wool Classer'?rates.classerPerRun:role==='Penner'?rates.pennerPerRun:role==='Presser'?rates.presserPerRun:rates.woolHandlerPerRun;
     const rpr=ov||defR||80;
     /* v4.6.18 — a day split across shed roles prices each bucket at its own
-       rate and always PER RUN (see isSplitDay). Unsplit days fall through to
+       rate and always PER RUN (see hasRoleRuns). Ordinary days fall through to
        the untouched paths below and are byte-identical to v4.6.16d. */
-    const splitDates=Object.keys((job.shedRoleRuns||{})[id]||{}).filter(d=>isSplitDay(job,id,d)&&inP(d));
+    const splitDates=Object.keys((job.shedRoleRuns||{})[id]||{}).filter(d=>hasRoleRuns(job,id,d)&&inP(d));
     splitDates.forEach(date=>{
       const byRole=shedRunsByRole(job,id,date);
       Object.keys(byRole).forEach(r=>{totalEarn+=byRole[r]*shedRunRate(job,id,r);});
@@ -2573,7 +2580,7 @@ function generateSummary(job,period){
        shown 4 x $110 instead of 2 x $110 + 2 x $85. Recompute from
        shedRoleRuns and itemise per role. Days with no split are untouched. */
     {
-      const splitDs=Object.keys((job.shedRoleRuns||{})[id]||{}).filter(dt=>isSplitDay(job,id,dt)&&inP(dt)).sort();
+      const splitDs=Object.keys((job.shedRoleRuns||{})[id]||{}).filter(dt=>hasRoleRuns(job,id,dt)&&inP(dt)).sort();
       if(splitDs.length){
         let splitEarn=0,splitRuns=0;const splitLines=[];const byRoleTot={};
         splitDs.forEach(date=>{
@@ -2812,7 +2819,7 @@ function payWeekJobData(job,period){
     /* v4.6.18 — days split across shed roles: each bucket at its own rate, always
        per run. Itemised one line per role so the payslip reads '2 runs Wool
        Classer' / '2 runs Presser' rather than a single unexplained figure. */
-    const splitD=Object.keys((job.shedRoleRuns||{})[id]||{}).filter(dt=>isSplitDay(job,id,dt)&&inP(dt)).sort();
+    const splitD=Object.keys((job.shedRoleRuns||{})[id]||{}).filter(dt=>hasRoleRuns(job,id,dt)&&inP(dt)).sort();
     splitD.forEach(date=>{
       const byRole=shedRunsByRole(job,id,date);
       Object.keys(byRole).sort().forEach(r=>{
@@ -3360,59 +3367,6 @@ function markAccessVerified(){
 }
 
 /* ── PIN PAD (reusable) ── */
-/* ══ v4.6.24 — SHED ROLE SPLIT EDITOR ═════════════════════════════════════════
-   One day, one person, runs allocated across shed roles. Opens seeded from the
-   day's existing runs sitting entirely on the job-level role, so the common case
-   is: tap Split, move two runs to the other role, Save.
-
-   Total is derived from the buckets rather than fixed — a lead who realises the
-   day was 5 runs, not 4, should not have to leave and re-enter it first.
-
-   Saving with one role holding everything clears the split and writes a normal
-   run row, so this is also how you undo. */
-function ShedSplitEditor({crewId,jobRole,current,dayTotal,onSave,onCancel}){
-  const seed={};
-  if(current&&Object.keys(current).length){
-    SHED_ROLES.forEach(r=>{seed[r]=Number(current[r])||0;});
-  }else{
-    SHED_ROLES.forEach(r=>{seed[r]=0;});
-    if(jobRole&&seed[jobRole]!==undefined)seed[jobRole]=Number(dayTotal)||0;
-  }
-  const [v,setV]=useState(seed);
-  const total=SHED_ROLES.reduce((a,r)=>a+(Number(v[r])||0),0);
-  const liveRoles=SHED_ROLES.filter(r=>(Number(v[r])||0)>0);
-  const bump=(r,d)=>setV(prev=>({...prev,[r]:Math.max(0,(Number(prev[r])||0)+d)}));
-  return e('div',{style:{flexBasis:'100%',margin:'8px 0 4px 48px',padding:12,borderRadius:10,
-      background:'var(--card2)',border:'1px solid var(--border)'}},
-    e('div',{style:{fontSize:11,fontWeight:800,letterSpacing:'.5px',color:'var(--dim)',
-      textTransform:'uppercase',marginBottom:8}},'Runs by role \u2014 this day'),
-    SHED_ROLES.map(r=>e('div',{key:r,style:{display:'flex',alignItems:'center',
-        justifyContent:'space-between',padding:'5px 0'}},
-      e('div',{style:{fontSize:13,fontWeight:600,
-        color:(Number(v[r])||0)>0?'var(--text)':'var(--dim)'}},r),
-      e('div',{className:'rs'},
-        e('button',{className:'rs-btn',disabled:(Number(v[r])||0)<=0,onClick:()=>bump(r,-1)},'\u2212'),
-        e('div',{className:'rs-val'},Number(v[r])||0),
-        e('button',{className:'rs-btn',onClick:()=>bump(r,1)},'+'))
-    )),
-    e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',
-      borderTop:'1px solid var(--border)',marginTop:8,paddingTop:8,fontSize:12}},
-      e('div',{style:{color:'var(--dim)'}},'Total'),
-      e('div',{style:{fontWeight:800,color:'var(--amber)'}},total+' run'+(total===1?'':'s'))),
-    liveRoles.length<2&&e('div',{style:{fontSize:11,color:'var(--dim)',marginTop:6}},
-      liveRoles.length===0?'All zero \u2014 saving clears the day.'
-        :'One role only \u2014 saving clears the split.'),
-    e('div',{style:{display:'flex',gap:8,marginTop:10}},
-      e('button',{onClick:()=>onSave(v),
-        style:{flex:1,padding:'9px',borderRadius:6,border:'none',background:'var(--amber)',
-          color:'#000',fontWeight:800,fontSize:13,cursor:'pointer'}},'Save'),
-      e('button',{onClick:onCancel,
-        style:{padding:'9px 14px',borderRadius:6,border:'1px solid var(--border)',
-          background:'var(--card)',color:'var(--dim)',fontWeight:700,fontSize:13,cursor:'pointer'}},
-        'Cancel'))
-  );
-}
-
 function PinPad({onSuccess,onCancel,label,subtitle,allowChange,changeLabel,_overridePin,_validateAsync,_startInChangeMode,_pinType,_onChanged}){
   const [entry,setEntry]=useState('');
   const [err,setErr]=useState('');
@@ -3848,7 +3802,18 @@ function TallyTab({job,setJob,role,viewDate,setViewDate}){
   const todayStr=localToday();
   const dates=jobDates(job);
   const dayRuns=(job.runs||{})[viewDate]||[];
-  const shearers=job.crew.filter(id=>{const r=getJobRole(job,id);return r==='Shearer'||r==='Crutcher';});
+  /* v4.6.30 — the stand holds anyone roled to shear, anyone added to it today,
+     and anyone already holding counts on this date. That last clause is what
+     makes a shed hand who took a stand persist across a reload, with no extra
+     storage: the counts themselves are the record. */
+  const standExtraRef=(extra['STAND']||[]);
+  const hasCountsToday=id=>((job.runs||{})[viewDate]||[]).some(run=>
+    mobsOf(run).some(mob=>((mob.counts||{})[id]||0)>0));
+  const shearers=job.crew.filter(id=>{
+    if(!gc(id))return false;
+    const r=getJobRole(job,id);
+    return r==='Shearer'||r==='Crutcher'||standExtraRef.indexOf(id)>=0||hasCountsToday(id);
+  });
   /* STAND ORDER — persisted per-job. New shearers added later appear at end of the order. */
   const savedOrder=Array.isArray(job.shearerOrder)?job.shearerOrder:[];
   const orderedFromSaved=savedOrder.filter(id=>shearers.includes(id));
@@ -4020,7 +3985,13 @@ const flushMobDesc=(mid,v)=>{
     const roles=Object.keys(byRole||{}).filter(r=>SHED_ROLE_CODE[r]);
     const live={};let total=0;
     roles.forEach(r=>{const v=Math.max(0,Number(byRole[r])||0);if(v>0){live[r]=v;total+=v;}});
-    const isSplit=Object.keys(live).length>1;
+    /* v4.6.30 — a legacy run_id='' row means "the job-level role", so it can only
+       be used when the single live role IS that person's job role. Someone placed
+       alone in a section they are only helping in still needs a coded row, or the
+       runs read back as their own role and price at the wrong rate — a wool
+       handler covering the penner would have been paid $80 instead of $85. */
+    const liveRoles=Object.keys(live);
+    const isSplit=liveRoles.length>1||(liveRoles.length===1&&liveRoles[0]!==getJobRole(job,cid));
     setJob(prev=>{
       const nextRole={...(prev.shedRoleRuns||{})};
       const forCid={...(nextRole[cid]||{})};
@@ -4040,10 +4011,46 @@ const flushMobDesc=(mid,v)=>{
     /* Legacy row: 0 while split (coded rows own the day), otherwise the total. */
     writeTallyCell({jobId:job.id,kind:'shed_runs',crewId:cid,date:viewDate,value:isSplit?0:total});
   };
-  const [splitFor,setSplitFor]=useState(null); /* v4.6.24 — crew id whose split editor is open */
+  /* ══ v4.6.30 — ROLE IS A DEFAULT, NOT A GATE ══════════════════════════════
+     Until now a person appeared on the stand or in a shed section because their
+     job role said so. A wool handler standing on a stand could not be given a
+     count row; the workaround was to change her job role for the WHOLE job,
+     which then stopped her being a wool handler at all.
+     Now each section has a + that can pull in anyone on the job. A person can
+     sit in two sections on the same day — that IS the split, entered with the
+     stepper everyone already uses instead of a modal.
+     Job roles are untouched: they still set the default placement and the rate,
+     and the per-job role override stays exactly as it was. */
+  const [addTo,setAddTo]=useState(null);        /* section label whose picker is open */
+  const [extra,setExtra]=useState({});          /* {sectionLabel:[crewId]} added this session */
+  const LBL_ROLE={'WOOL HANDLER':'Wool Handler','CLASSER':'Wool Classer',
+                  'PENNER':'Penner','PRESSER':'Presser'};
+  const extraIn=lbl=>(extra[lbl]||[]);
+  const addToSection=(lbl,cid)=>{
+    setExtra(p=>({...p,[lbl]:[...(p[lbl]||[]),cid]}));
+    setAddTo(null);
+  };
+  /* Set one role's runs for a person-day, preserving the others. Seeds from the
+     existing plain total the first time so adding a second role never loses the
+     runs already entered. setShedSplit decides split-vs-plain from what is left
+     non-zero, so dropping back to one role rewrites a normal row. */
+  const setRoleRuns=(cid,role,val)=>{
+    const cur={...(shedSplitFor(cid)||{})};
+    if(!Object.keys(cur).length){
+      const jr=getJobRole(job,cid);
+      const tot=(job.shedTallies[cid]||{})[viewDate]||0;
+      if(jr&&tot>0)cur[jr]=tot;
+    }
+    cur[role]=Math.max(0,val);
+    setShedSplit(cid,cur);
+  };
+  const roleRunsFor=(cid,role)=>{
+    const sp=shedSplitFor(cid);
+    if(sp&&Object.keys(sp).length)return Number(sp[role])||0;
+    return getJobRole(job,cid)===role?((job.shedTallies[cid]||{})[viewDate]||0):0;
+  };
   const shedSplitFor=(cid)=>(((job.shedRoleRuns||{})[cid])||{})[viewDate]||null;
-  const isShedSplit=(cid)=>{const sp=shedSplitFor(cid);
-    return !!sp&&Object.keys(sp).filter(r=>(Number(sp[r])||0)>0).length>1;};
+
   const setBale=(cid,v)=>{
     const val=Math.max(0,v);
     setJob(prev=>({...prev,baleTallies:{...prev.baleTallies,[cid]:{...(prev.baleTallies[cid]||{}),[viewDate]:val}}}));
@@ -4086,7 +4093,41 @@ const flushMobDesc=(mid,v)=>{
   const hasCrutch=Object.values(job.runs||{}).flat().some(run=>mobsOf(run).some(m=>m.type==='Crutching'));
   const stats=shearerStats(job,viewDate,shearers);
   const mts=mobTotals(job,viewDate,shearers);
-  const roleGroups=[{lbl:'WOOL HANDLER',ids:shedStaff.filter(id=>(getJobRole(job,id)||gc(id)?.role)==='Wool Handler')},{lbl:'CLASSER',ids:shedStaff.filter(id=>(getJobRole(job,id)||gc(id)?.role)==='Wool Classer')},{lbl:'PENNER',ids:shedStaff.filter(id=>(getJobRole(job,id)||gc(id)?.role)==='Penner')}].filter(g=>g.ids.length>0);
+  const roleGroups=(function(){
+    /* v4.6.30 — a section holds anyone whose job role puts them there, anyone
+       added to it today, and anyone already carrying runs in that role. The last
+       one is what makes a split survive a reload without any extra storage. */
+    const inSection=(lbl,role)=>job.crew.filter(id=>{
+      if(!gc(id))return false;
+      if(getJobRole(job,id)==='Cook')return false;
+      return (getJobRole(job,id)||gc(id)?.role)===role
+        || extraIn(lbl).indexOf(id)>=0
+        || roleRunsFor(id,role)>0;
+    });
+    return [{lbl:'WOOL HANDLER',role:'Wool Handler'},
+            {lbl:'CLASSER',role:'Wool Classer'},
+            {lbl:'PENNER',role:'Penner'}]
+      .map(g=>({...g,ids:inSection(g.lbl,g.role)}))
+      .filter(g=>g.ids.length>0||addTo===g.lbl);
+  })();
+  /* Everyone on the job who could still be added to a section, minus the cook. */
+  const addableTo=(lbl,ids)=>job.crew.filter(id=>gc(id)&&getJobRole(job,id)!=='Cook'&&ids.indexOf(id)<0);
+  const addBtn=(lbl,ids)=>canEdit&&e('div',{style:{padding:'2px 0 6px 48px'}},
+    addTo===lbl
+      ?e('div',{style:{display:'flex',flexWrap:'wrap',gap:6}},
+          addableTo(lbl,ids).length===0
+            ?e('div',{style:{fontSize:12,color:'var(--dim)'}},'Everyone on this job is already here.')
+            :addableTo(lbl,ids).map(id=>e('button',{key:id,onClick:()=>addToSection(lbl,id),
+                style:{padding:'5px 10px',borderRadius:14,fontSize:12,fontWeight:700,cursor:'pointer',
+                  background:'var(--card2)',color:'var(--text)',border:'1px solid var(--border)'}},
+                (gc(id)||{}).name)),
+          e('button',{onClick:()=>setAddTo(null),
+            style:{padding:'5px 10px',borderRadius:14,fontSize:12,cursor:'pointer',
+              background:'transparent',color:'var(--dim)',border:'1px solid var(--border)'}},'Cancel'))
+      :e('button',{onClick:()=>setAddTo(lbl),
+          style:{padding:'3px 10px',borderRadius:6,fontSize:11,fontWeight:700,cursor:'pointer',
+            background:'var(--card2)',color:'var(--dim)',border:'1px dashed var(--border)'}},
+          '+ Add to '+lbl.toLowerCase()));
 
   return e('div',null,
     /* DATE STRIP */
@@ -4187,34 +4228,50 @@ const flushMobDesc=(mid,v)=>{
       e('div',{className:'sht-hdr'},'\u2014 BF / Day / To Date'),
       e('div',{className:'sht-col-hdr-row'},e('div',{className:'sht-nc'},''),e('div',{className:'sht-ch sh'},'SH BF'),e('div',{className:'sht-ch sh'},'SH Day'),e('div',{className:'sht-ch sh'},'SH Tot'),hasCrutch&&e('div',{className:'sht-ch cr'},'CR BF'),hasCrutch&&e('div',{className:'sht-ch cr'},'CR Day'),hasCrutch&&e('div',{className:'sht-ch cr'},'CR Tot')),
       orderedShearers.map(id=>{const c=gc(id);if(!c)return null;const s=stats[id]||{shBF:0,shDay:0,crBF:0,crDay:0};const V=(val,cls)=>e('div',{className:`sht-v${cls?' '+cls:''}`},val>0?val:'—');return e('div',{key:id,className:'sht-row'},e('div',{className:'sht-name'},sn(c.name)),V(s.shBF),V(s.shDay,'today'),V(s.shBF+s.shDay,'tot'),hasCrutch&&V(s.crBF),hasCrutch&&V(s.crDay,'today'),hasCrutch&&V(s.crBF+s.crDay,'tot'));})
+      ,
+      /* v4.6.30 — put a shed hand on a stand for the day. Their job role, and so
+         their shed rate, is untouched; they simply gain a count column. */
+      addBtn('STAND',shearers)
     ),
     /* SHED STAFF */
     (shedStaff.length>0||pressers.length>0)&&e('div',{className:'shed-section'},
       e('div',{className:'shed-hdr'},'Shed Staff'),
-      roleGroups.map(({lbl,ids})=>e('div',{key:lbl},
+      roleGroups.map(({lbl,role,ids})=>e('div',{key:lbl},
         e('div',{className:'role-grp-lbl'},lbl),
-        ids.map(id=>{const c=gc(id);if(!c)return null;const runs=(job.shedTallies[id]||{})[viewDate]||0;const allRuns=Object.values(job.shedTallies[id]||{}).reduce((a,b)=>a+b,0);const bf=allRuns-runs;const ov=(rates.crewOverrides||{})[id];const defR=lbl==='CLASSER'?rates.classerPerRun:lbl==='PENNER'?rates.pennerPerRun:rates.woolHandlerPerRun;const rdisp=ov||(defR||80);
-          /* v4.6.24 — on a day split across roles the stepper is hidden. Tapping
-             it would write a legacy row that hydrate deliberately ignores, so the
-             number would not move and it would look broken. The editor is the
-             only way to change a split day. */
-          const sp=shedSplitFor(id); const split=isShedSplit(id);
-          const splitTxt=split?Object.keys(sp).filter(r=>sp[r]>0).sort()
-            .map(r=>sp[r]+' '+(SHED_ROLE_CODE[r]||r)).join(' + '):'';
-          return e('div',{key:id,className:'staff-row',style:{flexWrap:'wrap'}},e(Av,{name:c.name,size:36}),e('div',{className:'staff-info'},e('div',{className:'staff-name'},c.name),isAdmin&&e('div',{className:'staff-rate-lbl'},split?splitTxt:'$'+rdisp+'/run')),
-            e('div',{className:'staff-stats'},e('div',{className:'s-grp'},e('div',{className:'s-lbl'},'Runs'),split?e('div',{className:'s-val hi',onClick:()=>canEdit&&setSplitFor(splitFor===id?null:id),style:{cursor:canEdit?'pointer':'default'}},runs):canEdit?e('div',{className:'rs'},e('button',{className:'rs-btn',disabled:runs<=0,onClick:()=>setShed(id,runs-1)},'−'),e('div',{className:'rs-val'},runs),e('button',{className:'rs-btn',onClick:()=>setShed(id,runs+1)},'+'))
-              :e('div',{className:'s-val'},runs)),e('div',{className:'s-div'}),e('div',{className:'s-grp'},e('div',{className:'s-lbl'},'B/F'),e('div',{className:'s-val'},bf)),e('div',{className:'s-grp'},e('div',{className:'s-lbl'},'Today'),e('div',{className:'s-val'},runs)),e('div',{className:'s-grp'},e('div',{className:'s-lbl'},'To Date'),e('div',{className:'s-val hi'},allRuns))),
-            canEdit&&e('button',{onClick:()=>setSplitFor(splitFor===id?null:id),
-              style:{marginLeft:48,marginTop:2,padding:'3px 9px',borderRadius:6,fontSize:11,fontWeight:700,
-                border:'1px solid var(--border)',background:split?'var(--amberD)':'var(--card2)',
-                color:split?'var(--amber)':'var(--dim)',cursor:'pointer'}},
-              split?('Split \u00b7 '+splitTxt):'Split roles'),
-            splitFor===id&&e(ShedSplitEditor,{crewId:id,jobRole:getJobRole(job,id),
-              current:sp,dayTotal:runs,
-              onSave:byRole=>{setShedSplit(id,byRole);setSplitFor(null);},
-              onCancel:()=>setSplitFor(null)})
+        ids.map(id=>{const c=gc(id);if(!c)return null;
+          /* v4.6.30 — runs are read and written PER ROLE for this section, so a
+             person sitting in two sections holds a figure in each. The stepper is
+             the same one as always; nothing special happens on a split day. */
+          const runs=roleRunsFor(id,role);
+          const allRuns=Object.values(job.shedTallies[id]||{}).reduce((a,b)=>a+b,0);
+          const bf=Object.entries(job.shedTallies[id]||{}).filter(([d])=>d<viewDate).reduce((a,[,b])=>a+b,0);
+          const ov=(rates.crewOverrides||{})[id];
+          const defR=role==='Wool Classer'?rates.classerPerRun:role==='Penner'?rates.pennerPerRun:rates.woolHandlerPerRun;
+          /* a per-person override belongs to their OWN role — it must not follow
+             them into a section they are only helping in */
+          const rdisp=(ov&&getJobRole(job,id)===role)?ov:(defR||80);
+          const guest=getJobRole(job,id)!==role;
+          return e('div',{key:id+'|'+role,className:'staff-row'},e(Av,{name:c.name,size:36}),
+            e('div',{className:'staff-info'},
+              e('div',{className:'staff-name'},c.name),
+              e('div',{className:'staff-rate-lbl'},
+                (isAdmin?'$'+rdisp+'/run':'')+(guest?(isAdmin?' \u00b7 ':'')+'usually '+(getJobRole(job,id)||'\u2014'):''))),
+            e('div',{className:'staff-stats'},
+              e('div',{className:'s-grp'},e('div',{className:'s-lbl'},'Runs'),
+                canEdit?e('div',{className:'rs'},
+                    e('button',{className:'rs-btn',disabled:runs<=0,onClick:()=>setRoleRuns(id,role,runs-1)},'\u2212'),
+                    e('div',{className:'rs-val'},runs),
+                    e('button',{className:'rs-btn',onClick:()=>setRoleRuns(id,role,runs+1)},'+'))
+                  :e('div',{className:'s-val'},runs)),
+              e('div',{className:'s-div'}),
+              e('div',{className:'s-grp'},e('div',{className:'s-lbl'},'B/F'),e('div',{className:'s-val'},bf)),
+              e('div',{className:'s-grp'},e('div',{className:'s-lbl'},'Day'),
+                e('div',{className:'s-val'},(job.shedTallies[id]||{})[viewDate]||0)),
+              e('div',{className:'s-grp'},e('div',{className:'s-lbl'},'To Date'),
+                e('div',{className:'s-val hi'},allRuns)))
           );
-        })
+        }),
+        addBtn(lbl,ids)
       )),
       pressers.length>0&&e('div',null,
         e('div',{className:'role-grp-lbl'},'PRESSER'),
