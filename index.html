@@ -599,7 +599,7 @@ const LS_TALLY_QUEUE='mg_tally_queue_'+CONTRACTOR_SLUG; /* per-cell offline queu
 const LS_TALLY_DEAD='mg_tally_dead_'+CONTRACTOR_SLUG; /* v4.6.3g — quarantined cells (permanent rejection). Replayed once on boot in case the server-side blocker (e.g. missing kind constraint) was since fixed. */
 const LS_TALLY_META_QUEUE='mg_tally_meta_queue_'+CONTRACTOR_SLUG; /* v4.6.4 — offline/failed mob metadata (type/desc) updates to existing count cells; flushed alongside the tally queue. */
 const ROLE_TIMEOUT_HOURS=12; /* auto-reset after 12h inactivity */
-const APP_VERSION='v4.6.33-quality-trial';
+const APP_VERSION='v4.6.35-quality-trial';
 const SUPER_RATE=0.12; /* SG rate, 12% from 1 Jul 2025. One-line change if legislated rate moves. */
 /* v4.6.12a (26 Jul 2026): fleet-alignment rebuild - feature content identical to v4.6.12; new version string per one-build-one-version discipline. */
 /* v4.6.12 (20 Jul 2026): PER-CREW PIN, contractor-controlled (design settled with the founder before any deploy; an earlier worker-self-set draft was discarded - self-set has a bootstrap race where an imposter claims a name first and sets its PIN). MODEL: every worker is AUTO-ASSIGNED a random 4-digit PIN (genCrewPin at creation; existing crew backfilled via SQL per contractor at rollout). The PIN is stored READABLE at crew_members.data.pin and shown on the worker's card in My Database (admin-only surface) with a regenerate button and a 'Text PIN' button (plain GSM-7 SMS via /api/send-sms so the worker has it on file). DELIBERATE ENGINEERING CALL, not an oversight: with the shared anon key and a 4-digit space, a hash is brute-forced in under a second by anyone determined, so hashing here is theatre; readable storage buys contractor look-up-ability at no real security cost. This is a visibility gate against casual wrong-name claims - real authentication is v5 (Supabase Auth + RLS). CLAIM FLOW: picking a name with a PIN demands it (CrewPinVerifyModal, direct compare, works offline once the record is synced; names with PINs show a lock in the picker); 'Not you?' re-challenges; app_settings.requireCrewPin=true blocks claiming names with NO pin ('ask your contractor') for hard-lockdown contractors, off = pinless names bind as before. Workers never set or change their own PIN; contractor regenerates on request (specific chosen PINs = SRD via SQL). Lead/Admin PINs and the per-job PIN untouched. */
@@ -1192,7 +1192,23 @@ async function dbLoad(){
          save can tell a deliberate change from a stale copy. Stripped on write. */
       jobs:(jr.data||[]).map(r=>({...r.data,
         _srvStatus:(r.data||{}).status,
-        _srvRates:JSON.stringify((r.data||{}).rates||{})})),
+        _srvRates:JSON.stringify((r.data||{}).rates||{}),
+        _srvMobRates:(function(){
+          /* v4.6.34 — mob rate overrides live inside runs, NOT in job.rates, so
+             the rates guard never covered them. Three were lost this way, all of
+             them Rams: a stale device whose copy predated the override being set
+             saved its whole job and the override went with it. 56 head of rams
+             priced at $4.50 instead of $13.00 on one of them. */
+          const m={};
+          Object.values(((r.data||{}).runs)||{}).forEach(function(dayRuns){
+            (dayRuns||[]).forEach(function(run){
+              ((run&&run.mobs)||[]).forEach(function(mob){
+                if(mob&&mob.id)m[mob.id]=(mob.rateOverride===undefined?null:mob.rateOverride);
+              });
+            });
+          });
+          return m;
+        })()})),
       farms:(fr.data||[]).map(r=>r.data),
       crew:(cr.data||[]).map(r=>r.data),
       fromCache:false,
@@ -1398,6 +1414,7 @@ function buildStrippedJobBlob(job){
   out.sundries=[];    /* v4.6.3f: sundries_entries table is source of truth — never duplicate into blob */
   delete out._srvStatus; /* v4.6.32 — transient load-time markers, never persisted */
   delete out._srvRates;
+  delete out._srvMobRates;
   return out;
 }
 
@@ -1629,6 +1646,45 @@ async function dbSaveJob(job){
           }
         }catch(rateErr){
           logSaveFailure('guard_rates_error',job.id,(rateErr&&rateErr.message)||'unknown');
+        }
+        /* v4.6.34 — per-mob rate overrides. Same rule as the others: if this
+           device is carrying the same value it last saw, it is not changing the
+           override and has no business clearing one set elsewhere. A deliberate
+           clear differs from the stamp and is written through. */
+        try{
+          const stamp=job._srvMobRates||null;
+          if(stamp){
+            const srvMob={};
+            Object.values((srv.runs)||{}).forEach(function(dayRuns){
+              (dayRuns||[]).forEach(function(run){
+                ((run&&run.mobs)||[]).forEach(function(mob){
+                  if(mob&&mob.id)srvMob[mob.id]=(mob.rateOverride===undefined?null:mob.rateOverride);
+                });
+              });
+            });
+            const restored=[];
+            Object.values((jobForBlob.runs)||{}).forEach(function(dayRuns){
+              (dayRuns||[]).forEach(function(run){
+                ((run&&run.mobs)||[]).forEach(function(mob){
+                  if(!mob||!mob.id)return;
+                  if(!(mob.id in srvMob))return;          /* mob is new on this device */
+                  if(!(mob.id in stamp))return;           /* never seen from the server */
+                  const outVal=(mob.rateOverride===undefined?null:mob.rateOverride);
+                  const srvVal=srvMob[mob.id];
+                  const seenVal=stamp[mob.id];
+                  if(String(outVal)===String(seenVal)&&String(srvVal)!==String(outVal)){
+                    mob.rateOverride=srvVal;
+                    restored.push(mob.id+':'+String(outVal)+'->'+String(srvVal));
+                  }
+                });
+              });
+            });
+            if(restored.length>0){
+              logSaveFailure('guard_mobrate_kept',job.id,restored.join(','));
+            }
+          }
+        }catch(mrErr){
+          logSaveFailure('guard_mobrate_error',job.id,(mrErr&&mrErr.message)||'unknown');
         }
         const supabaseRunDates=Object.keys((srv.runs)||{}).length;
         if(supabaseRunDates>incomingRunDates){
