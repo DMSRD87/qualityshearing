@@ -36,6 +36,31 @@ html,body{background:var(--bg);color:var(--text);font-family:var(--b);min-height
 @keyframes ptrspin{to{transform:rotate(360deg)}}
 /* stop Chrome's native pull-to-refresh firing alongside ours (double reload) */
 html,body{overscroll-behavior-y:contain}
+/* v4.6.29 — Season stats rows. Six fixed-width numeric columns plus a name do
+   not fit a phone: names collapsed to "J..." and the last column ran off the
+   edge. On a narrow screen the name takes its own line and the figures sit under
+   it, each labelled, so the header row is not needed. Wide screens keep the
+   table with the header. Nothing is ever clipped. */
+.ss-row{display:flex;align-items:center;gap:6px;padding:9px 2px;border-top:1px solid var(--border)}
+.ss-name{flex:1;min-width:0}
+.ss-nm{font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ss-rl{font-size:11px;color:var(--dim)}
+.ss-stats{display:flex;gap:6px;align-items:flex-end}
+.ss-cell{flex:0 0 64px;text-align:right;font-variant-numeric:tabular-nums} /* fixed basis so a header label sits directly above its figure */
+.ss-cell .v{font-size:13px;font-weight:600;color:var(--text)}
+.ss-cell.hi .v{font-weight:800;color:var(--amber)}
+.ss-cell .k{display:none;font-size:9px;letter-spacing:.4px;text-transform:uppercase;color:var(--dim);font-weight:700}
+.ss-head{display:flex;gap:6px;padding:0 2px 6px}
+.ss-head .ss-cell .v{font-size:10px;letter-spacing:.4px;text-transform:uppercase;color:var(--dim);font-weight:700}
+@media(max-width:620px){
+  .ss-row{flex-wrap:wrap}
+  .ss-name{flex-basis:100%;margin-bottom:5px}
+  .ss-nm{white-space:normal}
+  .ss-stats{width:100%;justify-content:space-between;gap:2px}
+  .ss-cell{min-width:0;flex:1;text-align:center}
+  .ss-cell .k{display:block;margin-bottom:1px}
+  .ss-head{display:none}
+}
 .role-toggle{display:flex;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.15);border-radius:8px;overflow:hidden;flex-shrink:0}
 .rt-btn{padding:5px 8px;font-size:10px;font-weight:700;letter-spacing:.3px;text-transform:uppercase;cursor:pointer;border:none;background:none;color:rgba(255,255,255,.5);transition:.15s;white-space:nowrap}
 .rt-btn.active{background:var(--amber);color:#000}
@@ -574,7 +599,7 @@ const LS_TALLY_QUEUE='mg_tally_queue_'+CONTRACTOR_SLUG; /* per-cell offline queu
 const LS_TALLY_DEAD='mg_tally_dead_'+CONTRACTOR_SLUG; /* v4.6.3g — quarantined cells (permanent rejection). Replayed once on boot in case the server-side blocker (e.g. missing kind constraint) was since fixed. */
 const LS_TALLY_META_QUEUE='mg_tally_meta_queue_'+CONTRACTOR_SLUG; /* v4.6.4 — offline/failed mob metadata (type/desc) updates to existing count cells; flushed alongside the tally queue. */
 const ROLE_TIMEOUT_HOURS=12; /* auto-reset after 12h inactivity */
-const APP_VERSION='v4.6.28';
+const APP_VERSION='v4.6.29';
 const SUPER_RATE=0.12; /* SG rate, 12% from 1 Jul 2025. One-line change if legislated rate moves. */
 /* v4.6.12a (26 Jul 2026): fleet-alignment rebuild - feature content identical to v4.6.12; new version string per one-build-one-version discipline. */
 /* v4.6.12 (20 Jul 2026): PER-CREW PIN, contractor-controlled (design settled with the founder before any deploy; an earlier worker-self-set draft was discarded - self-set has a bootstrap race where an imposter claims a name first and sets its PIN). MODEL: every worker is AUTO-ASSIGNED a random 4-digit PIN (genCrewPin at creation; existing crew backfilled via SQL per contractor at rollout). The PIN is stored READABLE at crew_members.data.pin and shown on the worker's card in My Database (admin-only surface) with a regenerate button and a 'Text PIN' button (plain GSM-7 SMS via /api/send-sms so the worker has it on file). DELIBERATE ENGINEERING CALL, not an oversight: with the shared anon key and a 4-digit space, a hash is brute-forced in under a second by anyone determined, so hashing here is theatre; readable storage buys contractor look-up-ability at no real security cost. This is a visibility gate against casual wrong-name claims - real authentication is v5 (Supabase Auth + RLS). CLAIM FLOW: picking a name with a PIN demands it (CrewPinVerifyModal, direct compare, works offline once the record is synced; names with PINs show a lock in the picker); 'Not you?' re-challenges; app_settings.requireCrewPin=true blocks claiming names with NO pin ('ask your contractor') for hard-lockdown contractors, off = pinless names bind as before. Workers never set or change their own PIN; contractor regenerates on request (specific chosen PINs = SRD via SQL). Lead/Admin PINs and the per-job PIN untouched. */
@@ -6424,10 +6449,13 @@ function SeasonStats({jobs,onClose}){
 
   const nDays=o=>Object.keys(o.days||{}).length;
   const num=n=>(Number(n)||0).toLocaleString();
-  const cell=(txt,w,bold)=>e('div',{style:{width:w,textAlign:'right',fontVariantNumeric:'tabular-nums',
-    fontWeight:bold?800:600,fontSize:13,color:bold?'var(--amber)':'var(--text)'}},txt);
-  const hcell=(txt,w)=>e('div',{style:{width:w,textAlign:'right',fontSize:10,letterSpacing:'.4px',
-    textTransform:'uppercase',color:'var(--dim)',fontWeight:700}},txt);
+  /* Each figure carries its own label. Hidden on wide screens where the header
+     row does the job; shown on a phone where the row wraps and there is none. */
+  const cell=(k,txt,hi)=>e('div',{key:k,className:'ss-cell'+(hi?' hi':'')},
+    e('div',{className:'k'},k),e('div',{className:'v'},txt));
+  const head=cols=>e('div',{className:'ss-head'},
+    e('div',{className:'ss-name'}),
+    e('div',{className:'ss-stats'},cols.map(c=>e('div',{key:c,className:'ss-cell'},e('div',{className:'v'},c)))));
 
   const [f0,t0]=range();
   const btn=(k,l)=>e('button',{key:k,onClick:()=>setPeriod(k),
@@ -6480,42 +6508,41 @@ function SeasonStats({jobs,onClose}){
           value:q,onChange:ev=>setQ(ev.target.value),style:{marginBottom:10}}),
 
         view==='person'&&e('div',null,
-          e('div',{style:{display:'flex',gap:6,padding:'0 2px 6px'}},
-            e('div',{style:{flex:1}},hcell('','0')),
-            hcell('Shorn',66),hcell('Crut',56),hcell('Runs',48),hcell('Days',44),hcell('Avg/day',60),hcell('Best',52)),
+          head(['Shorn','Crut','Runs','Days','Avg/day','Best']),
           personRows.length===0&&e('div',{style:{textAlign:'center',color:'var(--muted)',padding:'26px 0'}},'Nothing in this period.'),
-          personRows.map(r=>e('div',{key:r.id,style:{display:'flex',alignItems:'center',gap:6,
-              padding:'8px 2px',borderTop:'1px solid var(--border)'}},
-            e('div',{style:{flex:1,minWidth:0}},
-              e('div',{style:{fontSize:14,fontWeight:700,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}},r.name),
-              e('div',{style:{fontSize:11,color:'var(--dim)'}},r.role)),
-            cell(num(r.sh),66,true),cell(r.cr?num(r.cr):'\u2014',56),
-            cell(r.runs?num(r.runs):'\u2014',48),cell(num(nDays(r)),44),
-            cell(nDays(r)?num(Math.round((r.sh+r.cr)/nDays(r))):'\u2014',60),
-            cell(r.best?num(r.best):'\u2014',52)))),
+          personRows.map(r=>e('div',{key:r.id,className:'ss-row'},
+            e('div',{className:'ss-name'},
+              e('div',{className:'ss-nm'},r.name),
+              e('div',{className:'ss-rl'},r.role)),
+            e('div',{className:'ss-stats'},
+              cell('Shorn',num(r.sh),true),
+              cell('Crut',r.cr?num(r.cr):'\u2014'),
+              cell('Runs',r.runs?num(r.runs):'\u2014'),
+              cell('Days',num(nDays(r))),
+              cell('Avg/day',nDays(r)?num(Math.round((r.sh+r.cr)/nDays(r))):'\u2014'),
+              cell('Best',r.best?num(r.best):'\u2014'))))),
 
         view==='shed'&&e('div',null,
-          e('div',{style:{display:'flex',gap:6,padding:'0 2px 6px'}},
-            e('div',{style:{flex:1}},hcell('','0')),
-            hcell('Shorn',70),hcell('Crut',60),hcell('Bales',54),hcell('Days',46)),
+          head(['Shorn','Crut','Bales','Days']),
           shedRows.length===0&&e('div',{style:{textAlign:'center',color:'var(--muted)',padding:'26px 0'}},'Nothing in this period.'),
-          shedRows.map(r=>e('div',{key:r.name,style:{display:'flex',alignItems:'center',gap:6,
-              padding:'8px 2px',borderTop:'1px solid var(--border)'}},
-            e('div',{style:{flex:1,fontSize:14,fontWeight:700,minWidth:0,whiteSpace:'nowrap',
-              overflow:'hidden',textOverflow:'ellipsis'}},r.name),
-            cell(num(r.sh),70,true),cell(r.cr?num(r.cr):'\u2014',60),
-            cell(r.bales?num(r.bales):'\u2014',54),cell(num(nDays(r)),46)))),
+          shedRows.map(r=>e('div',{key:r.name,className:'ss-row'},
+            e('div',{className:'ss-name'},e('div',{className:'ss-nm'},r.name)),
+            e('div',{className:'ss-stats'},
+              cell('Shorn',num(r.sh),true),
+              cell('Crut',r.cr?num(r.cr):'\u2014'),
+              cell('Bales',r.bales?num(r.bales):'\u2014'),
+              cell('Days',num(nDays(r))))))),
 
         view==='month'&&e('div',null,
-          e('div',{style:{display:'flex',gap:6,padding:'0 2px 6px'}},
-            e('div',{style:{flex:1}},hcell('','0')),
-            hcell('Shorn',70),hcell('Crut',60),hcell('Runs',52),hcell('Days',46)),
+          head(['Shorn','Crut','Runs','Days']),
           monthRows.length===0&&e('div',{style:{textAlign:'center',color:'var(--muted)',padding:'26px 0'}},'Nothing in this period.'),
-          monthRows.map(r=>e('div',{key:r.name,style:{display:'flex',alignItems:'center',gap:6,
-              padding:'8px 2px',borderTop:'1px solid var(--border)'}},
-            e('div',{style:{flex:1,fontSize:14,fontWeight:700}},fmtMonth(r.name)),
-            cell(num(r.sh),70,true),cell(r.cr?num(r.cr):'\u2014',60),
-            cell(r.runs?num(r.runs):'\u2014',52),cell(num(nDays(r)),46)))),
+          monthRows.map(r=>e('div',{key:r.name,className:'ss-row'},
+            e('div',{className:'ss-name'},e('div',{className:'ss-nm'},fmtMonth(r.name))),
+            e('div',{className:'ss-stats'},
+              cell('Shorn',num(r.sh),true),
+              cell('Crut',r.cr?num(r.cr):'\u2014'),
+              cell('Runs',r.runs?num(r.runs):'\u2014'),
+              cell('Days',num(nDays(r))))))),
 
         e('div',{style:{fontSize:11,color:'var(--dim)',marginTop:14,lineHeight:1.5}},
           'Counts come straight from tally_entries \u2014 the same source the pay summary uses. '
