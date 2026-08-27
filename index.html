@@ -3797,6 +3797,11 @@ function BookPhotoPanel({job,viewDate,role}){
    TALLY TAB
 ════════════════════════ */
 function TallyTab({job,setJob,role,viewDate,setViewDate}){
+  /* v4.6.30 — declared FIRST. `shearers` below reads `extra`, and a const used
+     above its declaration is a temporal dead zone error, which blanks the whole
+     tab rather than failing softly. */
+  const [addTo,setAddTo]=useState(null);   /* section label whose picker is open */
+  const [extra,setExtra]=useState({});     /* {sectionLabel:[crewId]} added this session */
   const canEdit=role==='shed_lead'||role==='admin';
   const isAdmin=role==='admin';
   const todayStr=localToday();
@@ -4021,8 +4026,6 @@ const flushMobDesc=(mid,v)=>{
      stepper everyone already uses instead of a modal.
      Job roles are untouched: they still set the default placement and the rate,
      and the per-job role override stays exactly as it was. */
-  const [addTo,setAddTo]=useState(null);        /* section label whose picker is open */
-  const [extra,setExtra]=useState({});          /* {sectionLabel:[crewId]} added this session */
   const LBL_ROLE={'WOOL HANDLER':'Wool Handler','CLASSER':'Wool Classer',
                   'PENNER':'Penner','PRESSER':'Presser'};
   const extraIn=lbl=>(extra[lbl]||[]);
