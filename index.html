@@ -599,7 +599,7 @@ const LS_TALLY_QUEUE='mg_tally_queue_'+CONTRACTOR_SLUG; /* per-cell offline queu
 const LS_TALLY_DEAD='mg_tally_dead_'+CONTRACTOR_SLUG; /* v4.6.3g — quarantined cells (permanent rejection). Replayed once on boot in case the server-side blocker (e.g. missing kind constraint) was since fixed. */
 const LS_TALLY_META_QUEUE='mg_tally_meta_queue_'+CONTRACTOR_SLUG; /* v4.6.4 — offline/failed mob metadata (type/desc) updates to existing count cells; flushed alongside the tally queue. */
 const ROLE_TIMEOUT_HOURS=12; /* auto-reset after 12h inactivity */
-const APP_VERSION='v4.6.30-quality-trial';
+const APP_VERSION='v4.6.31-quality-trial';
 const SUPER_RATE=0.12; /* SG rate, 12% from 1 Jul 2025. One-line change if legislated rate moves. */
 /* v4.6.12a (26 Jul 2026): fleet-alignment rebuild - feature content identical to v4.6.12; new version string per one-build-one-version discipline. */
 /* v4.6.12 (20 Jul 2026): PER-CREW PIN, contractor-controlled (design settled with the founder before any deploy; an earlier worker-self-set draft was discarded - self-set has a bootstrap race where an imposter claims a name first and sets its PIN). MODEL: every worker is AUTO-ASSIGNED a random 4-digit PIN (genCrewPin at creation; existing crew backfilled via SQL per contractor at rollout). The PIN is stored READABLE at crew_members.data.pin and shown on the worker's card in My Database (admin-only surface) with a regenerate button and a 'Text PIN' button (plain GSM-7 SMS via /api/send-sms so the worker has it on file). DELIBERATE ENGINEERING CALL, not an oversight: with the shared anon key and a 4-digit space, a hash is brute-forced in under a second by anyone determined, so hashing here is theatre; readable storage buys contractor look-up-ability at no real security cost. This is a visibility gate against casual wrong-name claims - real authentication is v5 (Supabase Auth + RLS). CLAIM FLOW: picking a name with a PIN demands it (CrewPinVerifyModal, direct compare, works offline once the record is synced; names with PINs show a lock in the picker); 'Not you?' re-challenges; app_settings.requireCrewPin=true blocks claiming names with NO pin ('ask your contractor') for hard-lockdown contractors, off = pinless names bind as before. Workers never set or change their own PIN; contractor regenerates on request (specific chosen PINs = SRD via SQL). Lead/Admin PINs and the per-job PIN untouched. */
@@ -6459,6 +6459,16 @@ function SeasonStats({jobs,onClose}){
   const agg=(()=>{
     const base={sh:0,cr:0,runs:0,bales:0,days:{},best:0,bestDay:null};
     const byPerson={},byShed={},byMonth={};
+    /* v4.6.31 — pay-week buckets, per person. This is the one thing totals cannot
+       show: direction. A shearer can hold a respectable season figure while having
+       dropped 20% over a month, and only a week-by-week view surfaces it.
+       Uses the contractor's own payday so the weeks line up with the pay run. */
+    const payDay=(function(){
+      for(const j of (jobs||[])){const p=j&&j.rates&&j.rates.payDayOfWeek;
+        if(p!==undefined&&p!==null&&p!=='')return Number(p);}
+      return 5; /* Friday */
+    })();
+    const byWeek={};   /* crewId -> weekEnd -> figures */
     let tot={sh:0,cr:0,runs:0,bales:0,days:{},sheds:{}};
     const dayHead={};   /* crew|date -> head, for best-day */
     (rows||[]).forEach(r=>{
@@ -6469,11 +6479,15 @@ function SeasonStats({jobs,onClose}){
       const sName=shedName(r.job_id);
       const sh=bucket(byShed,sName);
       const mo=bucket(byMonth,String(r.cell_date).slice(0,7));
+      const wk=getPeriodForDate(String(r.cell_date),payDay).end;
+      const wb=(byWeek[r.crew_id]||(byWeek[r.crew_id]={}));
+      const w=(wb[wk]||(wb[wk]={sh:0,cr:0,runs:0,days:{}}));
       if(r.kind==='count'){
         /* legacy rows have no mob_type — fall back to the job's own type */
         const type=r.mob_type||(j&&j.type)||'Shearing';
         const key=type==='Crutching'?'cr':'sh';
         [p,sh,mo].forEach(o=>{o[key]+=v;});
+        w[key]+=v; w.days[r.cell_date]=1;
         tot[key]+=v;
         const dk=r.crew_id+'|'+r.cell_date;
         dayHead[dk]=(dayHead[dk]||0)+v;
@@ -6481,6 +6495,7 @@ function SeasonStats({jobs,onClose}){
         tot.days[r.cell_date]=1; tot.sheds[sName]=1;
       }else if(r.kind==='shed_runs'){
         [p,sh,mo].forEach(o=>{o.runs+=v;o.days[r.cell_date]=1;});
+        w.runs+=v; w.days[r.cell_date]=1;
         tot.runs+=v; tot.days[r.cell_date]=1; tot.sheds[sName]=1;
       }else if(r.kind==='bales'){
         [p,sh,mo].forEach(o=>{o.bales+=v;});
@@ -6491,7 +6506,7 @@ function SeasonStats({jobs,onClose}){
       const [cid,d]=dk.split('|'); const p=byPerson[cid]; if(!p)return;
       if(dayHead[dk]>p.best){p.best=dayHead[dk];p.bestDay=d;}
     });
-    return {byPerson,byShed,byMonth,tot};
+    return {byPerson,byShed,byMonth,byWeek,tot};
   })();
 
   const roleOf=id=>{const c=gc(id);return (c&&c.role)||'—';};
@@ -6506,6 +6521,18 @@ function SeasonStats({jobs,onClose}){
     .filter(r=>!q||r.name.toLowerCase().includes(q.toLowerCase()))
     .sort((a,b)=>(b.sh+b.cr)-(a.sh+a.cr));
   const monthRows=Object.keys(agg.byMonth).sort().map(k=>({name:k,...agg.byMonth[k]}));
+  /* Same people, same filters as the person view — newest week first, with the
+     change against the week before so a slide is visible at a glance. */
+  const weekRows=personRows.map(p=>{
+    const wk=agg.byWeek[p.id]||{};
+    const weeks=Object.keys(wk).sort().reverse().map(k=>({end:k,...wk[k]}));
+    weeks.forEach((w,i)=>{
+      const prev=weeks[i+1];
+      w.head=w.sh+w.cr;
+      w.delta=prev?(w.head-(prev.sh+prev.cr)):null;
+    });
+    return {...p,weeks};
+  }).filter(p=>p.weeks.length>0);
 
   const nDays=o=>Object.keys(o.days||{}).length;
   const num=n=>(Number(n)||0).toLocaleString();
@@ -6554,9 +6581,9 @@ function SeasonStats({jobs,onClose}){
             e('div',{style:{fontSize:19,fontWeight:800,fontVariantNumeric:'tabular-nums'}},v)))),
 
         e('div',{style:{display:'flex',borderBottom:'1px solid var(--border)',marginBottom:10}},
-          tab('person','By person'),tab('shed','By shed'),tab('month','By month')),
+          tab('person','By person'),tab('week','By week'),tab('shed','By shed'),tab('month','By month')),
 
-        (view==='person')&&e('div',{style:{display:'flex',gap:6,marginBottom:10}},
+        (view==='person'||view==='week')&&e('div',{style:{display:'flex',gap:6,marginBottom:10}},
           [['all','All'],['shearers','Shearers'],['staff','Shed staff'],['cook','Cook']].map(([k,l])=>
             e('button',{key:k,onClick:()=>setRoleFilt(k),
               style:{padding:'6px 11px',fontSize:12,borderRadius:14,cursor:'pointer',
@@ -6564,7 +6591,7 @@ function SeasonStats({jobs,onClose}){
                 color:roleFilt===k?'var(--amber)':'var(--muted)',
                 border:'1px solid '+(roleFilt===k?'var(--amber)':'var(--border)'),fontWeight:700}},l))),
 
-        view!=='month'&&e('input',{className:'fi',placeholder:view==='person'?'Search name or role\u2026':'Search shed\u2026',
+        view!=='month'&&e('input',{className:'fi',placeholder:view==='shed'?'Search shed\u2026':'Search name or role\u2026',
           value:q,onChange:ev=>setQ(ev.target.value),style:{marginBottom:10}}),
 
         view==='person'&&e('div',null,
@@ -6581,6 +6608,32 @@ function SeasonStats({jobs,onClose}){
               cell('Days',num(nDays(r))),
               cell('Avg/day',nDays(r)?num(Math.round((r.sh+r.cr)/nDays(r))):'\u2014'),
               cell('Best',r.best?num(r.best):'\u2014'))))),
+
+        view==='week'&&e('div',null,
+          e('div',{style:{fontSize:11,color:'var(--dim)',marginBottom:8}},
+            'Pay weeks, newest first. The arrow compares each week with the one before it.'),
+          weekRows.length===0&&e('div',{style:{textAlign:'center',color:'var(--muted)',padding:'26px 0'}},'Nothing in this period.'),
+          weekRows.map(p=>e('div',{key:p.id,style:{borderTop:'1px solid var(--border)',padding:'9px 2px 4px'}},
+            e('div',{style:{display:'flex',alignItems:'baseline',gap:8,marginBottom:4}},
+              e('div',{className:'ss-nm'},p.name),
+              e('div',{className:'ss-rl'},p.role)),
+            p.weeks.map(w=>{
+              const up=w.delta!=null&&w.delta>0, dn=w.delta!=null&&w.delta<0;
+              return e('div',{key:w.end,style:{display:'flex',alignItems:'center',gap:8,
+                  padding:'3px 0 3px 10px',fontSize:12.5}},
+                e('div',{style:{minWidth:78,color:'var(--dim)'}},'wk '+fmtDate(w.end)),
+                e('div',{style:{flex:1,fontVariantNumeric:'tabular-nums'}},
+                  (w.sh?num(w.sh)+' shorn':'')
+                  +(w.sh&&w.cr?' \u00b7 ':'')
+                  +(w.cr?num(w.cr)+' crut':'')
+                  +((w.sh||w.cr)&&w.runs?' \u00b7 ':'')
+                  +(w.runs?num(w.runs)+' runs':'')
+                  +'  \u00b7 '+Object.keys(w.days).length+'d'),
+                w.delta!=null&&w.head>0&&e('div',{style:{minWidth:56,textAlign:'right',fontWeight:700,
+                    color:up?'var(--green)':dn?'var(--red)':'var(--dim)'}},
+                  (up?'\u25b2 +':dn?'\u25bc ':'\u2014 ')+(w.delta!==0?num(w.delta):'')));
+            })
+          ))),
 
         view==='shed'&&e('div',null,
           head(['Shorn','Crut','Bales','Days']),
