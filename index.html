@@ -599,7 +599,7 @@ const LS_TALLY_QUEUE='mg_tally_queue_'+CONTRACTOR_SLUG; /* per-cell offline queu
 const LS_TALLY_DEAD='mg_tally_dead_'+CONTRACTOR_SLUG; /* v4.6.3g — quarantined cells (permanent rejection). Replayed once on boot in case the server-side blocker (e.g. missing kind constraint) was since fixed. */
 const LS_TALLY_META_QUEUE='mg_tally_meta_queue_'+CONTRACTOR_SLUG; /* v4.6.4 — offline/failed mob metadata (type/desc) updates to existing count cells; flushed alongside the tally queue. */
 const ROLE_TIMEOUT_HOURS=12; /* auto-reset after 12h inactivity */
-const APP_VERSION='v4.6.35-quality-trial';
+const APP_VERSION='v4.6.37-quality-trial';
 const SUPER_RATE=0.12; /* SG rate, 12% from 1 Jul 2025. One-line change if legislated rate moves. */
 /* v4.6.12a (26 Jul 2026): fleet-alignment rebuild - feature content identical to v4.6.12; new version string per one-build-one-version discipline. */
 /* v4.6.12 (20 Jul 2026): PER-CREW PIN, contractor-controlled (design settled with the founder before any deploy; an earlier worker-self-set draft was discarded - self-set has a bootstrap race where an imposter claims a name first and sets its PIN). MODEL: every worker is AUTO-ASSIGNED a random 4-digit PIN (genCrewPin at creation; existing crew backfilled via SQL per contractor at rollout). The PIN is stored READABLE at crew_members.data.pin and shown on the worker's card in My Database (admin-only surface) with a regenerate button and a 'Text PIN' button (plain GSM-7 SMS via /api/send-sms so the worker has it on file). DELIBERATE ENGINEERING CALL, not an oversight: with the shared anon key and a 4-digit space, a hash is brute-forced in under a second by anyone determined, so hashing here is theatre; readable storage buys contractor look-up-ability at no real security cost. This is a visibility gate against casual wrong-name claims - real authentication is v5 (Supabase Auth + RLS). CLAIM FLOW: picking a name with a PIN demands it (CrewPinVerifyModal, direct compare, works offline once the record is synced; names with PINs show a lock in the picker); 'Not you?' re-challenges; app_settings.requireCrewPin=true blocks claiming names with NO pin ('ask your contractor') for hard-lockdown contractors, off = pinless names bind as before. Workers never set or change their own PIN; contractor regenerates on request (specific chosen PINs = SRD via SQL). Lead/Admin PINs and the per-job PIN untouched. */
@@ -1298,17 +1298,40 @@ async function dbLoad(){
        fully succeed = local must win for those jobs. */
     const pendingQ=lsGet(LS_QUEUE)||[];
     const pendingT=lsGet(LS_TALLY_QUEUE)||[];
+    const qJobIds=new Set(pendingQ.filter(x=>x.type==='job').map(x=>x.id));
+    pendingT.forEach(row=>{if(row&&row.job_id)qJobIds.add(row.job_id);});
+    const localJobs=lsGet(LS_JOBS)||[];
+    const serverIds=new Set((result.jobs||[]).map(j=>j&&j.id).filter(Boolean));
+    /* ══ v4.6.36 — A JOB CREATED OFFLINE MUST SURVIVE A LOAD ═════════════════
+       The merge below rebuilds the list from the SERVER's jobs. A job that exists
+       only on this device — created while the connection was down and never
+       successfully uploaded — is not in that list, so it was silently dropped.
+       The old merge protected locally-MODIFIED jobs; it did nothing for
+       locally-CREATED ones.
+
+       Reported live: a job was created, the crew added, and the whole job
+       vanished on the next successful load. Its number never reached the server,
+       so it appears nowhere in the database — it only ever existed on the phone.
+
+       A local-only job is kept ONLY when it still has a pending queue entry.
+       That is what separates "created here, not uploaded yet" from "deleted on
+       another device" — without it, deleting a job on one phone would see it
+       resurrected by every other phone that still had it cached. */
+    const localOnly=localJobs.filter(lj=>lj&&lj.id&&!serverIds.has(lj.id)&&qJobIds.has(lj.id));
+    if(localOnly.length>0){
+      try{logSaveFailure('local_only_job_kept','dbLoad',
+        'ids='+localOnly.map(j=>j.id).join(',')+';queue='+pendingQ.length);}catch(e){}
+    }
     if(pendingQ.length===0&&pendingT.length===0){
       lsSet(LS_JOBS,result.jobs);
       lsSet(LS_FARMS,result.farms);
       lsSet(LS_CREW,result.crew);
     } else {
-      /* Merge: use local cache for jobs in EITHER queue, Supabase for others */
-      const qJobIds=new Set(pendingQ.filter(x=>x.type==='job').map(x=>x.id));
-      pendingT.forEach(row=>{if(row&&row.job_id)qJobIds.add(row.job_id);});
+      /* Merge: use local cache for jobs in EITHER queue, Supabase for others,
+         then re-attach any job the server has never seen. */
       try{logSaveFailure('diag_load','merge_kept_local','jobs='+[...qJobIds].join(',')+';tallyQ='+pendingT.length);}catch(e){}
-      const localJobs=lsGet(LS_JOBS)||[];
-      const merged=result.jobs.map(j=>qJobIds.has(j.id)?localJobs.find(lj=>lj.id===j.id)||j:j);
+      const merged=result.jobs.map(j=>qJobIds.has(j.id)?localJobs.find(lj=>lj.id===j.id)||j:j)
+                              .concat(localOnly);
       result.jobs=merged;
       lsSet(LS_JOBS,merged);
       lsSet(LS_FARMS,result.farms);
