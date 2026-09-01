@@ -563,8 +563,8 @@ textarea.fi{resize:none;line-height:1.5}
 <body>
 <div id="root"></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3"></script>
-<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
 <script>
 const {useState,useEffect,useRef}=React,e=React.createElement;
 
@@ -599,7 +599,7 @@ const LS_TALLY_QUEUE='mg_tally_queue_'+CONTRACTOR_SLUG; /* per-cell offline queu
 const LS_TALLY_DEAD='mg_tally_dead_'+CONTRACTOR_SLUG; /* v4.6.3g — quarantined cells (permanent rejection). Replayed once on boot in case the server-side blocker (e.g. missing kind constraint) was since fixed. */
 const LS_TALLY_META_QUEUE='mg_tally_meta_queue_'+CONTRACTOR_SLUG; /* v4.6.4 — offline/failed mob metadata (type/desc) updates to existing count cells; flushed alongside the tally queue. */
 const ROLE_TIMEOUT_HOURS=12; /* auto-reset after 12h inactivity */
-const APP_VERSION='v4.6.37-quality-trial';
+const APP_VERSION='v4.6.39-quality-trial';
 const SUPER_RATE=0.12; /* SG rate, 12% from 1 Jul 2025. One-line change if legislated rate moves. */
 /* v4.6.12a (26 Jul 2026): fleet-alignment rebuild - feature content identical to v4.6.12; new version string per one-build-one-version discipline. */
 /* v4.6.12 (20 Jul 2026): PER-CREW PIN, contractor-controlled (design settled with the founder before any deploy; an earlier worker-self-set draft was discarded - self-set has a bootstrap race where an imposter claims a name first and sets its PIN). MODEL: every worker is AUTO-ASSIGNED a random 4-digit PIN (genCrewPin at creation; existing crew backfilled via SQL per contractor at rollout). The PIN is stored READABLE at crew_members.data.pin and shown on the worker's card in My Database (admin-only surface) with a regenerate button and a 'Text PIN' button (plain GSM-7 SMS via /api/send-sms so the worker has it on file). DELIBERATE ENGINEERING CALL, not an oversight: with the shared anon key and a 4-digit space, a hash is brute-forced in under a second by anyone determined, so hashing here is theatre; readable storage buys contractor look-up-ability at no real security cost. This is a visibility gate against casual wrong-name claims - real authentication is v5 (Supabase Auth + RLS). CLAIM FLOW: picking a name with a PIN demands it (CrewPinVerifyModal, direct compare, works offline once the record is synced; names with PINs show a lock in the picker); 'Not you?' re-challenges; app_settings.requireCrewPin=true blocks claiming names with NO pin ('ask your contractor') for hard-lockdown contractors, off = pinless names bind as before. Workers never set or change their own PIN; contractor regenerates on request (specific chosen PINs = SRD via SQL). Lead/Admin PINs and the per-job PIN untouched. */
@@ -1786,11 +1786,15 @@ async function dbSaveFarm(farm){
 async function dbDeleteFarm(farmId){
   const farms=lsGet(LS_FARMS)||[];
   lsSet(LS_FARMS,farms.filter(f=>f.id!==farmId));
+  /* v4.6.38 — dequeue, mirroring dbDeleteJob. */
+  dequeue('farm',farmId);
   try{await sb.from('farms').delete().eq('id',farmId).eq('contractor_slug',CONTRACTOR_SLUG);}catch(e){}
 }
 async function dbDeleteCrew(crewId){ /* v4.6.11a - mirrors dbDeleteFarm; previous inline builder .catch threw, so crew deletes were local-only and crashed the handler */
   const crew=lsGet(LS_CREW)||[];
   lsSet(LS_CREW,crew.filter(c=>c.id!==crewId));
+  /* v4.6.38 — dequeue, mirroring dbDeleteJob. */
+  dequeue('crew',crewId);
   try{await sb.from('crew_members').delete().eq('id',crewId).eq('contractor_slug',CONTRACTOR_SLUG);}catch(e){}
 }
 async function dbSaveCrew(member){
@@ -3998,7 +4002,13 @@ function TallyTab({job,setJob,role,viewDate,setViewDate}){
   const vdt=new Date(y2,mo2-1,dy2);
   const dtLbl=DAY_NAMES[vdt.getDay()].toUpperCase()+' '+String(vdt.getDate()).padStart(2,'0')+'/'+String(vdt.getMonth()+1).padStart(2,'0');
   const setRuns=fn=>setJob(prev=>({...prev,runs:{...prev.runs,[viewDate]:fn((prev.runs||{})[viewDate]||[])}}));
-  const addRun=()=>setRuns(r=>[...r,{id:'r'+Date.now(),mobs:[{id:'m'+Date.now(),type:'Shearing',desc:'',counts:{}}]}]);
+  /* v4.6.38 — a new run's first mob follows the JOB's type. It was hardcoded to
+     Shearing, so on a crutching job every added run started as Shearing and had
+     to be switched by hand — and if that was missed, the mob priced at the
+     shearing rate. The + Shearing / + Crutching buttons still set the type
+     explicitly, so a mixed shed is unaffected. */
+  const addRun=()=>setRuns(r=>[...r,{id:'r'+Date.now(),
+    mobs:[{id:'m'+Date.now(),type:(job.type==='Crutching'?'Crutching':'Shearing'),desc:'',counts:{}}]}]);
   const delRun=async rid=>{
     setConfirmDelRun(null);
     /* v4.6.3b: cascade-delete tally_entries before removing from state. Without this,
