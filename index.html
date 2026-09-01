@@ -599,7 +599,7 @@ const LS_TALLY_QUEUE='mg_tally_queue_'+CONTRACTOR_SLUG; /* per-cell offline queu
 const LS_TALLY_DEAD='mg_tally_dead_'+CONTRACTOR_SLUG; /* v4.6.3g — quarantined cells (permanent rejection). Replayed once on boot in case the server-side blocker (e.g. missing kind constraint) was since fixed. */
 const LS_TALLY_META_QUEUE='mg_tally_meta_queue_'+CONTRACTOR_SLUG; /* v4.6.4 — offline/failed mob metadata (type/desc) updates to existing count cells; flushed alongside the tally queue. */
 const ROLE_TIMEOUT_HOURS=12; /* auto-reset after 12h inactivity */
-const APP_VERSION='v4.6.39-quality-trial';
+const APP_VERSION='v4.6.41-quality-trial';
 const SUPER_RATE=0.12; /* SG rate, 12% from 1 Jul 2025. One-line change if legislated rate moves. */
 /* v4.6.12a (26 Jul 2026): fleet-alignment rebuild - feature content identical to v4.6.12; new version string per one-build-one-version discipline. */
 /* v4.6.12 (20 Jul 2026): PER-CREW PIN, contractor-controlled (design settled with the founder before any deploy; an earlier worker-self-set draft was discarded - self-set has a bootstrap race where an imposter claims a name first and sets its PIN). MODEL: every worker is AUTO-ASSIGNED a random 4-digit PIN (genCrewPin at creation; existing crew backfilled via SQL per contractor at rollout). The PIN is stored READABLE at crew_members.data.pin and shown on the worker's card in My Database (admin-only surface) with a regenerate button and a 'Text PIN' button (plain GSM-7 SMS via /api/send-sms so the worker has it on file). DELIBERATE ENGINEERING CALL, not an oversight: with the shared anon key and a 4-digit space, a hash is brute-forced in under a second by anyone determined, so hashing here is theatre; readable storage buys contractor look-up-ability at no real security cost. This is a visibility gate against casual wrong-name claims - real authentication is v5 (Supabase Auth + RLS). CLAIM FLOW: picking a name with a PIN demands it (CrewPinVerifyModal, direct compare, works offline once the record is synced; names with PINs show a lock in the picker); 'Not you?' re-challenges; app_settings.requireCrewPin=true blocks claiming names with NO pin ('ask your contractor') for hard-lockdown contractors, off = pinless names bind as before. Workers never set or change their own PIN; contractor regenerates on request (specific chosen PINs = SRD via SQL). Lead/Admin PINs and the per-job PIN untouched. */
@@ -5659,7 +5659,7 @@ function OverviewTab({job,role,onSend,onBroadcast,canSend,onEditFarm,isDraft,onP
   );
 }
 /* ── JOB DETAIL ── */
-function JobDetailScreen({job,setJob,role,setRole,onBack,onSend,onBroadcast,onEdit,onDeleteJob,onPublish,initialTab,crewList,addCrew}){
+function JobDetailScreen({job,setJob,role,setRole,stale,onBack,onSend,onBroadcast,onEdit,onDeleteJob,onPublish,initialTab,crewList,addCrew}){
   const [tab,setTab]=useState(initialTab||'tallies');
   const [showEditFarm,setShowEditFarm]=useState(false);
   const farm=gf(job.farmId);
@@ -5699,6 +5699,16 @@ function JobDetailScreen({job,setJob,role,setRole,onBack,onSend,onBroadcast,onEd
     e(TopBar,{role,setRole,onBack,backLabel:job.jobName||(farm?farm.name:'Jobs')}),
     e('div',{className:'screen'},
       isDraft&&e('div',{className:'jd-draft-strip'},'◌ Draft — not sent to crew yet'),
+      /* v4.6.40 — the top strip is global and easy to miss; the alarm happens
+         while staring at a job that looks empty. Say it here, in the job, and
+         name the action that destroys work. Only shows when the last load
+         failed — a normal offline day with a good cache stays quiet. */
+      stale&&e('div',{style:{margin:'8px 16px 0',padding:'10px 12px',borderRadius:9,
+          background:'rgba(124,45,18,.28)',border:'1px solid var(--amber)',
+          color:'var(--amber)',fontSize:12.5,fontWeight:600,lineHeight:1.45}},
+        'Couldn\'t reach the server, so this is the last copy saved on this device. '
+        +'Runs or crew entered elsewhere may not show yet, and nothing here is lost. '
+        +'Don\'t clear the app or reinstall — that deletes work not yet sent.'),
       e('div',{className:'jd-hero'},
         e('div',{className:'jd-farm'},job.jobName||(farm?farm.name:'Unknown Farm')),
         e('div',{className:'jd-sub'},
@@ -8508,7 +8518,12 @@ function App(){
       pendingCount>0?`✈ Offline — ${pendingCount} change${pendingCount>1?'s':''} will sync when signal returns`:'✈ Offline — changes saved to device'
     ),
     isOnline&&!isFreshState&&isLoaded.current&&e('div',{style:{position:'fixed',top:0,left:0,right:0,zIndex:200,background:'#7c2d12',color:'#fff',fontSize:11,fontWeight:700,textAlign:'center',padding:'4px',letterSpacing:.5}},
-      '⟳ Reconnecting to server — changes will save once connected'
+      /* v4.6.40 — this used to read "Reconnecting to server", which describes the
+         connection and tells you nothing about what you are looking at. A lead
+         spent a day believing a shed had been deleted while the server held it
+         intact. Say what it means for the DATA, and say the one thing that
+         actually destroys work. */
+      '⚠ Showing saved data — can\'t reach the server. Don\'t clear the app.'
     ),
     /* v4.6.3e: the dangerous silent state — browser says online, but queued
        entries never reached the server (weak signal / failed flush). User saw
@@ -8530,7 +8545,7 @@ function App(){
     e(StatusBar),
     screen==='home'&&e(HomeScreen,{jobs,role,setRole:persistRole,onJob:goJob,onNew:()=>setShowNew(true),onDatabase:()=>setShowDatabase(true),onSchedule:goSchedule,contractorName:CONTRACTOR_NAME}),
     screen==='schedule'&&role!=='read_only'&&role!=='shed_lead'&&e(ScheduleScreen,{jobs,role,setRole:persistRole,onBack:goHome,onJob:goJob,onNew:()=>setShowNew(true),onNewDraft:()=>setShowNew(true)}),
-    screen==='job'&&selJob&&!leadBlocked(selJob)&&e(JobDetailScreen,{job:selJob,setJob:setSelJob,role,setRole:persistRole,onBack:goHome,onSend:()=>setShowSMS(true),onBroadcast:()=>setShowBroadcast(true),gfl,gcl,onEdit:()=>setShowEdit(true),onPublish:publishJob,onDeleteJob:async()=>{const id=selJob.id;setSelJobId(null);await dbDeleteJob(id);setJobs(p=>p.filter(j=>j.id!==id));setScreen('home');setShowSMS(false);setPreviewId(null);setJobPinPending(null);},initialTab:deepLinkTab,crewList,addCrew,key:selJobId+(deepLinkTab||'')}),
+    screen==='job'&&selJob&&!leadBlocked(selJob)&&e(JobDetailScreen,{job:selJob,setJob:setSelJob,role,setRole:persistRole,stale:!isFreshState&&isLoaded.current,onBack:goHome,onSend:()=>setShowSMS(true),onBroadcast:()=>setShowBroadcast(true),gfl,gcl,onEdit:()=>setShowEdit(true),onPublish:publishJob,onDeleteJob:async()=>{const id=selJob.id;setSelJobId(null);await dbDeleteJob(id);setJobs(p=>p.filter(j=>j.id!==id));setScreen('home');setShowSMS(false);setPreviewId(null);setJobPinPending(null);},initialTab:deepLinkTab,crewList,addCrew,key:selJobId+(deepLinkTab||'')}),
     showSMS&&selJob&&e(SMSModal,{job:selJob,onClose:()=>{setShowSMS(false);setPreviewId(null);},onPreview:id=>setPreviewId(id),farmList,crewList}),
     showBroadcast&&selJob&&e(BroadcastModal,{job:selJob,onClose:()=>setShowBroadcast(false),farmList,crewList}),
     previewId&&selJob&&e(JobCardView,{job:selJob,crewId:previewId,onClose:()=>setPreviewId(null),gfl,gcl}),
