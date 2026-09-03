@@ -599,8 +599,9 @@ const LS_TALLY_QUEUE='mg_tally_queue_'+CONTRACTOR_SLUG; /* per-cell offline queu
 const LS_TALLY_DEAD='mg_tally_dead_'+CONTRACTOR_SLUG; /* v4.6.3g — quarantined cells (permanent rejection). Replayed once on boot in case the server-side blocker (e.g. missing kind constraint) was since fixed. */
 const LS_TALLY_META_QUEUE='mg_tally_meta_queue_'+CONTRACTOR_SLUG; /* v4.6.4 — offline/failed mob metadata (type/desc) updates to existing count cells; flushed alongside the tally queue. */
 const ROLE_TIMEOUT_HOURS=12; /* auto-reset after 12h inactivity */
-const APP_VERSION='v4.6.41-quality-trial';
+const APP_VERSION='v4.6.42-quality-trial';
 const SUPER_RATE=0.12; /* SG rate, 12% from 1 Jul 2025. One-line change if legislated rate moves. */
+/* v4.6.42-quality-trial (3 Sep 2026): STALE-STAMP FIX + MOB-RATE TRACE. Single-contractor trial build. (1) GUARD STAMPS REFRESHED AFTER A SUCCESSFUL SAVE - _srvStatus/_srvRates/_srvMobRates were stamped only in dbLoad and never updated again, so once a device had saved a change its stamp no longer described the server and every guard was reasoning from a lie. Scenario D of the 28 Aug harness: a user who saves a change and later returns the field to its load-time value is indistinguishable from a stale device, and the guard reverted the real edit while logging guard_*_kept as if it had caught something. Stamps now live in a module Map (_srvStamp), refreshed from jobForBlob immediately after the upsert succeeds and cleared by any successful dbLoad; the per-job _srv* markers remain the fallback for the first save after a load, so behaviour on a freshly loaded job is unchanged. NOT written back onto the job object - that reference is React state and buildStrippedJobBlob is right that mutating it is how silent corruption starts. (2) RATES COMPARE IS NOW KEY-ORDER INSENSITIVE - the guard compared raw JSON.stringify on both sides, so any rebuild of the rates object with a different key insertion order made a device that had NOT touched the rates fail the equality test; the guard silently no-opped and the device overwrote the server's rates, which is the exact failure it exists to prevent. canonJSON sorts keys recursively. Legacy _srvRates strings cached by earlier builds are re-canonicalised through stampFor, so there is no window where the guard is dead. (3) MOB-RATE TRACE - the mob-rate guard had five exits and only two logged, so a lost override left no evidence; guard_mobrate_kept has fired ZERO times fleet-wide since v4.6.34 while overrides were demonstrably going missing. Every mob whose outgoing value disagrees with the server now records its verdict (no_stamp / new_on_device / unseen / kept / written_through) as a single 'mobrate_trace' row per save, capped at 12 mobs and 480 chars. A mob that agrees with the server is not recorded, so an ordinary save writes nothing and this cannot repeat the save_failures telemetry bloat. NO pay calculation, superable base, deduction, total or report output is touched; the restore rule itself is byte-for-byte the v4.6.34 rule. Structural fix (mob rates out of the job blob, authoritative store like v4.6.4 did for mob_type/mob_desc) is still the real answer - this stops the bleeding and makes the next loss diagnosable. */
 /* v4.6.12a (26 Jul 2026): fleet-alignment rebuild - feature content identical to v4.6.12; new version string per one-build-one-version discipline. */
 /* v4.6.12 (20 Jul 2026): PER-CREW PIN, contractor-controlled (design settled with the founder before any deploy; an earlier worker-self-set draft was discarded - self-set has a bootstrap race where an imposter claims a name first and sets its PIN). MODEL: every worker is AUTO-ASSIGNED a random 4-digit PIN (genCrewPin at creation; existing crew backfilled via SQL per contractor at rollout). The PIN is stored READABLE at crew_members.data.pin and shown on the worker's card in My Database (admin-only surface) with a regenerate button and a 'Text PIN' button (plain GSM-7 SMS via /api/send-sms so the worker has it on file). DELIBERATE ENGINEERING CALL, not an oversight: with the shared anon key and a 4-digit space, a hash is brute-forced in under a second by anyone determined, so hashing here is theatre; readable storage buys contractor look-up-ability at no real security cost. This is a visibility gate against casual wrong-name claims - real authentication is v5 (Supabase Auth + RLS). CLAIM FLOW: picking a name with a PIN demands it (CrewPinVerifyModal, direct compare, works offline once the record is synced; names with PINs show a lock in the picker); 'Not you?' re-challenges; app_settings.requireCrewPin=true blocks claiming names with NO pin ('ask your contractor') for hard-lockdown contractors, off = pinless names bind as before. Workers never set or change their own PIN; contractor regenerates on request (specific chosen PINs = SRD via SQL). Lead/Admin PINs and the per-job PIN untouched. */
 /* v4.6.11j (20 Jul 2026): (1) PAY WEEK PAYDAY - now prefers contractor_settings.default_rates payDayOfWeek/payFrequency (durable, admin-set, boot-cached to LS_DEFAULT_RATES) over the latest-job rule. DB evidence 20 Jul: two contractors who deliberately picked Saturday (payday 6) had every subsequent job seeded payday 4 from stale pre-4.6.6 device templates (4 = old-picker 'Friday', post-fix Thursday), and the v4.6.9 latest-job rule adopted it -> Pay Week flipped to Thu-Wed periods ('reset from Saturday to Wednesday'). default_rates is the template devices can't overwrite; latest-job then device template remain the fallbacks, so contractors without default_rates behave exactly as before. NO period-maths change. (2) CREW CHIP DISAMBIGUATION - job-creation/crew-edit chips showed first name only; two same-first-name workers were identical chips. chipLabel adds a surname initial ONLY when first names clash in the group, full surname when initials clash too, phone last-3 when names are entirely identical. Unambiguous names render exactly as before. (3) QUICK-ACTION ORDER - + FAB moved to the top of the bottom-right admin stack (then Pay Week, then My Database) per field preference. (4) STAFF ROLE TOTALS - pay summary gains a role-combined block after per-worker staff lines (e.g. 'Wool Handlers (2): 16 runs - $1,360.00'); Pay Week report WEEK TOTALS gains role-combined wages. Roles with nothing to show are omitted. DISPLAY-ONLY: new lines assembled from already-computed per-worker figures; no pay calculation, superable base, tax, or totals maths touched; jobs whose reports are never re-generated are unaffected. */
@@ -1161,6 +1162,61 @@ function hydrateTallies(job,tallyRows){
 }
 
 /* ── DB HELPERS ── */
+/* ══ v4.6.42 — GUARD STAMPS, HELD OUTSIDE REACT STATE ════════════════════════
+   _srvStatus / _srvRates / _srvMobRates were stamped ONLY in dbLoad and never
+   refreshed after a successful save (findings 28 Aug, harness scenario D).
+   Once a device had itself saved a change, the stamp no longer described what
+   the server held, and every guard's central question — "does the value I am
+   about to write still match what I last saw?" — was being answered against a
+   lie. A user putting a field back to its load-time value after saving a change
+   to it earlier in the same session is then indistinguishable from a stale
+   device: the guard reverts the real edit and logs it as a successful catch.
+
+   Held in a module Map rather than written back onto the job object, because
+   buildStrippedJobBlob's own comment is right — the caller's job reference is
+   React state and must not be mutated. dbLoad clears the Map, so a fresh server
+   read always wins and the per-job _srv* markers stay the fallback for the
+   first save after a load. */
+const _srvStamp=new Map();
+/* Key-order-insensitive stringify. The rates guard compared raw JSON.stringify
+   on both sides, so any rebuild of the rates object with a different key
+   insertion order made a device that had NOT touched the rates fail the
+   equality test: the guard silently no-opped and the device overwrote the
+   server's rates. The failure direction was the exact bug it exists to stop. */
+function canonJSON(v){
+  if(v===null||v===undefined)return 'null';
+  if(typeof v!=='object')return JSON.stringify(v);
+  if(Array.isArray(v))return '['+v.map(canonJSON).join(',')+']';
+  return '{'+Object.keys(v).sort().map(function(k){
+    return JSON.stringify(k)+':'+canonJSON(v[k]);
+  }).join(',')+'}';
+}
+/* mobId -> rateOverride across every run/mob of a runs structure. */
+function mobRateMap(runs){
+  const m={};
+  Object.values(runs||{}).forEach(function(dayRuns){
+    (dayRuns||[]).forEach(function(run){
+      ((run&&run.mobs)||[]).forEach(function(mob){
+        if(mob&&mob.id)m[mob.id]=(mob.rateOverride===undefined?null:mob.rateOverride);
+      });
+    });
+  });
+  return m;
+}
+/* The stamp this device should be judged against: the Map when this device has
+   saved since its last load, otherwise the load-time markers on the job itself.
+   A legacy _srvRates string written by an earlier build is re-canonicalised on
+   the way through, so a job cached before this release still compares correctly
+   and there is no window where the rates guard is dead. */
+function stampFor(job){
+  const m=_srvStamp.get(job.id);
+  if(m)return m;
+  let rates=null;
+  if(job._srvRates){
+    try{rates=canonJSON(JSON.parse(job._srvRates));}catch(e){rates=null;}
+  }
+  return {status:job._srvStatus,rates:rates,mobRates:job._srvMobRates||null};
+}
 async function dbLoad(){
   try{
     /* Cap each select at 8s — if Supabase hangs we fall through to cache.
@@ -1213,6 +1269,10 @@ async function dbLoad(){
       crew:(cr.data||[]).map(r=>r.data),
       fromCache:false,
     };
+    /* v4.6.42 — a successful server read supersedes any post-save stamps this
+       device accumulated; the _srv* markers stamped above are now the truth.
+       Only on this path — a cache fall-through has learned nothing new. */
+    _srvStamp.clear();
     /* v4.6.0 — hydrate tallies from the dedicated table. This is the
        source of truth for tally values; jobs.data tally fields are
        legacy/redundant and ignored on read. */
@@ -1649,9 +1709,12 @@ async function dbSaveJob(job){
            changing the status — it is carrying an old value — so keep whatever
            the server has now. A genuine change by this user differs from the
            stamp and is written through untouched. */
-        if(job._srvStatus&&jobForBlob.status===job._srvStatus&&srv.status&&srv.status!==jobForBlob.status){
+        /* v4.6.42 — read via stampFor, so the stamp reflects this device's last
+           successful SAVE as well as its last load. Rule itself is unchanged. */
+        const _stamp=stampFor(job);
+        if(_stamp.status&&jobForBlob.status===_stamp.status&&srv.status&&srv.status!==jobForBlob.status){
           logSaveFailure('guard_status_kept',job.id,
-            'device_had='+job._srvStatus+';server_now='+srv.status);
+            'device_had='+_stamp.status+';server_now='+srv.status);
           jobForBlob.status=srv.status;
         }
         /* v4.6.30 — rates carry the same exposure and it is the one that moves
@@ -1659,10 +1722,12 @@ async function dbSaveJob(job){
            the whole job for everyone on it. Same rule — if this device did not
            touch the rates, it has no business overwriting them. */
         try{
-          if(job._srvRates&&srv.rates){
-            const outRates=JSON.stringify(jobForBlob.rates||{});
-            const srvRates=JSON.stringify(srv.rates||{});
-            if(outRates===job._srvRates&&srvRates!==outRates){
+          if(_stamp.rates&&srv.rates){
+            /* v4.6.42 — canonJSON on both sides: key insertion order no longer
+               decides whether this guard fires. */
+            const outRates=canonJSON(jobForBlob.rates||{});
+            const srvRates=canonJSON(srv.rates||{});
+            if(outRates===_stamp.rates&&srvRates!==outRates){
               logSaveFailure('guard_rates_kept',job.id,'device_unchanged;server_differs');
               jobForBlob.rates=srv.rates;
             }
@@ -1675,36 +1740,49 @@ async function dbSaveJob(job){
            override and has no business clearing one set elsewhere. A deliberate
            clear differs from the stamp and is written through. */
         try{
-          const stamp=job._srvMobRates||null;
-          if(stamp){
-            const srvMob={};
-            Object.values((srv.runs)||{}).forEach(function(dayRuns){
-              (dayRuns||[]).forEach(function(run){
-                ((run&&run.mobs)||[]).forEach(function(mob){
-                  if(mob&&mob.id)srvMob[mob.id]=(mob.rateOverride===undefined?null:mob.rateOverride);
-                });
-              });
-            });
-            const restored=[];
-            Object.values((jobForBlob.runs)||{}).forEach(function(dayRuns){
-              (dayRuns||[]).forEach(function(run){
-                ((run&&run.mobs)||[]).forEach(function(mob){
-                  if(!mob||!mob.id)return;
-                  if(!(mob.id in srvMob))return;          /* mob is new on this device */
-                  if(!(mob.id in stamp))return;           /* never seen from the server */
-                  const outVal=(mob.rateOverride===undefined?null:mob.rateOverride);
-                  const srvVal=srvMob[mob.id];
+          const stamp=_stamp.mobRates;
+          const srvMob=mobRateMap(srv.runs);
+          const restored=[];
+          /* v4.6.42 — the guard had five exits and only two of them spoke, so a
+             lost override left no evidence at all. Every mob whose outgoing
+             value disagrees with the server now records the verdict that
+             decided it. A mob that agrees with the server cannot lose anything,
+             so it is not recorded — on an ordinary save this writes nothing. */
+          const trace=[];
+          Object.values((jobForBlob.runs)||{}).forEach(function(dayRuns){
+            (dayRuns||[]).forEach(function(run){
+              ((run&&run.mobs)||[]).forEach(function(mob){
+                if(!mob||!mob.id)return;
+                const outVal=(mob.rateOverride===undefined?null:mob.rateOverride);
+                const inSrv=(mob.id in srvMob);
+                const srvVal=inSrv?srvMob[mob.id]:undefined;
+                let verdict;
+                if(!stamp)verdict='no_stamp';                    /* guard skipped entirely */
+                else if(!inSrv)verdict='new_on_device';          /* mob is new on this device */
+                else if(!(mob.id in stamp))verdict='unseen';     /* never seen from the server */
+                else{
                   const seenVal=stamp[mob.id];
                   if(String(outVal)===String(seenVal)&&String(srvVal)!==String(outVal)){
                     mob.rateOverride=srvVal;
                     restored.push(mob.id+':'+String(outVal)+'->'+String(srvVal));
+                    verdict='kept';
+                  }else{
+                    verdict='written_through';
                   }
-                });
+                }
+                if(inSrv&&String(srvVal)!==String(outVal)&&trace.length<12){
+                  trace.push(mob.id+':out='+String(outVal)+';srv='+String(srvVal)
+                    +';seen='+((stamp&&(mob.id in stamp))?String(stamp[mob.id]):'?')
+                    +';'+verdict);
+                }
               });
             });
-            if(restored.length>0){
-              logSaveFailure('guard_mobrate_kept',job.id,restored.join(','));
-            }
+          });
+          if(restored.length>0){
+            logSaveFailure('guard_mobrate_kept',job.id,restored.join(','));
+          }
+          if(trace.length>0){
+            logSaveFailure('mobrate_trace',job.id,trace.join(' | ').slice(0,480));
           }
         }catch(mrErr){
           logSaveFailure('guard_mobrate_error',job.id,(mrErr&&mrErr.message)||'unknown');
@@ -1728,6 +1806,18 @@ async function dbSaveJob(job){
     const result=await withTimeout(upsertCall,12000,'upsert_timeout');
     if(result&&result.error)throw new Error(result.error.message);
     dequeue('job',job.id);
+    /* v4.6.42 — the blob just written IS what the server now holds, so make it
+       this device's stamp. Only on this path: the offline, queued and rejected
+       paths all return before the upsert and have learned nothing. */
+    try{
+      _srvStamp.set(job.id,{
+        status:jobForBlob.status,
+        rates:canonJSON(jobForBlob.rates||{}),
+        mobRates:mobRateMap(jobForBlob.runs)
+      });
+    }catch(stampErr){
+      logSaveFailure('stamp_refresh_error',job.id,(stampErr&&stampErr.message)||'unknown');
+    }
     /* PATCH A — Snapshot system. Snapshots use the FULL job (including
        tallies from React state) as a recovery option. Yesterday and
        earlier snapshots remain frozen and intact. */
