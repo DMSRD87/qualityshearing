@@ -18,7 +18,18 @@
    so all devices receive the wipe-prevention patches and DATA_VERSION-driven
    localStorage cleanup. Network-first for HTML retained from v6. Supabase API
    calls still bypassed (v5 fix retained — never serve fake-200 stubs for data). */
-const CACHE = 'mygang-v9';
+/* v10 — HTML fetch now has a 3s TIMEOUT. Network-first was right but had no
+   ceiling: on a link that is up but not passing packets (one bar in a shed) the
+   navigation request sat in the OS queue for a minute or more before rejecting,
+   and only THEN did the cache fallback fire. Fully offline was fine (instant
+   reject) and full signal was fine; poor signal was the case nothing handled.
+   Now the fetch races a 3s timer. Network wins → fresh code as before. Timer
+   wins → cached app served immediately, and the in-flight fetch is kept alive
+   via waitUntil so it still refreshes the cache for the NEXT open.
+   Cost, stated plainly: a slow-but-live link may serve the previous build once.
+   No cache means no fallback, so a first-ever install still needs signal — that
+   has always been true. CACHE bumped so every device reactivates. */
+const CACHE = 'mygang-v10';
 const PRECACHE = [
   '/',
   /* pinned — what current builds request */
@@ -70,16 +81,27 @@ self.addEventListener('fetch', event => {
 
   /* App HTML — NETWORK-FIRST with cache fallback. Online users get fresh code. */
   if (isAppHTML(event.request)) {
+    const HTML_TIMEOUT_MS = 3000;
+    const net = fetch(event.request).then(res => {
+      if (res && res.ok) {
+        const clone = res.clone();
+        return caches.open(CACHE).then(c => c.put(event.request, clone)).then(() => res, () => res);
+      }
+      return res;
+    });
+    /* keep the fetch alive past respondWith so a late arrival still lands in cache */
+    event.waitUntil(net.catch(() => {}));
     event.respondWith(
-      fetch(event.request).then(res => {
-        if (res && res.ok) {
-          const clone = res.clone();
-          caches.open(CACHE).then(c => c.put(event.request, clone));
-        }
-        return res;
-      }).catch(() =>
-        caches.match(event.request).then(c => c || caches.match('/'))
-      )
+      caches.match(event.request)
+        .then(c => c || caches.match('/'))
+        .then(cached => {
+          if (!cached) return net;  /* nothing to fall back to — let the network decide */
+          const timer = new Promise(resolve => setTimeout(() => resolve('timeout'), HTML_TIMEOUT_MS));
+          return Promise.race([net.catch(() => null), timer]).then(winner => {
+            if (winner && winner !== 'timeout' && winner.ok) return winner;
+            return cached;
+          });
+        })
     );
     return;
   }
