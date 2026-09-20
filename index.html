@@ -599,9 +599,13 @@ const LS_TALLY_QUEUE='mg_tally_queue_'+CONTRACTOR_SLUG; /* per-cell offline queu
 const LS_TALLY_DEAD='mg_tally_dead_'+CONTRACTOR_SLUG; /* v4.6.3g — quarantined cells (permanent rejection). Replayed once on boot in case the server-side blocker (e.g. missing kind constraint) was since fixed. */
 const LS_TALLY_META_QUEUE='mg_tally_meta_queue_'+CONTRACTOR_SLUG; /* v4.6.4 — offline/failed mob metadata (type/desc) updates to existing count cells; flushed alongside the tally queue. */
 const ROLE_TIMEOUT_HOURS=12; /* auto-reset after 12h inactivity */
-const APP_VERSION='v4.6.42-quality-trial';
+const APP_VERSION='v4.6.55';
 const SUPER_RATE=0.12; /* SG rate, 12% from 1 Jul 2025. One-line change if legislated rate moves. */
-/* v4.6.42-quality-trial (3 Sep 2026): STALE-STAMP FIX + MOB-RATE TRACE. Single-contractor trial build. (1) GUARD STAMPS REFRESHED AFTER A SUCCESSFUL SAVE - _srvStatus/_srvRates/_srvMobRates were stamped only in dbLoad and never updated again, so once a device had saved a change its stamp no longer described the server and every guard was reasoning from a lie. Scenario D of the 28 Aug harness: a user who saves a change and later returns the field to its load-time value is indistinguishable from a stale device, and the guard reverted the real edit while logging guard_*_kept as if it had caught something. Stamps now live in a module Map (_srvStamp), refreshed from jobForBlob immediately after the upsert succeeds and cleared by any successful dbLoad; the per-job _srv* markers remain the fallback for the first save after a load, so behaviour on a freshly loaded job is unchanged. NOT written back onto the job object - that reference is React state and buildStrippedJobBlob is right that mutating it is how silent corruption starts. (2) RATES COMPARE IS NOW KEY-ORDER INSENSITIVE - the guard compared raw JSON.stringify on both sides, so any rebuild of the rates object with a different key insertion order made a device that had NOT touched the rates fail the equality test; the guard silently no-opped and the device overwrote the server's rates, which is the exact failure it exists to prevent. canonJSON sorts keys recursively. Legacy _srvRates strings cached by earlier builds are re-canonicalised through stampFor, so there is no window where the guard is dead. (3) MOB-RATE TRACE - the mob-rate guard had five exits and only two logged, so a lost override left no evidence; guard_mobrate_kept has fired ZERO times fleet-wide since v4.6.34 while overrides were demonstrably going missing. Every mob whose outgoing value disagrees with the server now records its verdict (no_stamp / new_on_device / unseen / kept / written_through) as a single 'mobrate_trace' row per save, capped at 12 mobs and 480 chars. A mob that agrees with the server is not recorded, so an ordinary save writes nothing and this cannot repeat the save_failures telemetry bloat. NO pay calculation, superable base, deduction, total or report output is touched; the restore rule itself is byte-for-byte the v4.6.34 rule. Structural fix (mob rates out of the job blob, authoritative store like v4.6.4 did for mob_type/mob_desc) is still the real answer - this stops the bleeding and makes the next loss diagnosable. */
+/* v4.6.46 (4 Sep 2026): JOB IDENTIFICATION ON PAY OUTPUT. Includes everything in v4.6.45 (abort-on-timeout, APP_VERSION stamping), which was built but never deployed. (1) PAY SUMMARY HEADER gains 'Job #: NNNN-0000 - Type'. The FARM RECORD has carried this since v4.6.3; the pay summary never did, so a printed or shared pay summary identified the FARM only. Two jobs at the same farm were indistinguishable on paper the moment they left the app, and a crew member or payroll officer querying a figure had nothing to quote back. (2) PAY WEEK per-shed lines and the CSV 'shed' column now carry the job number. This is also the grouping key, so two jobs at the same farm within one pay period now report as TWO lines instead of merging into one - deliberate: the same earnings, split across two correctly-labelled lines instead of pooled under one ambiguous one. No amount changes, and per-worker and week totals are identical. Worth knowing before the first pay run on it, because a contractor who is used to seeing one line for a farm will see two. (3) SEASON STATS by-shed likewise. DISPLAY ONLY - no pay calculation, superable base, deduction, tax or total is touched. The CSV shape is the future payroll-export payload, so identifying the job here is a prerequisite for mapping earnings lines to anything external. */
+/* v4.6.45 (4 Sep 2026): TIMED-OUT REQUESTS ARE NOW CANCELLED + BUILD STAMPED ON EVERY DIAGNOSTIC ROW. (1) ABORT ON TIMEOUT - withTimeout was a bare Promise.race across all 26 call sites. When the timer won, the caller queued a retry but the underlying request was never cancelled and stayed on the wire. On satellite the link drops for one to three minutes; requests fired during the window sit in the connection queue while the browser reports online, then all flush at once when it returns, each carrying the blob it was built with minutes earlier, in whatever order the link delivers them. A save that 'failed' lands anyway, at an unpredictable moment, with stale data - and NO guard can stop it, because every guard ran when the request was CONSTRUCTED against a server state that no longer exists. This is why guard_mobrate_kept had never fired fleet-wide while overrides were demonstrably going missing: the damage was never done by a save the guards evaluated. 27 such bursts on the largest contractor in 14 days. postgrest builders are lazy and expose abortSignal(), so attaching a controller inside withTimeout fixes all 26 sites without touching one of them; dbLoad's Promise.all shares one explicit controller since Promise.all has no signal. LIMIT, stated plainly: abort stops a request that has NOT yet reached the server, which during an outage is the common case, but it cannot undo one Postgres has already committed - we simply never hear the reply. Closing that last gap needs optimistic concurrency on the write and is a separate piece of work. (2) APP_VERSION ON EVERY save_failures ROW (column added by migration first) - without it, deciding whether a fix worked meant inferring the build from commit timestamps, and a device running yesterday's cached file is indistinguishable from one running today's. Every measurement from here depends on this. (3) netHealth() tracks consecutive timeouts and lifetime successes, ready for reachability-based offline detection - NOT yet wired to any gating or UI. navigator.onLine is link state, not reachability: 2,224 of 2,229 network failures fleet-wide in 30 days reported online. Replacing that flag changes when saves are attempted or held and deserves its own build. NO pay calculation or report output is touched. */
+/* v4.6.44 (4 Sep 2026): DAY NOTES OPEN TO EVERYONE, MOVED OUT OF THE JOB BLOB. Day notes were job.dayNotes[date] inside the job blob, gated to lead/admin. The ask was to open them to anyone, farmers included, the same as the whiteboard. Flipping the gate alone would have meant every phone in the shed writing a FULL JOB BLOB to record a one-line note - the identical write that lost a shearer's 200 head on 3 Sep and a wool handler's five runs on 25 Aug, moved from a couple of lead devices onto every handset on the worst connections in the fleet, while timed-out requests are still uncancelled. So notes now work the way the whiteboard already does: their own table (job_day_notes, natural key contractor_slug+job_id+note_date, RLS allow_all mirroring job_whiteboard), one small row per job per day, loaded with the tab, written debounced at 900ms, no blob involvement and no autosave. HARD PREREQUISITE: the job_day_notes table must exist BEFORE this file is deployed - it was created and the 39 existing notes across 8 contractors backfilled on 4 Sep. Blob dayNotes are still READ as a fallback so a job looks the same on a contractor still on an older build; they are no longer written, so the two stores cannot fight. CONCURRENT EDITS: several people can now hold the same box open. On write the row is re-read, and if it moved since we loaded it and the incoming text does not already contain theirs, the two are APPENDED rather than replaced. A messy note is recoverable; a wiped one is not. Last editor's role and time are shown under the box. NO pay calculation or report output is touched. */
+/* v4.6.43a (4 Sep 2026): CORRECTS TWO DEFECTS IN v4.6.43. (1) CREW GUARD RESTORED FOR SHED STAFF - v4.6.43 anchored the crew guard to rows from the shrink-guard query to avoid an extra request. That query filters kind='count' AND run_id<>'', which is how SHEARERS are stored; every wool handler, classer and presser is kind='shed_runs' with a blank run_id. 1,936 such rows across 164 crew fleet-wide, and 680 crew-job pairs (169 people) hold work with NO count rows at all. v4.6.43 would therefore have protected shearers while silently removing the protection for the wool handler the guard was written for on 25 Aug - a straight regression on the original fix, dressed as an improvement. The shrink-guard query is reverted to its original form and the crew guard now makes its own targeted request: crew with work on this job who are NOT already on the outgoing list. Normally zero rows, so it stays cheap on a bad link. Kinds limited to count/shed_runs/bales/bale_kg/cook_day - mess and travel are attendance attributes, the likeliest rows to survive a deliberate removal, and restoring on a stray mess row would re-apply a DEDUCTION to someone the lead meant to take off. (2) STALE-DEVICE RECOVERY - v4.6.43 made goOnline demote honestly on a cache fall-through, which was right, but autosave, flushNow AND the 20s background tally drain are all gated on isFreshRef. A demoted device therefore stops saving jobs and stops draining queued cells, and the only ways back were an 'online' event or a visibility change. On satellite or a hotspot the browser never reports offline, so it never reports online either: the device could sit stalled with a shed's cells held only in localStorage. The tick now retries a real load every third pass (~60s) while online and stale, and promotes on success. If the device is DIRTY it promotes WITHOUT replacing state, because overwriting unsaved local work with the server copy would be worse than the stall. */
+/* v4.6.43 (3 Sep 2026): CREW GUARD ANCHORED TO WORK + LOAD-PATH FIXES. Built on the v4.6.40 fleet master (cross-build hash verified identical across six contractors before edit). (1) CREW GUARD - the v4.6.30 version compared the outgoing crew list only against the SERVER's crew list, so it caught the second wipe and never the first: once any save had removed someone from the server copy, their tally rows became irrelevant because they could not enter `dropped`. A shearer with 200 head over four runs was invisible on a 12-person job on 3 Sep, board reading 892 against a true 1092. Now anyone with recorded work (value>0) on the job is merged back regardless of what the server lists. value>0 is deliberate: restoring on the mere existence of a row would make anyone holding a leftover zero-value cell permanently unremovable. The rows come from the existing shrink-guard query, widened to select crew_id and value, so this adds NO extra request per save. (2) SUNDRIES OFF THE SERIAL PATH - loadSundriesAll was awaited AFTER the jobs/farms/crew read, so on the largest contractor it queued behind everything and expired on its own 8s clock: 300 sundries_load_timeouts in 14 days on a contractor with ZERO sundries rows and a 96 kB table. Now started in parallel before the main await; deliberately not inside the Promise.all, so a sundries hang can never trip load_timeout and drop the whole load to cache. (3) goOnline NO LONGER LEAVES A CACHE LOAD FLAGGED FRESH - it pushed cached jobs into state and then only promoted on success, never demoted on failure, so a device that booted cleanly stayed 'fresh' all day through repeated failed reloads: no stale banner and save paths still armed, because they gate on isFreshRef. mountLoad and the visibility revalidate already demote; this path did not. This is the mechanism behind a stale device confidently overwriting good server data. (4) GUARD STAMPS REFRESHED AFTER A SUCCESSFUL SAVE, key-order-insensitive rates compare, and mob-rate trace logging - as shipped and harness-tested in v4.6.42. NO pay calculation, superable base, deduction, total or report output is touched. */
 /* v4.6.12a (26 Jul 2026): fleet-alignment rebuild - feature content identical to v4.6.12; new version string per one-build-one-version discipline. */
 /* v4.6.12 (20 Jul 2026): PER-CREW PIN, contractor-controlled (design settled with the founder before any deploy; an earlier worker-self-set draft was discarded - self-set has a bootstrap race where an imposter claims a name first and sets its PIN). MODEL: every worker is AUTO-ASSIGNED a random 4-digit PIN (genCrewPin at creation; existing crew backfilled via SQL per contractor at rollout). The PIN is stored READABLE at crew_members.data.pin and shown on the worker's card in My Database (admin-only surface) with a regenerate button and a 'Text PIN' button (plain GSM-7 SMS via /api/send-sms so the worker has it on file). DELIBERATE ENGINEERING CALL, not an oversight: with the shared anon key and a 4-digit space, a hash is brute-forced in under a second by anyone determined, so hashing here is theatre; readable storage buys contractor look-up-ability at no real security cost. This is a visibility gate against casual wrong-name claims - real authentication is v5 (Supabase Auth + RLS). CLAIM FLOW: picking a name with a PIN demands it (CrewPinVerifyModal, direct compare, works offline once the record is synced; names with PINs show a lock in the picker); 'Not you?' re-challenges; app_settings.requireCrewPin=true blocks claiming names with NO pin ('ask your contractor') for hard-lockdown contractors, off = pinless names bind as before. Workers never set or change their own PIN; contractor regenerates on request (specific chosen PINs = SRD via SQL). Lead/Admin PINs and the per-job PIN untouched. */
 /* v4.6.11j (20 Jul 2026): (1) PAY WEEK PAYDAY - now prefers contractor_settings.default_rates payDayOfWeek/payFrequency (durable, admin-set, boot-cached to LS_DEFAULT_RATES) over the latest-job rule. DB evidence 20 Jul: two contractors who deliberately picked Saturday (payday 6) had every subsequent job seeded payday 4 from stale pre-4.6.6 device templates (4 = old-picker 'Friday', post-fix Thursday), and the v4.6.9 latest-job rule adopted it -> Pay Week flipped to Thu-Wed periods ('reset from Saturday to Wednesday'). default_rates is the template devices can't overwrite; latest-job then device template remain the fallbacks, so contractors without default_rates behave exactly as before. NO period-maths change. (2) CREW CHIP DISAMBIGUATION - job-creation/crew-edit chips showed first name only; two same-first-name workers were identical chips. chipLabel adds a surname initial ONLY when first names clash in the group, full surname when initials clash too, phone last-3 when names are entirely identical. Unambiguous names render exactly as before. (3) QUICK-ACTION ORDER - + FAB moved to the top of the bottom-right admin stack (then Pay Week, then My Database) per field preference. (4) STAFF ROLE TOTALS - pay summary gains a role-combined block after per-worker staff lines (e.g. 'Wool Handlers (2): 16 runs - $1,360.00'); Pay Week report WEEK TOTALS gains role-combined wages. Roles with nothing to show are omitted. DISPLAY-ONLY: new lines assembled from already-computed per-worker figures; no pay calculation, superable base, tax, or totals maths touched; jobs whose reports are never re-generated are unaffected. */
@@ -1222,11 +1226,33 @@ async function dbLoad(){
     /* Cap each select at 8s — if Supabase hangs we fall through to cache.
        Without this, dbLoad can sit forever on a marginal connection,
        blocking app startup. */
+    /* v4.6.43 — sundries kicked off HERE, in parallel with the three below,
+       instead of being awaited after them. It was serial: on the largest
+       contractor the jobs/farms/crew and tally reads consumed most of the
+       connection and the sundries call then timed out waiting its turn on its
+       own 8s clock — 300 sundries_load_timeouts in 14 days on a contractor with
+       ZERO sundries rows. Nothing was ever wrong with the query; it was queued
+       behind everything else. Starting it first costs nothing and removes up to
+       8 seconds of dead time from every load. Deliberately NOT inside the
+       Promise.all below: a sundries hang must never trip load_timeout and drop
+       the whole load to cache. It still swallows its own errors and returns
+       null, so the handling downstream is unchanged. */
+    const _sundriesPromise=loadSundriesAll();
+    /* v4.6.45 — Promise.all has no abortSignal of its own, so the three reads
+       share one controller and it is handed to withTimeout explicitly. Without
+       this, a load that times out leaves three requests still on the wire; the
+       jobs read is the largest payload in the app and the one most likely to
+       land late and stale. */
+    const _loadCtrl=(typeof AbortController!=='undefined')?new AbortController():null;
+    const _sig=q=>(_loadCtrl&&typeof q.abortSignal==='function')?q.abortSignal(_loadCtrl.signal):q;
     const [jr,fr,cr]=await withTimeout(Promise.all([
-      sb.from('jobs').select('id,data').eq('contractor_slug',CONTRACTOR_SLUG).order('updated_at',{ascending:false}),
-      sb.from('farms').select('id,data').eq('contractor_slug',CONTRACTOR_SLUG),
-      sb.from('crew_members').select('id,data').eq('contractor_slug',CONTRACTOR_SLUG),
-    ]),8000,'load_timeout');
+      /* v4.6.55 — explicit ceilings. Unbounded, these would truncate in silence
+         at the server default. The largest contractor is at ~100 jobs so there is
+         headroom, but a silent cap on the CORE load is the worst place for one. */
+      _sig(sb.from('jobs').select('id,data').eq('contractor_slug',CONTRACTOR_SLUG).order('updated_at',{ascending:false}).limit(5000)),
+      _sig(sb.from('farms').select('id,data').eq('contractor_slug',CONTRACTOR_SLUG).limit(5000)),
+      _sig(sb.from('crew_members').select('id,data').eq('contractor_slug',CONTRACTOR_SLUG).limit(5000)),
+    ]),8000,'load_timeout',_loadCtrl);
     /* CRITICAL: if any of the three calls returned an error (or the SW
        offline stub returned fake-200-with-error), DO NOT trust the result.
        Treat as offline — fall through to cache. Without this check, a
@@ -1244,8 +1270,10 @@ async function dbLoad(){
       };
     }
     const result={
-      /* v4.6.32 — stamp status and rates as the server has them right now, so a
-         save can tell a deliberate change from a stale copy. Stripped on write. */
+      /* v4.6.30 — stamp the status exactly as the server has it right now.
+         At save time this tells us whether THIS device changed the status or is
+         simply carrying an old copy. Stripped by buildStrippedJobBlob, so it is
+         never persisted. */
       jobs:(jr.data||[]).map(r=>({...r.data,
         _srvStatus:(r.data||{}).status,
         _srvRates:JSON.stringify((r.data||{}).rates||{}),
@@ -1269,9 +1297,8 @@ async function dbLoad(){
       crew:(cr.data||[]).map(r=>r.data),
       fromCache:false,
     };
-    /* v4.6.42 — a successful server read supersedes any post-save stamps this
-       device accumulated; the _srv* markers stamped above are now the truth.
-       Only on this path — a cache fall-through has learned nothing new. */
+    /* v4.6.43 — a successful server read supersedes any post-save stamps this
+       device accumulated; the _srv* markers stamped above are now the truth. */
     _srvStamp.clear();
     /* v4.6.0 — hydrate tallies from the dedicated table. This is the
        source of truth for tally values; jobs.data tally fields are
@@ -1286,7 +1313,7 @@ async function dbLoad(){
     /* v4.6.27 — single request for all jobs. null = the load failed
        (offline/timeout): keep whatever the cached job already had rather than
        wiping a previously-loaded list, exactly as the per-job version did. */
-    const _sundriesByJob=await loadSundriesAll();
+    const _sundriesByJob=await _sundriesPromise; /* v4.6.43 — started above, usually already settled */
     result.jobs.forEach(j=>{
       if(_sundriesByJob!==null)j.sundries=_sundriesByJob[j.id]||[];
       else if(!Array.isArray(j.sundries))j.sundries=[];
@@ -1422,17 +1449,118 @@ async function dbLoad(){
    11:46, and the crew only found out at knock-off.
    Writes get 12s because a write that times out risks data; loads stay at 8s
    because a load that times out simply retries and a long hang feels broken. */
-function withTimeout(promise,ms,label){
-  let timer;
+/* ══ v4.6.45 — A TIMED-OUT REQUEST IS NOW ACTUALLY CANCELLED ═════════════════
+   withTimeout was a bare Promise.race. When the timer won, the promise rejected
+   and the caller queued the write for retry — but the underlying request was
+   NEVER cancelled. It stayed on the wire.
+
+   On satellite the link drops for one to three minutes at a time. Requests fired
+   during that window sit in the connection queue; the browser reports online the
+   whole time, so nothing stops them being fired. When the link returns they all
+   flush at once, each carrying the blob it was built with minutes earlier, in
+   whatever order the satellite delivers them. A save that "failed" lands anyway,
+   at an unpredictable moment, with stale data — and no guard can stop it,
+   because the guards ran when the request was CONSTRUCTED, against a server
+   state that no longer exists. 27 such bursts on one contractor in 14 days.
+
+   postgrest builders are lazy and expose abortSignal(), so attaching a
+   controller here fixes all 26 call sites without touching one of them. Callers
+   that wrap a Promise.all pass their own controller as the 4th argument, since
+   Promise.all has no signal of its own.
+
+   LIMIT, stated plainly: abort stops a request that has not yet reached the
+   server, which during an outage is the common case. It CANNOT undo a request
+   Postgres has already received and committed — we simply never hear the reply.
+   Closing that last gap needs optimistic concurrency on the write (reject if the
+   row moved since we read it), which is a separate piece of work. */
+let _netFails=0,_netOk=0;   /* consecutive timeouts / lifetime successes */
+function netHealth(){return {consecutiveTimeouts:_netFails,successes:_netOk};}
+function withTimeout(promise,ms,label,ctrl){
+  let timer,controller=ctrl||null,target=promise;
+  if(!controller&&typeof AbortController!=='undefined'&&promise&&typeof promise.abortSignal==='function'){
+    try{controller=new AbortController();target=promise.abortSignal(controller.signal);}
+    catch(e){controller=null;target=promise;}
+  }
   const timeout=new Promise((_,reject)=>{
-    timer=setTimeout(()=>reject(new Error(label||'timeout')),ms);
+    timer=setTimeout(()=>{
+      /* cancel first, THEN reject, so the caller can never be racing a request
+         that is still able to land. */
+      try{if(controller)controller.abort();}catch(e){}
+      _netFails++;
+      reject(new Error(label||'timeout'));
+    },ms);
   });
-  return Promise.race([promise,timeout]).finally(()=>clearTimeout(timer));
+  return Promise.race([Promise.resolve(target).then(v=>{_netFails=0;_netOk++;return v;}),timeout])
+    .finally(()=>clearTimeout(timer));
 }
 
 /* logSaveFailure — best-effort forensic insert. Captures save failures so
    we can investigate later. The log call itself has its OWN short timeout
    and any failure is swallowed — logging must NEVER affect the save flow. */
+/* ══ v4.6.50 — JOB EVENT LOG ══════════════════════════════════════════════════
+   Append-only record of what happened to a job: broadcasts and job cards sent,
+   crew added or removed, status changes. Until now these left no trace —
+   broadcasts were a bare POST, and crew or status changes could only be
+   reconstructed by diffing job_snapshots afterwards. A wool handler went unpaid
+   because she silently dropped off a crew list and nothing on the job said so.
+
+   Evidence, not state: nothing reads this back into the app, and the pay engine
+   never touches it. Fire-and-forget, so a failed log never blocks the action it
+   is describing. */
+/* ══ v4.6.55 — NEVER RELY ON THE SERVER'S DEFAULT ROW CAP ════════════════════
+   PostgREST silently truncates any select with no explicit bound. No error, no
+   warning — you just get fewer rows than you asked for.
+
+   Season stats hit it live: the 30-day figure read HIGHER than the whole season,
+   because 30 days fitted under the cap and the season did not. A subset larger
+   than its superset, and every season number quietly short. It gets worse the
+   longer the season runs, which is exactly backwards.
+
+   A sweep found 13 queries depending on that cap. Bumping the limit just moves
+   the cliff, so this pages instead.
+
+   Paging rule matters: a project's max-rows can be LOWER than PAGE, so the first
+   page can already be "short" and a naive page.length<PAGE test stops early and
+   under-fetches. Advance by rows ACTUALLY returned; stop only on an empty page.
+   Same rule the bulk tally hydrate already uses.
+
+   build() must return a FRESH builder each call — a PostgREST builder cannot be
+   re-ranged after it has been awaited. */
+async function sbAll(build,label,opts){
+  const o=opts||{};
+  const PAGE=o.page||1000, CEIL=o.max||200000, MS=o.ms||12000, LOOPS=o.loops||400;
+  const out=[];
+  let from=0, done=false;
+  for(let guard=0; guard<LOOPS; guard++){
+    const r=await withTimeout(build().range(from,from+PAGE-1),MS,label);
+    if(r&&r.error)throw new Error(r.error.message||'load failed');
+    const d=(r&&r.data)||[];
+    out.push.apply(out,d);
+    if(d.length===0){done=true;break;}  /* only an EMPTY page means done */
+    from+=d.length;                     /* advance by what came back, not PAGE */
+    if(out.length>=CEIL)break;          /* ceiling hit — incomplete, flagged below */
+  }
+  /* Never hand back a short result without saying so. Returning silently short
+     is the exact fault this helper exists to remove; doing it here would only
+     move the bug up a level. Callers must check _truncated. */
+  if(!done){
+    out._truncated=true;
+    try{logSaveFailure('error','sbAll_truncated',(label||'?')+';rows='+out.length);}catch(e){}
+  }
+  return out;
+}
+function logJobEvent(jobId,kind,detail,actorRole){
+  if(!jobId||!kind)return;
+  try{
+    sb.from('job_events').insert({
+      contractor_slug:CONTRACTOR_SLUG,
+      job_id:jobId,
+      kind:String(kind).slice(0,40),
+      actor_role:actorRole||null,
+      detail:(detail==null?null:String(detail).slice(0,500))
+    }).then(()=>{},()=>{});
+  }catch(e){}
+}
 function logSaveFailure(reason,jobId,details){
   /* v4.6.16d - DIAGNOSTIC GATE. The diag_* reasons were added during the sync
      incidents and did their job. Left on, they wrote ~1,600 rows a day across
@@ -1449,7 +1577,12 @@ function logSaveFailure(reason,jobId,details){
       details:(details||'').toString().slice(0,1000), /* cap long stack traces */
       user_agent:(navigator.userAgent||'').slice(0,500),
       online_status:navigator.onLine,
-      queue_length:(lsGet(LS_QUEUE)||[]).length
+      queue_length:(lsGet(LS_QUEUE)||[]).length,
+      /* v4.6.45 — which build produced this row. Without it, telling whether a
+         fix worked meant inferring the build from commit timestamps, which is
+         guesswork; a device running yesterday's cached file is indistinguishable
+         from one running today's. Every measurement from here depends on this. */
+      app_version:APP_VERSION
     };
     /* Fire and forget. 3s timeout. Errors silently ignored. */
     withTimeout(
@@ -1495,7 +1628,7 @@ function buildStrippedJobBlob(job){
   out.cookDays={};    /* v4.6.19 */
   out.cookHeads={};   /* v4.6.19 */
   out.sundries=[];    /* v4.6.3f: sundries_entries table is source of truth — never duplicate into blob */
-  delete out._srvStatus; /* v4.6.32 — transient load-time markers, never persisted */
+  delete out._srvStatus; /* v4.6.30 — transient load-time markers, never persisted */
   delete out._srvRates;
   delete out._srvMobRates;
   return out;
@@ -1522,7 +1655,7 @@ async function loadSundriesAll(){
     const r=await withTimeout(sb.from('sundries_entries')
       .select('id,job_id,crew_id,occurred_date,description,amount,updated_at')
       .eq('contractor_slug',CONTRACTOR_SLUG)
-      .order('occurred_date',{ascending:true}),8000,'sundries_load_timeout');
+      .order('occurred_date',{ascending:true}).limit(20000),8000,'sundries_load_timeout');
     if(r&&r.error){
       const m=r.error.message||'';
       if(/sundries_entries/i.test(m)&&/schema cache|does not exist|not find/i.test(m)){
@@ -1541,7 +1674,7 @@ async function loadSundriesForJob(jobId){
     const r=await withTimeout(sb.from('sundries_entries')
       .select('id,crew_id,occurred_date,description,amount,updated_at')
       .eq('contractor_slug',CONTRACTOR_SLUG)
-      .eq('job_id',jobId).order('occurred_date',{ascending:true}),5000,'sundries_load_timeout');
+      .eq('job_id',jobId).limit(5000).order('occurred_date',{ascending:true}),5000,'sundries_load_timeout');
     if(r&&r.error){
       const m=r.error.message||'';
       if(/sundries_entries/i.test(m)&&/schema cache|does not exist|not find/i.test(m)){
@@ -1606,10 +1739,14 @@ async function dbSaveJob(job){
        to display them under. */
     try{
       const tallyRunIdsResult=await withTimeout(
+        /* v4.6.55 — explicit ceiling. A long shed already reaches ~900 count
+           rows; at the server default this guard would silently see a partial
+           set of run ids. */
         sb.from('tally_entries')
           .select('run_id')
           .eq('contractor_slug',CONTRACTOR_SLUG)
           .eq('job_id',job.id)
+          .limit(20000)
           .eq('kind','count')
           .not('run_id','eq',''),
         3000,
@@ -1649,8 +1786,8 @@ async function dbSaveJob(job){
        counts within mobs are emptied), so the guard still functions as
        designed: rejects writes that would shrink the run-date history. */
     const incomingRunDates=Object.keys((jobForBlob&&jobForBlob.runs)||{}).length;
-    /* v4.6.32 — was `incomingRunDates>0`, so a job with crew but no runs yet was
-       never compared against the server and could lose crew unseen. */
+    /* v4.6.30 — was `incomingRunDates>0`, so a job with crew but no runs yet was
+       never compared against the server at all and could lose crew unseen. */
     {
       const guardCheck=await withTimeout(
         sb.from('jobs').select('data').eq('id',job.id).eq('contractor_slug',CONTRACTOR_SLUG).maybeSingle(),
@@ -1677,27 +1814,64 @@ async function dbSaveJob(job){
            refusal here would make a job unsaveable, which is worse than the bug.
            Someone with no recorded work can still be removed normally. */
         try{
-          const srvCrew=Array.isArray(srv.crew)?srv.crew:[];
+          /* ══ v4.6.43 — ANCHOR THE GUARD TO THE WORK, NOT TO THE SERVER LIST ══
+             The v4.6.30 version only ever considered people already on the
+             SERVER's crew list:  dropped = srvCrew.filter(not in outCrew).
+             So it caught the SECOND wipe and never the first. Once any save had
+             removed someone from the server copy, every later save agreed they
+             were absent and their tally rows were irrelevant — they could not
+             enter `dropped`, so they could never be restored.
+
+             3 Sep: a shearer with 200 head across four runs was invisible on a
+             12-person job. His rows were in tally_entries the whole time; only
+             the crew list had lost him, and the guard was structurally blind to
+             him. The board read 892 shorn against a true 1092.
+
+             The rule is simply: anyone with recorded WORK on this job belongs on
+             its crew list, whatever the server currently says.
+
+             value>0 is deliberate. Restoring on the mere existence of a row
+             would make anyone with a leftover zero-value cell permanently
+             unremovable — a live complaint on another contractor. Zero work,
+             removable as normal. */
           const outCrew=Array.isArray(jobForBlob.crew)?jobForBlob.crew.slice():[];
-          const dropped=srvCrew.filter(cid=>cid&&outCrew.indexOf(cid)<0);
-          if(dropped.length>0){
-            const held=await withTimeout(
-              sb.from('tally_entries').select('crew_id')
-                .eq('contractor_slug',CONTRACTOR_SLUG).eq('job_id',job.id)
-                .in('crew_id',dropped).limit(200),
-              3000,'guard_crew_timeout'
-            ).catch(err=>({error:{message:'guard_crew_failed:'+err.message}}));
-            if(held&&!held.error&&Array.isArray(held.data)){
-              const withWork=[...new Set(held.data.map(r=>r.crew_id).filter(Boolean))];
-              const restore=withWork.filter(cid=>outCrew.indexOf(cid)<0);
-              if(restore.length>0){
-                restore.forEach(cid=>outCrew.push(cid));
-                jobForBlob.crew=outCrew;
-                logSaveFailure('guard_crew_restored',job.id,
-                  'restored='+restore.join(',')+';srv='+srvCrew.length+';incoming='+
-                  ((job.crew||[]).length));
-              }
-            }
+          /* v4.6.43a — ask the server ONLY for crew who hold work on this job and
+             are NOT already on the outgoing list. Normally that is zero rows, so
+             this is cheap on the wire even on a bad link.
+
+             v4.6.43 tried to avoid the round trip by reusing the shrink-guard
+             query. That query filters kind='count' AND run_id<>'', which is how
+             SHEARERS are stored. Every wool handler, classer and presser is
+             kind='shed_runs' with a blank run_id — 1,936 rows across 164 people
+             fleet-wide, none of them visible to that filter. It would have
+             protected shearers and silently dropped the protection for the wool
+             handler this guard was built for on 25 Aug. Correctness first: take
+             the extra request.
+
+             Kinds are limited to actual WORK. mess and travel are attendance
+             attributes and are the likeliest rows to be left behind after a
+             deliberate removal; restoring on those would resurrect someone the
+             lead meant to take off, and a stray mess row would re-apply a
+             DEDUCTION to them. */
+          let crewOrphans=null;
+          try{
+            let cq=sb.from('tally_entries').select('crew_id')
+              .eq('contractor_slug',CONTRACTOR_SLUG).eq('job_id',job.id)
+              .in('kind',['count','shed_runs','bales','bale_kg','cook_day'])
+              .gt('value',0).limit(50);
+            if(outCrew.length>0)cq=cq.not('crew_id','in','('+outCrew.join(',')+')');
+            const cr2=await withTimeout(cq,3000,'guard_crew_timeout')
+              .catch(err=>({error:{message:'guard_crew_failed:'+err.message}}));
+            if(cr2&&!cr2.error&&Array.isArray(cr2.data))crewOrphans=cr2.data;
+          }catch(cErr){ /* fail open — a guard must never block a save */ }
+          const withWork=[...new Set((crewOrphans||[]).map(r=>r&&r.crew_id).filter(Boolean))];
+          const restore=withWork.filter(cid=>outCrew.indexOf(cid)<0);
+          if(restore.length>0){
+            restore.forEach(cid=>outCrew.push(cid));
+            jobForBlob.crew=outCrew;
+            logSaveFailure('guard_crew_restored',job.id,
+              'restored='+restore.join(',')+';srv='+((srv.crew||[]).length)+';incoming='+
+              ((job.crew||[]).length));
           }
         }catch(crewErr){
           logSaveFailure('guard_crew_error',job.id,(crewErr&&crewErr.message)||'unknown');
@@ -1709,7 +1883,7 @@ async function dbSaveJob(job){
            changing the status — it is carrying an old value — so keep whatever
            the server has now. A genuine change by this user differs from the
            stamp and is written through untouched. */
-        /* v4.6.42 — read via stampFor, so the stamp reflects this device's last
+        /* v4.6.43 — read via stampFor, so the stamp reflects this device's last
            successful SAVE as well as its last load. Rule itself is unchanged. */
         const _stamp=stampFor(job);
         if(_stamp.status&&jobForBlob.status===_stamp.status&&srv.status&&srv.status!==jobForBlob.status){
@@ -1723,7 +1897,7 @@ async function dbSaveJob(job){
            touch the rates, it has no business overwriting them. */
         try{
           if(_stamp.rates&&srv.rates){
-            /* v4.6.42 — canonJSON on both sides: key insertion order no longer
+            /* v4.6.43 — canonJSON on both sides: key insertion order no longer
                decides whether this guard fires. */
             const outRates=canonJSON(jobForBlob.rates||{});
             const srvRates=canonJSON(srv.rates||{});
@@ -1782,7 +1956,15 @@ async function dbSaveJob(job){
             logSaveFailure('guard_mobrate_kept',job.id,restored.join(','));
           }
           if(trace.length>0){
-            logSaveFailure('mobrate_trace',job.id,trace.join(' | ').slice(0,480));
+            /* v4.6.53 — was 'mobrate_trace', which escaped the DIAG_TELEMETRY gate
+               because that gate only matches /^diag_/. It fires on every mob-rate
+               comparison INCLUDING legitimate edits, so it wrote ~80 rows a week
+               across four contractors into production telemetry — the same
+               pattern that once grew save_failures to 54 MB and buried 377 real
+               failures in 11,800 rows of noise.
+               Renamed, not removed: flip DIAG_TELEMETRY to re-arm it when chasing
+               a mob-rate bug, which is what the gate exists for. */
+            logSaveFailure('diag_mobrate_trace',job.id,trace.join(' | ').slice(0,480));
           }
         }catch(mrErr){
           logSaveFailure('guard_mobrate_error',job.id,(mrErr&&mrErr.message)||'unknown');
@@ -1806,7 +1988,7 @@ async function dbSaveJob(job){
     const result=await withTimeout(upsertCall,12000,'upsert_timeout');
     if(result&&result.error)throw new Error(result.error.message);
     dequeue('job',job.id);
-    /* v4.6.42 — the blob just written IS what the server now holds, so make it
+    /* v4.6.43 — the blob just written IS what the server now holds, so make it
        this device's stamp. Only on this path: the offline, queued and rejected
        paths all return before the upsert and have learned nothing. */
     try{
@@ -1856,7 +2038,28 @@ async function dbDeleteJob(jobId){
   /* Clear any pending queued upsert for this job — without this, a queued
      write from before the delete would resurrect the job on next flushQueue. */
   dequeue('job',jobId);
+  /* v4.6.53 — CASCADE THE TALLIES. Deleting a job removed the job row and left
+     its tally_entries pointing at nothing: 383 rows carrying 14,509 head are
+     already stranded that way fleet-wide. They cannot be paid from, invoiced
+     from, or found without a hand-written query, and self-heal will happily
+     rebuild a phantom job out of them.
+
+     Tallies go FIRST. If that fails the job row stays, so the pair can never
+     end up half-deleted — better a job that would not delete than a job that
+     silently shed its head count. The confirm dialog states the number being
+     destroyed before any of this runs. */
+  try{
+    const del=await withTimeout(
+      sb.from('tally_entries').delete()
+        .eq('contractor_slug',CONTRACTOR_SLUG).eq('job_id',jobId),
+      12000,'job_cascade_timeout');
+    if(del&&del.error)throw new Error(del.error.message||'cascade failed');
+  }catch(ex){
+    logSaveFailure('error','job_delete_cascade',(ex&&ex.message)||'unknown');
+    return false;   /* job row deliberately left in place */
+  }
   try{await sb.from('jobs').delete().eq('id',jobId).eq('contractor_slug',CONTRACTOR_SLUG);}catch(e){}
+  return true;
 }
 async function dbSaveFarm(farm){
   const farms=lsGet(LS_FARMS)||[];
@@ -1876,7 +2079,8 @@ async function dbSaveFarm(farm){
 async function dbDeleteFarm(farmId){
   const farms=lsGet(LS_FARMS)||[];
   lsSet(LS_FARMS,farms.filter(f=>f.id!==farmId));
-  /* v4.6.38 — dequeue, mirroring dbDeleteJob. */
+  /* v4.6.38 — dequeue, mirroring dbDeleteJob. Without it a queued upsert from
+     before the delete resurrects the record on the next flush. */
   dequeue('farm',farmId);
   try{await sb.from('farms').delete().eq('id',farmId).eq('contractor_slug',CONTRACTOR_SLUG);}catch(e){}
 }
@@ -2014,17 +2218,17 @@ function shedRunsByRole(job,id,date){
   const jr=getJobRole(job,id);
   return jr?{[jr]:total}:{};
 }
-/* v4.6.30 — true when this worker-day carries an explicit role allocation,
+/* v4.6.32 — true when this worker-day carries an explicit role allocation,
    whether that is two roles or one.
 
-   This was ">1 role" and silently mispriced anyone placed alone in a section that
-   is not their own: the day fell through to the legacy path and paid at their JOB
-   role's rate. A wool handler covering the penner drew $80 instead of $85.
+   This was ">1 role", which silently mispriced anyone allocated entirely to a
+   role that is not their own: the day fell through to the legacy path and paid at
+   their JOB role's rate. The concept was wrong, not the threshold.
 
    An allocation only ever exists when it means something — the writer stores a
-   plain row whenever the single role IS the job role — so anything here should be
-   priced by role, PER RUN. That also leaves the presser bale-threshold hybrid
-   alone: a job-role presser's ordinary day never reaches this path. */
+   plain row whenever the single role IS the job role — so anything reaching here
+   should be priced by role, PER RUN. The presser bale-threshold hybrid is
+   untouched: a job-role presser's ordinary day never writes an allocation. */
 function hasRoleRuns(job,id,date){
   const split=(((job.shedRoleRuns||{})[id])||{})[date];
   if(!split||typeof split!=='object')return false;
@@ -2691,6 +2895,10 @@ function generateSummary(job,period){
   let totalShEarn=0,totalShedEarn=0,totalTravel=0,totalTeamLoad=0,totalStand=0,totalSuperable=0;
   const L=[];
   L.push('PAY SUMMARY \u2014 '+(farm?farm.name.toUpperCase():'JOB'));
+  /* v4.6.46 — the farm record has carried 'Job #' since v4.6.3, the pay summary
+     never did. A printed pay summary showed the farm name only, so two jobs at
+     the same farm were indistinguishable on paper once they left the app. */
+  L.push('Job #:  '+(job.jobNumber||'\u2014')+' \u2014 '+(job.type||''));
   if(farm)L.push('Address: '+farm.address+'  |  From: '+fmtDate(job.startDate));
   if(period)L.push('Pay Period: '+fmtPeriodLabel(period.start,period.end));
   L.push('Status: '+job.status.toUpperCase());
@@ -3177,7 +3385,13 @@ function generatePayWeekReport(jobs,period,contractorName){
       const p=per[id];p.lines=p.lines.concat(w.lines);
       ['piece','teamLoad','staffEarn','travel','stand','standSuper','tax','mess','sundries'].forEach(k=>{p[k]+=w[k]||0;});
     });
-    const shedName=(gf(job.farmId)||{}).name||job.jobName||'Job';
+    /* v4.6.46 — job number appended. This is also the GROUPING KEY and the CSV
+       'shed' column, so two jobs at the same farm inside one pay period now
+       report as two lines instead of silently merging into one. That is the
+       point: a payroll officer querying a figure needs to know which shed it
+       came from. No amount changes - the same earnings are split across two
+       correctly-labelled lines instead of pooled under one ambiguous one. */
+    const shedName=((gf(job.farmId)||{}).name||job.jobName||'Job')+(job.jobNumber?' (#'+job.jobNumber+')':'');
     if(any&&sheds.indexOf(shedName)<0)sheds.push(shedName);
     if(jobGross>0.005){
       if(team)checks.push({shed:shedName,skip:true});
@@ -3253,7 +3467,30 @@ function generatePayWeekCSV(jobs,period){
   return rows.map(r=>r.map(esc).join(',')).join('\n');
 }
 /* v4.6.12 - crew PIN helpers */
+/* ══ v4.6.51 — ACTIVE / INACTIVE CREW ═════════════════════════════════════════
+   Deleting a crew member removed the record but left their tally rows pointing
+   at nothing: their work became invisible and pay summaries could not be
+   regenerated. That is how thousands of head ended up orphaned, and seven
+   records only came back because an old recovery project still had them.
+
+   Seasonal workers made it worse — the only choices were leave them cluttering
+   every picker, or delete them and lose the history.
+
+   Inactive keeps the record and the history, and hides them from the pickers.
+   They come back as the SAME person with the same id, which also stops leads
+   inventing a second record because the original was not findable.
+
+   Absent means active, so nothing changes for anyone already on the books. */
+function isActiveCrew(c){return !!c&&c.active!==false;}
 function genCrewPin(){return String(Math.floor(Math.random()*10000)).padStart(4,'0');}
+/* v4.6.48 — crew PINs are now opt-out per contractor. Some contractors do not
+   want crew logging in at all: farmer plus lead/admin only. Unset means enabled,
+   so nothing changes for anyone already using them.
+   contractor_settings.app_settings.crewPins = false turns it off: no PIN is
+   assigned to new crew, and the PIN row is hidden on the worker's card so it
+   cannot be regenerated or texted. Existing PINs are cleared separately in the
+   database — the flag alone does not revoke what is already issued. */
+function crewPinsEnabled(){return (lsGet(LS_APP_SETTINGS)||{}).crewPins!==false;}
 
 /* v4.6.12 - verify-only PIN modal for identity claiming. Direct compare against the
    synced readable pin (see header for why not hashed). Offline-capable. */
@@ -3284,6 +3521,10 @@ function CrewPinVerifyModal({claim,onBound,onCancel}){
    regenerate with confirm, Text PIN via /api/send-sms. SMS body is GSM-7 plain - no emoji,
    no em-dash (UCS-2 multiplies segment billing). */
 function CrewPinRow({c,onSave}){
+  /* v4.6.48 — hidden entirely when the contractor has crew PINs turned off, so
+     a PIN cannot be regenerated or texted for a crew that is not meant to log
+     in at all. Hooks are declared before the early return to keep hook order
+     stable across renders. */
   const [confirmRegen,setConfirmRegen]=useState(false);
   const [smsState,setSmsState]=useState('');
   const doRegen=()=>{onSave(Object.assign({},c,{pin:genCrewPin()}));setConfirmRegen(false);};
@@ -3296,6 +3537,7 @@ function CrewPinRow({c,onSave}){
       setSmsState(r.ok?'sent':'failed');
     }catch(e2){setSmsState('failed');}
   };
+  if(!crewPinsEnabled())return null;
   return e('div',{style:{display:'flex',alignItems:'center',gap:8,marginTop:6,flexWrap:'wrap'}},
     e('span',{style:{fontSize:12,color:'var(--muted)'}},'App PIN:'),
     e('span',{style:{fontFamily:'var(--m)',fontWeight:800,fontSize:14,letterSpacing:2,color:'var(--amber)'}},c.pin||'\u2014'),
@@ -3558,6 +3800,7 @@ async function savePin(type,newVal){
    Master PIN bypasses for SRD support. Verified flag in localStorage = the hash
    itself, so password rotation invalidates old devices automatically. */
 const LS_ACCESS_VERIFIED='mg_access_verified_'+CONTRACTOR_SLUG;
+const LS_ACCESS_HASH='mg_access_hash_'+CONTRACTOR_SLUG; /* v4.6.47 — cached so the gate works without signal */
 let _accessHash=null;
 let _accessLoaded=false;
 
@@ -3577,10 +3820,24 @@ async function loadDefaultRates(){
 
 async function loadAccessHash(){
   if(_accessLoaded)return;
+  /* v4.6.47 — cached hash first, so a poor-signal or offline open still has the
+     real gate state instead of falling open (no hash = no gate). */
+  const cachedHash=lsGet(LS_ACCESS_HASH);
+  if(typeof cachedHash==='string'&&cachedHash)_accessHash=cachedHash;
   try{
-    const result=await sb.from('contractor_settings').select('access_password_hash').eq('contractor_slug',CONTRACTOR_SLUG).maybeSingle();
+    /* v4.6.47 — this gates accessReady, i.e. whether ANYTHING renders. It was the
+       one boot call with no timeout: the v4.6.45 abort sweep covered saves and
+       missed it. On a link that is up but not passing packets it sat in the OS
+       queue for a minute or more while the app showed a spinner — reported live
+       as "can't open the app in poor signal". 4s, then fall through to cache. */
+    const result=await withTimeout(
+      sb.from('contractor_settings').select('access_password_hash').eq('contractor_slug',CONTRACTOR_SLUG).maybeSingle(),
+      4000,'access_hash_timeout');
     if(result&&!result.error&&result.data){
       _accessHash=result.data.access_password_hash||null;
+      /* Clear the cache when a contractor has no access password, so a removed
+         gate does not keep gating from a stale cached hash. */
+      if(_accessHash)lsSet(LS_ACCESS_HASH,_accessHash);else lsRemove(LS_ACCESS_HASH);
     }
     _accessLoaded=true;
   }catch(e){
@@ -3620,6 +3877,59 @@ function markAccessVerified(){
 }
 
 /* ── PIN PAD (reusable) ── */
+/* ══ v4.6.24 — SHED ROLE SPLIT EDITOR ═════════════════════════════════════════
+   One day, one person, runs allocated across shed roles. Opens seeded from the
+   day's existing runs sitting entirely on the job-level role, so the common case
+   is: tap Split, move two runs to the other role, Save.
+
+   Total is derived from the buckets rather than fixed — a lead who realises the
+   day was 5 runs, not 4, should not have to leave and re-enter it first.
+
+   Saving with one role holding everything clears the split and writes a normal
+   run row, so this is also how you undo. */
+function ShedSplitEditor({crewId,jobRole,current,dayTotal,onSave,onCancel}){
+  const seed={};
+  if(current&&Object.keys(current).length){
+    SHED_ROLES.forEach(r=>{seed[r]=Number(current[r])||0;});
+  }else{
+    SHED_ROLES.forEach(r=>{seed[r]=0;});
+    if(jobRole&&seed[jobRole]!==undefined)seed[jobRole]=Number(dayTotal)||0;
+  }
+  const [v,setV]=useState(seed);
+  const total=SHED_ROLES.reduce((a,r)=>a+(Number(v[r])||0),0);
+  const liveRoles=SHED_ROLES.filter(r=>(Number(v[r])||0)>0);
+  const bump=(r,d)=>setV(prev=>({...prev,[r]:Math.max(0,(Number(prev[r])||0)+d)}));
+  return e('div',{style:{flexBasis:'100%',margin:'8px 0 4px 48px',padding:12,borderRadius:10,
+      background:'var(--card2)',border:'1px solid var(--border)'}},
+    e('div',{style:{fontSize:11,fontWeight:800,letterSpacing:'.5px',color:'var(--dim)',
+      textTransform:'uppercase',marginBottom:8}},'Runs by role \u2014 this day'),
+    SHED_ROLES.map(r=>e('div',{key:r,style:{display:'flex',alignItems:'center',
+        justifyContent:'space-between',padding:'5px 0'}},
+      e('div',{style:{fontSize:13,fontWeight:600,
+        color:(Number(v[r])||0)>0?'var(--text)':'var(--dim)'}},r),
+      e('div',{className:'rs'},
+        e('button',{className:'rs-btn',disabled:(Number(v[r])||0)<=0,onClick:()=>bump(r,-1)},'\u2212'),
+        e('div',{className:'rs-val'},Number(v[r])||0),
+        e('button',{className:'rs-btn',onClick:()=>bump(r,1)},'+'))
+    )),
+    e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',
+      borderTop:'1px solid var(--border)',marginTop:8,paddingTop:8,fontSize:12}},
+      e('div',{style:{color:'var(--dim)'}},'Total'),
+      e('div',{style:{fontWeight:800,color:'var(--amber)'}},total+' run'+(total===1?'':'s'))),
+    liveRoles.length<2&&e('div',{style:{fontSize:11,color:'var(--dim)',marginTop:6}},
+      liveRoles.length===0?'All zero \u2014 saving clears the day.'
+        :'One role only \u2014 saving clears the split.'),
+    e('div',{style:{display:'flex',gap:8,marginTop:10}},
+      e('button',{onClick:()=>onSave(v),
+        style:{flex:1,padding:'9px',borderRadius:6,border:'none',background:'var(--amber)',
+          color:'#000',fontWeight:800,fontSize:13,cursor:'pointer'}},'Save'),
+      e('button',{onClick:onCancel,
+        style:{padding:'9px 14px',borderRadius:6,border:'1px solid var(--border)',
+          background:'var(--card)',color:'var(--dim)',fontWeight:700,fontSize:13,cursor:'pointer'}},
+        'Cancel'))
+  );
+}
+
 function PinPad({onSuccess,onCancel,label,subtitle,allowChange,changeLabel,_overridePin,_validateAsync,_startInChangeMode,_pinType,_onChanged}){
   const [entry,setEntry]=useState('');
   const [err,setErr]=useState('');
@@ -4039,39 +4349,27 @@ function BookPhotoPanel({job,viewDate,role}){
     rec&&pubUrl&&e('a',{href:pubUrl,target:'_blank',rel:'noopener'},
       e('img',{src:pubUrl,alt:'Tally book photo',style:{width:'100%',maxHeight:260,objectFit:'contain',borderRadius:10,border:'1px solid var(--border)',background:'#000'}})),
     rec&&e('div',{style:{color:'var(--muted)',fontSize:12,margin:'6px 0'}},'Taken '+new Date(rec.taken_at).toLocaleString('en-AU',{day:'numeric',month:'short',hour:'numeric',minute:'2-digit'})),
-    !rec&&!busy&&e('div',{style:{color:'var(--muted)',fontSize:13,margin:'6px 0'}},canTake?'Snap the tally book at knock-off \u2014 one photo per day.':'No book photo for this day yet.'),
+    !rec&&!busy&&e('div',{style:{color:'var(--muted)',fontSize:13,margin:'6px 0'}},canTake?'Add the tally book at knock-off \u2014 camera or gallery, one photo per day.':'No book photo for this day yet.'),
     busy&&e('div',{style:{color:'var(--muted)',fontSize:13,margin:'6px 0'}},'Uploading\u2026'),
     msg&&e('div',{style:{color:'var(--amber)',fontSize:13,margin:'6px 0',fontWeight:700}},msg),
-    canTake&&e('button',{className:'btn-g',style:{width:'100%',marginTop:6},disabled:busy,onClick:doPick},rec?'Re-take photo':'📷 Take book photo'),
-    canTake&&e('input',{type:'file',accept:'image/*',capture:'environment',style:{display:'none'},ref:fileRef,onChange:onFile})
+    canTake&&e('button',{className:'btn-g',style:{width:'100%',marginTop:6},disabled:busy,onClick:doPick},rec?'Replace photo':'📷 Add book photo'),
+    /* v4.6.51 — `capture:'environment'` forced the camera and hid the gallery, so
+       a photo already taken on the phone could not be used. Dropping the
+       attribute lets the OS offer camera OR gallery; taking one there and then
+       still works exactly as before. */
+    canTake&&e('input',{type:'file',accept:'image/*',style:{display:'none'},ref:fileRef,onChange:onFile})
   );
 }
 /* ════════════════════════
    TALLY TAB
 ════════════════════════ */
 function TallyTab({job,setJob,role,viewDate,setViewDate}){
-  /* v4.6.30 — declared FIRST. `shearers` below reads `extra`, and a const used
-     above its declaration is a temporal dead zone error, which blanks the whole
-     tab rather than failing softly. */
-  const [addTo,setAddTo]=useState(null);   /* section label whose picker is open */
-  const [extra,setExtra]=useState({});     /* {sectionLabel:[crewId]} added this session */
   const canEdit=role==='shed_lead'||role==='admin';
   const isAdmin=role==='admin';
   const todayStr=localToday();
   const dates=jobDates(job);
   const dayRuns=(job.runs||{})[viewDate]||[];
-  /* v4.6.30 — the stand holds anyone roled to shear, anyone added to it today,
-     and anyone already holding counts on this date. That last clause is what
-     makes a shed hand who took a stand persist across a reload, with no extra
-     storage: the counts themselves are the record. */
-  const standExtraRef=(extra['STAND']||[]);
-  const hasCountsToday=id=>((job.runs||{})[viewDate]||[]).some(run=>
-    mobsOf(run).some(mob=>((mob.counts||{})[id]||0)>0));
-  const shearers=job.crew.filter(id=>{
-    if(!gc(id))return false;
-    const r=getJobRole(job,id);
-    return r==='Shearer'||r==='Crutcher'||standExtraRef.indexOf(id)>=0||hasCountsToday(id);
-  });
+  const shearers=job.crew.filter(id=>{const r=getJobRole(job,id);return r==='Shearer'||r==='Crutcher';});
   /* STAND ORDER — persisted per-job. New shearers added later appear at end of the order. */
   const savedOrder=Array.isArray(job.shearerOrder)?job.shearerOrder:[];
   const orderedFromSaved=savedOrder.filter(id=>shearers.includes(id));
@@ -4249,11 +4547,11 @@ const flushMobDesc=(mid,v)=>{
     const roles=Object.keys(byRole||{}).filter(r=>SHED_ROLE_CODE[r]);
     const live={};let total=0;
     roles.forEach(r=>{const v=Math.max(0,Number(byRole[r])||0);if(v>0){live[r]=v;total+=v;}});
-    /* v4.6.30 — a legacy run_id='' row means "the job-level role", so it can only
-       be used when the single live role IS that person's job role. Someone placed
-       alone in a section they are only helping in still needs a coded row, or the
+    /* v4.6.32 — a legacy run_id='' row means "the job-level role", so it can only
+       be used when the single live role IS that person's job role. Someone put
+       entirely on a role they are only helping in still needs a coded row, or the
        runs read back as their own role and price at the wrong rate — a wool
-       handler covering the penner would have been paid $80 instead of $85. */
+       handler covering the penner was paid $80 instead of $85. */
     const liveRoles=Object.keys(live);
     const isSplit=liveRoles.length>1||(liveRoles.length===1&&liveRoles[0]!==getJobRole(job,cid));
     setJob(prev=>{
@@ -4275,44 +4573,10 @@ const flushMobDesc=(mid,v)=>{
     /* Legacy row: 0 while split (coded rows own the day), otherwise the total. */
     writeTallyCell({jobId:job.id,kind:'shed_runs',crewId:cid,date:viewDate,value:isSplit?0:total});
   };
-  /* ══ v4.6.30 — ROLE IS A DEFAULT, NOT A GATE ══════════════════════════════
-     Until now a person appeared on the stand or in a shed section because their
-     job role said so. A wool handler standing on a stand could not be given a
-     count row; the workaround was to change her job role for the WHOLE job,
-     which then stopped her being a wool handler at all.
-     Now each section has a + that can pull in anyone on the job. A person can
-     sit in two sections on the same day — that IS the split, entered with the
-     stepper everyone already uses instead of a modal.
-     Job roles are untouched: they still set the default placement and the rate,
-     and the per-job role override stays exactly as it was. */
-  const LBL_ROLE={'WOOL HANDLER':'Wool Handler','CLASSER':'Wool Classer',
-                  'PENNER':'Penner','PRESSER':'Presser'};
-  const extraIn=lbl=>(extra[lbl]||[]);
-  const addToSection=(lbl,cid)=>{
-    setExtra(p=>({...p,[lbl]:[...(p[lbl]||[]),cid]}));
-    setAddTo(null);
-  };
-  /* Set one role's runs for a person-day, preserving the others. Seeds from the
-     existing plain total the first time so adding a second role never loses the
-     runs already entered. setShedSplit decides split-vs-plain from what is left
-     non-zero, so dropping back to one role rewrites a normal row. */
-  const setRoleRuns=(cid,role,val)=>{
-    const cur={...(shedSplitFor(cid)||{})};
-    if(!Object.keys(cur).length){
-      const jr=getJobRole(job,cid);
-      const tot=(job.shedTallies[cid]||{})[viewDate]||0;
-      if(jr&&tot>0)cur[jr]=tot;
-    }
-    cur[role]=Math.max(0,val);
-    setShedSplit(cid,cur);
-  };
-  const roleRunsFor=(cid,role)=>{
-    const sp=shedSplitFor(cid);
-    if(sp&&Object.keys(sp).length)return Number(sp[role])||0;
-    return getJobRole(job,cid)===role?((job.shedTallies[cid]||{})[viewDate]||0):0;
-  };
+  const [splitFor,setSplitFor]=useState(null); /* v4.6.24 — crew id whose split editor is open */
   const shedSplitFor=(cid)=>(((job.shedRoleRuns||{})[cid])||{})[viewDate]||null;
-
+  const isShedSplit=(cid)=>{const sp=shedSplitFor(cid);
+    return !!sp&&Object.keys(sp).filter(r=>(Number(sp[r])||0)>0).length>1;};
   const setBale=(cid,v)=>{
     const val=Math.max(0,v);
     setJob(prev=>({...prev,baleTallies:{...prev.baleTallies,[cid]:{...(prev.baleTallies[cid]||{}),[viewDate]:val}}}));
@@ -4325,7 +4589,82 @@ const flushMobDesc=(mid,v)=>{
     writeTallyCell({jobId:job.id,kind:'bale_kg',crewId:cid,date:viewDate,value:val});
   };
   const baleTot=id=>Object.values(job.baleTallies[id]||{}).reduce((a,b)=>a+b,0);
-  const setNote=v=>setJob(prev=>({...prev,dayNotes:{...prev.dayNotes,[viewDate]:v}}));
+  /* ══ v4.6.44 — DAY NOTES MOVED OUT OF THE JOB BLOB ═══════════════════════════
+     Day notes were job.dayNotes[date], inside the blob, gated to lead/admin.
+     Opening the gate without moving the storage would have meant every phone in
+     the shed writing a FULL JOB BLOB to make a one-line note — the exact write
+     that lost a shearer's 200 head and a wool handler's five runs, moved from a
+     couple of lead devices onto every handset on the worst connections we have.
+
+     So notes now work the way the whiteboard already does: their own table, one
+     small row per job per day, no blob involvement. Anyone with the tab open can
+     write one, farmers included.
+
+     Blob dayNotes are still READ as a fallback so nothing looks empty on a
+     contractor who has not taken this build yet; they are no longer written. */
+  const [noteMap,setNoteMap]=useState(null);        /* date -> {body,role,at} */
+  const [noteDraft,setNoteDraft]=useState(null);    /* uncontrolled-ish local echo */
+  const noteTimer=useRef(null);
+  const noteLoadedAt=useRef({});                    /* date -> updated_at we last saw */
+  useEffect(()=>{
+    let dead=false;
+    (async()=>{
+      try{
+        const r=await withTimeout(sb.from('job_day_notes')
+          .select('note_date,body,updated_by_role,updated_at')
+          .eq('contractor_slug',CONTRACTOR_SLUG).eq('job_id',job.id).limit(2000),
+          8000,'daynotes_load_timeout');
+        if(dead)return;
+        if(r&&!r.error&&Array.isArray(r.data)){
+          const m={};
+          r.data.forEach(row=>{m[row.note_date]={body:row.body||'',role:row.updated_by_role||'',at:row.updated_at};
+            noteLoadedAt.current[row.note_date]=row.updated_at;});
+          setNoteMap(m);
+        }else setNoteMap({});
+      }catch(e){ if(!dead)setNoteMap({}); }
+    })();
+    return()=>{dead=true;};
+  },[job.id]);
+  useEffect(()=>{setNoteDraft(null);},[viewDate]);
+  const noteRole=role==='farmer'?'Farmer':(role==='admin'?'Admin':(role==='shed_lead'?'Lead':'Crew'));
+  const noteServer=(noteMap&&noteMap[viewDate])||null;
+  const noteFallback=(job.dayNotes||{})[viewDate]||'';
+  const noteValue=noteDraft!==null?noteDraft:(noteServer?noteServer.body:noteFallback);
+  const pushNote=async(text)=>{
+    try{
+      /* NO SILENT LOSS. Several people can now hold this box open at once. If the
+         server row moved since we loaded it and the text is not ours, append
+         instead of replacing — a messy note is recoverable, a wiped one is not. */
+      let body=text;
+      const cur=await withTimeout(sb.from('job_day_notes')
+        .select('body,updated_at').eq('contractor_slug',CONTRACTOR_SLUG)
+        .eq('job_id',job.id).eq('note_date',viewDate).maybeSingle(),6000,'daynote_read_timeout');
+      if(cur&&!cur.error&&cur.data){
+        const seen=noteLoadedAt.current[viewDate];
+        if(seen&&cur.data.updated_at!==seen&&(cur.data.body||'')!==text){
+          const theirs=(cur.data.body||'').trim();
+          if(theirs&&text.indexOf(theirs)<0)body=theirs+'\n'+text;
+        }
+      }
+      const at=new Date().toISOString();
+      const w=await withTimeout(sb.from('job_day_notes').upsert({
+        contractor_slug:CONTRACTOR_SLUG,job_id:job.id,note_date:viewDate,
+        body:body,updated_by_role:noteRole,updated_at:at
+      },{onConflict:'contractor_slug,job_id,note_date'}),12000,'daynote_write_timeout');
+      if(w&&w.error)throw new Error(w.error.message);
+      noteLoadedAt.current[viewDate]=at;
+      setNoteMap(m=>({...(m||{}),[viewDate]:{body:body,role:noteRole,at:at}}));
+      if(body!==text)setNoteDraft(body);
+    }catch(e){
+      logSaveFailure(/timeout$/.test(e&&e.message||'')?'timeout':'error','daynote',
+        (e&&e.message)||'unknown');
+    }
+  };
+  const setNote=v=>{
+    setNoteDraft(v);
+    clearTimeout(noteTimer.current);
+    noteTimer.current=setTimeout(()=>pushNote(v),900);
+  };
   const setTravel=(cid,val)=>{
     setJob(prev=>({...prev,travelTallies:{...(prev.travelTallies||{}),[cid]:{...((prev.travelTallies||{})[cid]||{}),[viewDate]:val}}}));
     writeTallyCell({jobId:job.id,kind:'travel',crewId:cid,date:viewDate,value:val?1:0});
@@ -4355,41 +4694,7 @@ const flushMobDesc=(mid,v)=>{
   const hasCrutch=Object.values(job.runs||{}).flat().some(run=>mobsOf(run).some(m=>m.type==='Crutching'));
   const stats=shearerStats(job,viewDate,shearers);
   const mts=mobTotals(job,viewDate,shearers);
-  const roleGroups=(function(){
-    /* v4.6.30 — a section holds anyone whose job role puts them there, anyone
-       added to it today, and anyone already carrying runs in that role. The last
-       one is what makes a split survive a reload without any extra storage. */
-    const inSection=(lbl,role)=>job.crew.filter(id=>{
-      if(!gc(id))return false;
-      if(getJobRole(job,id)==='Cook')return false;
-      return (getJobRole(job,id)||gc(id)?.role)===role
-        || extraIn(lbl).indexOf(id)>=0
-        || roleRunsFor(id,role)>0;
-    });
-    return [{lbl:'WOOL HANDLER',role:'Wool Handler'},
-            {lbl:'CLASSER',role:'Wool Classer'},
-            {lbl:'PENNER',role:'Penner'}]
-      .map(g=>({...g,ids:inSection(g.lbl,g.role)}))
-      .filter(g=>g.ids.length>0||addTo===g.lbl);
-  })();
-  /* Everyone on the job who could still be added to a section, minus the cook. */
-  const addableTo=(lbl,ids)=>job.crew.filter(id=>gc(id)&&getJobRole(job,id)!=='Cook'&&ids.indexOf(id)<0);
-  const addBtn=(lbl,ids)=>canEdit&&e('div',{style:{padding:'2px 0 6px 48px'}},
-    addTo===lbl
-      ?e('div',{style:{display:'flex',flexWrap:'wrap',gap:6}},
-          addableTo(lbl,ids).length===0
-            ?e('div',{style:{fontSize:12,color:'var(--dim)'}},'Everyone on this job is already here.')
-            :addableTo(lbl,ids).map(id=>e('button',{key:id,onClick:()=>addToSection(lbl,id),
-                style:{padding:'5px 10px',borderRadius:14,fontSize:12,fontWeight:700,cursor:'pointer',
-                  background:'var(--card2)',color:'var(--text)',border:'1px solid var(--border)'}},
-                (gc(id)||{}).name)),
-          e('button',{onClick:()=>setAddTo(null),
-            style:{padding:'5px 10px',borderRadius:14,fontSize:12,cursor:'pointer',
-              background:'transparent',color:'var(--dim)',border:'1px solid var(--border)'}},'Cancel'))
-      :e('button',{onClick:()=>setAddTo(lbl),
-          style:{padding:'3px 10px',borderRadius:6,fontSize:11,fontWeight:700,cursor:'pointer',
-            background:'var(--card2)',color:'var(--dim)',border:'1px dashed var(--border)'}},
-          '+ Add to '+lbl.toLowerCase()));
+  const roleGroups=[{lbl:'WOOL HANDLER',ids:shedStaff.filter(id=>(getJobRole(job,id)||gc(id)?.role)==='Wool Handler')},{lbl:'CLASSER',ids:shedStaff.filter(id=>(getJobRole(job,id)||gc(id)?.role)==='Wool Classer')},{lbl:'PENNER',ids:shedStaff.filter(id=>(getJobRole(job,id)||gc(id)?.role)==='Penner')}].filter(g=>g.ids.length>0);
 
   return e('div',null,
     /* DATE STRIP */
@@ -4490,50 +4795,34 @@ const flushMobDesc=(mid,v)=>{
       e('div',{className:'sht-hdr'},'\u2014 BF / Day / To Date'),
       e('div',{className:'sht-col-hdr-row'},e('div',{className:'sht-nc'},''),e('div',{className:'sht-ch sh'},'SH BF'),e('div',{className:'sht-ch sh'},'SH Day'),e('div',{className:'sht-ch sh'},'SH Tot'),hasCrutch&&e('div',{className:'sht-ch cr'},'CR BF'),hasCrutch&&e('div',{className:'sht-ch cr'},'CR Day'),hasCrutch&&e('div',{className:'sht-ch cr'},'CR Tot')),
       orderedShearers.map(id=>{const c=gc(id);if(!c)return null;const s=stats[id]||{shBF:0,shDay:0,crBF:0,crDay:0};const V=(val,cls)=>e('div',{className:`sht-v${cls?' '+cls:''}`},val>0?val:'—');return e('div',{key:id,className:'sht-row'},e('div',{className:'sht-name'},sn(c.name)),V(s.shBF),V(s.shDay,'today'),V(s.shBF+s.shDay,'tot'),hasCrutch&&V(s.crBF),hasCrutch&&V(s.crDay,'today'),hasCrutch&&V(s.crBF+s.crDay,'tot'));})
-      ,
-      /* v4.6.30 — put a shed hand on a stand for the day. Their job role, and so
-         their shed rate, is untouched; they simply gain a count column. */
-      addBtn('STAND',shearers)
     ),
     /* SHED STAFF */
     (shedStaff.length>0||pressers.length>0)&&e('div',{className:'shed-section'},
       e('div',{className:'shed-hdr'},'Shed Staff'),
-      roleGroups.map(({lbl,role,ids})=>e('div',{key:lbl},
+      roleGroups.map(({lbl,ids})=>e('div',{key:lbl},
         e('div',{className:'role-grp-lbl'},lbl),
-        ids.map(id=>{const c=gc(id);if(!c)return null;
-          /* v4.6.30 — runs are read and written PER ROLE for this section, so a
-             person sitting in two sections holds a figure in each. The stepper is
-             the same one as always; nothing special happens on a split day. */
-          const runs=roleRunsFor(id,role);
-          const allRuns=Object.values(job.shedTallies[id]||{}).reduce((a,b)=>a+b,0);
-          const bf=Object.entries(job.shedTallies[id]||{}).filter(([d])=>d<viewDate).reduce((a,[,b])=>a+b,0);
-          const ov=(rates.crewOverrides||{})[id];
-          const defR=role==='Wool Classer'?rates.classerPerRun:role==='Penner'?rates.pennerPerRun:rates.woolHandlerPerRun;
-          /* a per-person override belongs to their OWN role — it must not follow
-             them into a section they are only helping in */
-          const rdisp=(ov&&getJobRole(job,id)===role)?ov:(defR||80);
-          const guest=getJobRole(job,id)!==role;
-          return e('div',{key:id+'|'+role,className:'staff-row'},e(Av,{name:c.name,size:36}),
-            e('div',{className:'staff-info'},
-              e('div',{className:'staff-name'},c.name),
-              e('div',{className:'staff-rate-lbl'},
-                (isAdmin?'$'+rdisp+'/run':'')+(guest?(isAdmin?' \u00b7 ':'')+'usually '+(getJobRole(job,id)||'\u2014'):''))),
-            e('div',{className:'staff-stats'},
-              e('div',{className:'s-grp'},e('div',{className:'s-lbl'},'Runs'),
-                canEdit?e('div',{className:'rs'},
-                    e('button',{className:'rs-btn',disabled:runs<=0,onClick:()=>setRoleRuns(id,role,runs-1)},'\u2212'),
-                    e('div',{className:'rs-val'},runs),
-                    e('button',{className:'rs-btn',onClick:()=>setRoleRuns(id,role,runs+1)},'+'))
-                  :e('div',{className:'s-val'},runs)),
-              e('div',{className:'s-div'}),
-              e('div',{className:'s-grp'},e('div',{className:'s-lbl'},'B/F'),e('div',{className:'s-val'},bf)),
-              e('div',{className:'s-grp'},e('div',{className:'s-lbl'},'Day'),
-                e('div',{className:'s-val'},(job.shedTallies[id]||{})[viewDate]||0)),
-              e('div',{className:'s-grp'},e('div',{className:'s-lbl'},'To Date'),
-                e('div',{className:'s-val hi'},allRuns)))
+        ids.map(id=>{const c=gc(id);if(!c)return null;const runs=(job.shedTallies[id]||{})[viewDate]||0;const allRuns=Object.values(job.shedTallies[id]||{}).reduce((a,b)=>a+b,0);const bf=allRuns-runs;const ov=(rates.crewOverrides||{})[id];const defR=lbl==='CLASSER'?rates.classerPerRun:lbl==='PENNER'?rates.pennerPerRun:rates.woolHandlerPerRun;const rdisp=ov||(defR||80);
+          /* v4.6.24 — on a day split across roles the stepper is hidden. Tapping
+             it would write a legacy row that hydrate deliberately ignores, so the
+             number would not move and it would look broken. The editor is the
+             only way to change a split day. */
+          const sp=shedSplitFor(id); const split=isShedSplit(id);
+          const splitTxt=split?Object.keys(sp).filter(r=>sp[r]>0).sort()
+            .map(r=>sp[r]+' '+(SHED_ROLE_CODE[r]||r)).join(' + '):'';
+          return e('div',{key:id,className:'staff-row',style:{flexWrap:'wrap'}},e(Av,{name:c.name,size:36}),e('div',{className:'staff-info'},e('div',{className:'staff-name'},c.name),isAdmin&&e('div',{className:'staff-rate-lbl'},split?splitTxt:'$'+rdisp+'/run')),
+            e('div',{className:'staff-stats'},e('div',{className:'s-grp'},e('div',{className:'s-lbl'},'Runs'),split?e('div',{className:'s-val hi',onClick:()=>canEdit&&setSplitFor(splitFor===id?null:id),style:{cursor:canEdit?'pointer':'default'}},runs):canEdit?e('div',{className:'rs'},e('button',{className:'rs-btn',disabled:runs<=0,onClick:()=>setShed(id,runs-1)},'−'),e('div',{className:'rs-val'},runs),e('button',{className:'rs-btn',onClick:()=>setShed(id,runs+1)},'+'))
+              :e('div',{className:'s-val'},runs)),e('div',{className:'s-div'}),e('div',{className:'s-grp'},e('div',{className:'s-lbl'},'B/F'),e('div',{className:'s-val'},bf)),e('div',{className:'s-grp'},e('div',{className:'s-lbl'},'Today'),e('div',{className:'s-val'},runs)),e('div',{className:'s-grp'},e('div',{className:'s-lbl'},'To Date'),e('div',{className:'s-val hi'},allRuns))),
+            canEdit&&e('button',{onClick:()=>setSplitFor(splitFor===id?null:id),
+              style:{marginLeft:48,marginTop:2,padding:'3px 9px',borderRadius:6,fontSize:11,fontWeight:700,
+                border:'1px solid var(--border)',background:split?'var(--amberD)':'var(--card2)',
+                color:split?'var(--amber)':'var(--dim)',cursor:'pointer'}},
+              split?('Split \u00b7 '+splitTxt):'Split roles'),
+            splitFor===id&&e(ShedSplitEditor,{crewId:id,jobRole:getJobRole(job,id),
+              current:sp,dayTotal:runs,
+              onSave:byRole=>{setShedSplit(id,byRole);setSplitFor(null);},
+              onCancel:()=>setSplitFor(null)})
           );
-        }),
-        addBtn(lbl,ids)
+        })
       )),
       pressers.length>0&&e('div',null,
         e('div',{className:'role-grp-lbl'},'PRESSER'),
@@ -4735,7 +5024,20 @@ const flushMobDesc=(mid,v)=>{
         );
       })
     ),
-    e('div',{className:'notes-wrap'},e('div',{className:'notes-lbl'},'Notes — '+fmtDateLong(viewDate)),e('textarea',{className:'notes-ta',rows:3,placeholder:'Notes for the day...',value:(job.dayNotes||{})[viewDate]||'',disabled:!canEdit,onChange:ev=>setNote(ev.target.value)})),
+    e('div',{className:'notes-wrap'},
+      e('div',{className:'notes-lbl'},'Notes \u2014 '+fmtDateLong(viewDate)),
+      e('textarea',{className:'notes-ta',rows:3,
+        placeholder:noteMap===null?'Loading notes...':'Notes for the day \u2014 anyone can add',
+        value:noteValue,
+        /* v4.6.44 — no role gate, same as the whiteboard. Farmers included. */
+        onChange:ev=>setNote(ev.target.value)}),
+      noteServer&&noteServer.role&&noteServer.role!=='migrated'&&e('div',{
+        style:{fontSize:10,color:'var(--dim)',marginTop:3,textAlign:'right'}},
+        'Last edit: '+noteServer.role+(noteServer.at?' \u00b7 '+(()=>{
+          try{return new Date(noteServer.at).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});}
+          catch(e){return '';}
+        })():''))
+    ),
     e(BookPhotoPanel,{job,viewDate,role}), /* v4.6.11 */
     e('div',{style:{height:20}})
   );
@@ -5000,6 +5302,9 @@ function RCell({lbl,k,draft,onSet,hi,prefix,suffix,step}){
 }
 
 function AdminTab({job,setJob,onEdit,onDeleteFarm,onDeleteJob,onPublish}){
+  /* v4.6.53 — count what the delete will destroy, so the confirm is honest
+     rather than a generic warning. */
+  const [delCounts,setDelCounts]=useState(null);
   const [confirmDelete,setConfirmDelete]=useState(false);
   const [confirmDeleteJob,setConfirmDeleteJob]=useState(false);
   const [saved,setSaved]=useState(false);
@@ -5086,19 +5391,50 @@ function AdminTab({job,setJob,onEdit,onDeleteFarm,onDeleteJob,onPublish}){
         e('div',{className:'draft-banner-t'},'Draft — not yet sent'),
         e('div',{className:'draft-banner-s'},'Publish activates the job and opens Send Cards. Draft crew never receive SMS.')
       ),
-      e('button',{className:'draft-publish-btn',onClick:onPublish},'🚀 Publish')
+      e('button',{className:'draft-publish-btn',onClick:()=>onPublish(false)},'🚀 Publish'),
+      (job.crew||[]).length>0&&e('button',{className:'draft-publish-btn',
+        style:{marginLeft:8,background:'linear-gradient(135deg,#0e7490,#155e75)'},
+        onClick:()=>onPublish(true)},'🚀 Publish & send to crew')
     ),
     /* JOB DETAILS */
     e('div',{className:'admin-section'},
       e('div',{className:'admin-sec-hdr'},e('div',{className:'admin-sec-title'},'Job Details')),
       e('button',{className:'btn-p',onClick:onEdit,style:{width:'100%',marginBottom:8}},'✏️ Edit Job Details'),
-      !confirmDeleteJob&&e('button',{onClick:()=>setConfirmDeleteJob(true),style:{width:'100%',padding:'12px',background:'rgba(239,68,68,.1)',border:'1px solid rgba(239,68,68,.3)',borderRadius:8,color:'#ef4444',fontWeight:700,fontSize:14,cursor:'pointer'}},'🗑️ Delete This Job'),
+      !confirmDeleteJob&&e('button',{onClick:()=>{
+          setConfirmDeleteJob(true); setDelCounts(null);
+          /* count what will be destroyed — best effort, the dialog says so if it fails */
+          (async()=>{
+            try{
+              const r=await withTimeout(
+                sb.from('tally_entries').select('kind,value')
+                  .eq('contractor_slug',CONTRACTOR_SLUG).eq('job_id',job.id).limit(5000),
+                8000,'delcount_timeout');
+              if(r&&!r.error&&Array.isArray(r.data)){
+                let head=0,rows=r.data.length;
+                r.data.forEach(x=>{if(x.kind==='count')head+=Number(x.value)||0;});
+                setDelCounts({rows,head});
+              }else setDelCounts({failed:true});
+            }catch(e){setDelCounts({failed:true});}
+          })();
+        },style:{width:'100%',padding:'12px',background:'rgba(239,68,68,.1)',border:'1px solid rgba(239,68,68,.3)',borderRadius:8,color:'#ef4444',fontWeight:700,fontSize:14,cursor:'pointer'}},'🗑️ Delete This Job'),
       confirmDeleteJob&&e('div',{style:{background:'rgba(239,68,68,.06)',border:'1px solid rgba(239,68,68,.2)',borderRadius:10,padding:16,marginTop:4}},
         e('div',{style:{fontWeight:700,fontSize:14,marginBottom:6,color:'#ef4444'}},'Delete this job?'),
+        /* v4.6.53 — say what is actually being destroyed. The tallies are now
+           cascaded rather than orphaned, so this is the last chance to see the
+           head count before it goes. */
+        delCounts&&!delCounts.failed&&delCounts.rows>0&&e('div',{style:{fontSize:13,
+            color:'#ef4444',fontWeight:700,marginBottom:8,lineHeight:1.45}},
+          delCounts.head>0
+            ? delCounts.head.toLocaleString()+' head and '+delCounts.rows+' tally entries will be permanently deleted with this job.'
+            : delCounts.rows+' tally entries will be permanently deleted with this job.'),
+        delCounts&&delCounts.failed&&e('div',{style:{fontSize:12.5,color:'var(--amber)',
+          marginBottom:8,lineHeight:1.45}},'Could not check what this job holds \u2014 no signal. Wait until you are connected before deleting.'),
+        !delCounts&&e('div',{style:{fontSize:12.5,color:'var(--dim)',marginBottom:8}},'Checking what this job holds\u2026'),
         e('div',{style:{fontSize:13,color:'var(--muted)',marginBottom:14}},'All tallies, runs and pay data for this job will be permanently deleted.'),
         e('div',{style:{display:'flex',gap:10}},
           e('button',{className:'btn-g',style:{flex:1},onClick:()=>setConfirmDeleteJob(false)},'Cancel'),
-          e('button',{style:{flex:1,padding:'10px',background:'#ef4444',border:'none',borderRadius:8,color:'#fff',fontWeight:700,fontSize:14,cursor:'pointer'},onClick:onDeleteJob},'Yes, Delete Job')
+          e('button',{style:{flex:1,padding:'10px',background:'#ef4444',border:'none',borderRadius:8,color:'#fff',fontWeight:700,fontSize:14,cursor:'pointer'},disabled:!delCounts||delCounts.failed,
+            onClick:onDeleteJob},(!delCounts||delCounts.failed)?'Checking\u2026':'Yes, Delete Job')
         )
       )
     ),
@@ -5456,8 +5792,32 @@ function ProgressTab({job}){
 }
 /* ── OVERVIEW TAB ── */
 /* ── WHITEBOARD TAB ── */
+/* ══ v4.6.54 — THE WHITEBOARD IS AN INJURY LOG, TREAT IT LIKE ONE ════════════
+   Contractors use this to record RWS animal-welfare incidents — "white tag
+   wether / cut hock / stitched sprayed rattled". It was written as a casual
+   message board and had none of the protections the tally path has:
+
+   1. No timeout on the load. The v4.6.45 abort sweep missed it, same as the
+      access gate did.
+   2. Errors swallowed by an empty catch. A failed query left the list empty and
+      loading false, so a load failure rendered as a BLANK BOARD with nothing
+      saying so — reported live as "the whiteboard is missing" when every entry
+      was sitting safely on the server.
+   3. No local cache, so no signal meant no board at all.
+   4. Worst: doAdd added the entry to the on-screen list even when the insert
+      failed. Someone wrote an injury note, watched it appear, and it never
+      reached the server. For a compliance record that is the worst failure
+      available.
+
+   Now: timeout, cached per job, failures visible, and an unsent note is kept and
+   retried rather than faked. */
 function WhiteboardTab({job,role}){
-  const [entries,setEntries]=useState([]);
+  const LS_WB='mg_wb_'+CONTRACTOR_SLUG+'_';
+  const [entries,setEntries]=useState(()=>{
+    try{return lsGet(LS_WB+job.id)||[];}catch(e){return [];}
+  });
+  const [loadErr,setLoadErr]=useState('');
+  const [addErr,setAddErr]=useState('');
   const [loading,setLoading]=useState(true);
   const [text,setText]=useState('');
   const [authorRole,setAuthorRole]=useState(role==='farmer'?'Farmer':'Shearer'); /* v4.6.11 */
@@ -5465,18 +5825,42 @@ function WhiteboardTab({job,role}){
   const ROLES=['Farmer','Lead','Shearer','Staff'];
 
   const load=async()=>{
+    setLoadErr('');
     try{
-      const {data}=await sb.from('job_whiteboard')
-        .select('*')
-        .eq('job_id',job.id)
-        .eq('contractor_slug',CONTRACTOR_SLUG)
-        .order('created_at',{ascending:false});
-      if(data)setEntries(data);
-    }catch(e){}
+      const r=await withTimeout(
+        sb.from('job_whiteboard').select('*')
+          .eq('job_id',job.id).eq('contractor_slug',CONTRACTOR_SLUG).limit(2000)
+          .order('created_at',{ascending:false}),
+        8000,'whiteboard_load_timeout');
+      if(r&&r.error)throw new Error(r.error.message||'load failed');
+      if(r&&Array.isArray(r.data)){
+        /* keep anything still waiting to send, then take the server's list */
+        const pending=(lsGet(LS_WB+job.id)||[]).filter(x=>x&&x._unsent);
+        const merged=pending.concat(r.data.filter(d=>!pending.some(p=>p.id===d.id)));
+        setEntries(merged);
+        lsSet(LS_WB+job.id,merged);
+      }
+    }catch(e){
+      logSaveFailure(e.message==='whiteboard_load_timeout'?'timeout':'error','whiteboard_load',e.message);
+      setLoadErr('cached');   /* the list already holds the cached copy */
+    }
     setLoading(false);
   };
+  /* Retry anything that never made it, whenever the tab is opened. */
+  const flushUnsent=async()=>{
+    const pend=(lsGet(LS_WB+job.id)||[]).filter(x=>x&&x._unsent);
+    if(!pend.length)return;
+    for(const p of pend){
+      const {_unsent,...row}=p;
+      try{
+        const r=await withTimeout(sb.from('job_whiteboard').insert(row),12000,'whiteboard_flush_timeout');
+        if(r&&r.error)throw new Error(r.error.message);
+        setEntries(prev=>{const nx=prev.map(x=>x.id===p.id?row:x);lsSet(LS_WB+job.id,nx);return nx;});
+      }catch(e){ /* stays unsent, tries again next time */ }
+    }
+  };
 
-  useEffect(()=>{load();},[job.id]);
+  useEffect(()=>{load();flushUnsent();},[job.id]);
 
   const doAdd=async()=>{
     if(!text.trim())return;
@@ -5489,11 +5873,21 @@ function WhiteboardTab({job,role}){
       note:text.trim(),
       created_at:new Date().toISOString()
     };
+    setAddErr('');
     try{
-      await sb.from('job_whiteboard').insert(entry);
-      setEntries(p=>[entry,...p]);
+      const r=await withTimeout(sb.from('job_whiteboard').insert(entry),12000,'whiteboard_add_timeout');
+      if(r&&r.error)throw new Error(r.error.message||'insert failed');
+      setEntries(p=>{const nx=[entry,...p];lsSet(LS_WB+job.id,nx);return nx;});
       setText('');
-    }catch(e){}
+    }catch(e){
+      /* v4.6.54 — keep it, mark it unsent, and SAY SO. Never show a note as
+         saved when it is not: this is an injury record. */
+      logSaveFailure(e.message==='whiteboard_add_timeout'?'timeout':'error','whiteboard_add',e.message);
+      const un={...entry,_unsent:true};
+      setEntries(p=>{const nx=[un,...p];lsSet(LS_WB+job.id,nx);return nx;});
+      setText('');
+      setAddErr('Saved on this phone but not sent yet \u2014 it will send when you have signal. Do not clear the app.');
+    }
     setSaving(false);
   };
 
@@ -5512,6 +5906,20 @@ function WhiteboardTab({job,role}){
   const ROLE_COLORS={Farmer:'#0ea5e9',Lead:'var(--amber)',Shearer:'var(--green)',Staff:'#8b5cf6'};
 
   return e('div',{style:{padding:'0 0 100px 0'}},
+    /* v4.6.54 — a failed load must never look like an empty board. */
+    loadErr&&e('div',{style:{margin:'12px 16px 0',padding:'10px 12px',borderRadius:9,
+        background:'rgba(245,158,11,.14)',border:'1px solid var(--amber)',
+        color:'var(--amber)',fontSize:12.5,fontWeight:600,lineHeight:1.45}},
+      entries.length>0
+        ? 'Couldn\'t reach the server \u2014 showing the last copy saved on this phone. Newer notes from others may be missing.'
+        : 'Couldn\'t reach the server and there is no saved copy on this phone, so nothing can be shown. Notes already written are safe on the server \u2014 try again with signal.',
+      e('button',{onClick:()=>{setLoading(true);load();},
+        style:{display:'block',marginTop:6,background:'none',border:'none',padding:0,
+          color:'var(--amber)',fontSize:12,fontWeight:800,cursor:'pointer',
+          textDecoration:'underline'}},'Try again')),
+    addErr&&e('div',{style:{margin:'12px 16px 0',padding:'10px 12px',borderRadius:9,
+        background:'rgba(245,158,11,.14)',border:'1px solid var(--amber)',
+        color:'var(--amber)',fontSize:12.5,fontWeight:600,lineHeight:1.45}},addErr),
     /* Add note box — visible to all roles */
     e('div',{style:{margin:'12px 16px',background:'var(--card)',borderRadius:12,padding:16,border:'1px solid var(--border)'}},
       e('div',{style:{fontFamily:'var(--h)',fontSize:16,fontWeight:800,marginBottom:10}},'📋 Add to Whiteboard'),
@@ -5544,20 +5952,27 @@ function WhiteboardTab({job,role}){
 
     /* Entries */
     loading&&e('div',{style:{textAlign:'center',padding:'40px',color:'var(--muted)'}},'Loading...'),
-    !loading&&entries.length===0&&e('div',{style:{textAlign:'center',padding:'40px 24px',color:'var(--muted)'}},
+    !loading&&entries.length===0&&!loadErr&&e('div',{style:{textAlign:'center',padding:'40px 24px',color:'var(--muted)'}},
       e('div',{style:{fontSize:36,marginBottom:8}},'📋'),
       e('div',{style:{fontWeight:700,marginBottom:4}},'Whiteboard is empty'),
       e('div',{style:{fontSize:13}},'Add notes, observations or instructions above — visible to everyone on this job')
     ),
     !loading&&entries.map(entry=>e('div',{key:entry.id,
       style:{margin:'0 16px 10px',background:'var(--card)',borderRadius:12,padding:14,
-        border:'1px solid var(--border)',borderLeft:'3px solid '+(ROLE_COLORS[entry.author_role]||'var(--border)')}},
+        border:entry._unsent?'1px solid var(--amber)':'1px solid var(--border)',
+        borderLeft:'3px solid '+(entry._unsent?'var(--amber)':(ROLE_COLORS[entry.author_role]||'var(--border)'))}},
       e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:6}},
         e('div',{style:{display:'flex',alignItems:'center',gap:8}},
           e('span',{style:{fontSize:11,fontWeight:700,padding:'2px 8px',borderRadius:10,
             background:ROLE_COLORS[entry.author_role]||'var(--muted)',color:'#fff'}},
             entry.author_role),
-          e('span',{style:{fontSize:11,color:'var(--muted)'}},fmtTs(entry.created_at))
+          e('span',{style:{fontSize:11,color:'var(--muted)'}},fmtTs(entry.created_at)),
+          /* v4.6.54 — an unsent note must never look filed. This is an injury
+             record; showing it as saved when it is not is the failure that
+             matters most here. */
+          entry._unsent&&e('span',{style:{fontSize:10,fontWeight:800,padding:'2px 7px',
+            borderRadius:10,background:'var(--amber)',color:'#141414',letterSpacing:.3}},
+            'NOT SENT YET')
         ),
         (role==='admin'||role==='shed_lead')&&e('button',{
           type:'button',
@@ -5628,17 +6043,35 @@ function EditFarmModal({farm,onSave,onClose}){
    This panel is lead+admin, ADD ONLY: removing a worker can strip pay history, so that
    stays admin. New workers created here go to the contractor roster exactly as they do
    from the job-creation form (auto-assigned PIN and all). */
+/* ══ v4.6.52 — THE CREW ON A JOB IS NOW EDITABLE ══════════════════════════════
+   This panel could only ADD. That produced two live problems:
+
+   1. A person's role is snapshotted into the job's own crewDetails when they are
+      added, and changing their role in the database never touches jobs that
+      already exist. That snapshot is deliberate and must stay — one contractor
+      has a wool handler who presses on eight jobs and classes on five — but it
+      was invisible and uneditable, so a shearer moved to penner kept turning up
+      on the stand with no way to correct it.
+
+   2. Someone added by mistake could not be taken off. A rousie who pulled out
+      stayed on the job card and on the pay summary at zero runs.
+
+   Removing is allowed only when the person has NO recorded work on the job. With
+   work, it refuses and says so — silently dropping someone off a crew list is
+   exactly how a wool handler went unpaid for five runs. */
 function JobCrewPanel({job,setJob,role,crewList,addCrew}){
   const [open,setOpen]=useState(false);
   const [q,setQ]=useState('');
   const [showNew,setShowNew]=useState(false);
   const [justAdded,setJustAdded]=useState('');
+  const [busyId,setBusyId]=useState('');
+  const [blocked,setBlocked]=useState(null);   /* {id,name,rows} */
   const canAdd=role==='admin'||role==='shed_lead';
   if(!canAdd)return null;
   const onJobIds=job.crew||[];
   const onJob=onJobIds.map(id=>(crewList||[]).find(c=>c.id===id)).filter(Boolean);
   const qq=q.trim().toLowerCase();
-  const avail=(crewList||[]).filter(c=>!onJobIds.includes(c.id)&&(!qq||(c.name||'').toLowerCase().includes(qq)));
+  const avail=(crewList||[]).filter(c=>!onJobIds.includes(c.id)&&isActiveCrew(c)&&(!qq||(c.name||'').toLowerCase().includes(qq))); /* v4.6.51 — active only */
   const addExisting=c=>{
     if(onJobIds.includes(c.id))return;
     /* v4.6.6 sticky worker settings + role snapshot, same seed as job creation so pay
@@ -5647,16 +6080,97 @@ function JobCrewPanel({job,setJob,role,crewList,addCrew}){
     const next={...job,crew:[...onJobIds,c.id],
       rates:{...(job.rates||{}),crewDetails:{...((job.rates||{}).crewDetails||{}),[c.id]:det}}};
     setJob(()=>next);
+    logJobEvent(job.id,'crew_added',(c.name||c.id)+' ('+(c.role||'?')+')',role);
     dbSaveJob(next).catch(()=>{}); /* persist now — do not wait for a navigation event */
     setJustAdded(c.name);setQ('');
   };
   const handleNew=async c=>{await addCrew(c);setShowNew(false);addExisting(c);};
+
+  /* Change the role for THIS JOB only. The person's database record and every
+     other job are untouched. */
+  const setJobRole=(c,newRole)=>{
+    const prev=getJobRole(job,c.id)||c.role||'?';
+    if(newRole===prev)return;
+    const det={...(((job.rates||{}).crewDetails||{})[c.id]||{}),role:newRole};
+    const next={...job,rates:{...(job.rates||{}),
+      crewDetails:{...((job.rates||{}).crewDetails||{}),[c.id]:det}}};
+    setJob(()=>next);
+    logJobEvent(job.id,'crew_role_changed',(c.name||c.id)+': '+prev+' \u2192 '+newRole,role);
+    dbSaveJob(next).catch(()=>{});
+  };
+
+  /* Remove from THIS JOB only — never from the database. Refuses if they have
+     tallies here, and refuses if the check cannot run, rather than risk
+     orphaning recorded work. */
+  const removeFromJob=async c=>{
+    setBusyId(c.id); setBlocked(null);
+    try{
+      const r=await withTimeout(
+        sb.from('tally_entries').select('crew_id')
+          .eq('contractor_slug',CONTRACTOR_SLUG).eq('job_id',job.id)
+          .eq('crew_id',c.id).limit(1),
+        6000,'crew_remove_check_timeout');
+      if(!r||r.error||!Array.isArray(r.data))throw new Error('check failed');
+      if(r.data.length>0){ setBlocked({id:c.id,name:c.name}); setBusyId(''); return; }
+    }catch(ex){ setBlocked({id:c.id,name:c.name,offline:true}); setBusyId(''); return; }
+    const cd={...((job.rates||{}).crewDetails||{})};
+    delete cd[c.id];   /* drop the role snapshot too, or a stale role reappears
+                          if they are ever added back */
+    const next={...job,crew:(job.crew||[]).filter(x=>x!==c.id),
+      rates:{...(job.rates||{}),crewDetails:cd},
+      leadId:(job.leadId===c.id?null:job.leadId)};
+    setJob(()=>next);
+    logJobEvent(job.id,'crew_removed',(c.name||c.id),role);
+    dbSaveJob(next).catch(()=>{});
+    setBusyId('');
+  };
+  const ROLES=['Shearer','Crutcher','Wool Handler','Wool Classer','Presser','Penner','Cook'];
   return e('div',{className:'card',style:{margin:'0 16px 12px'}},
     e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between'}},
       e('div',{style:{fontWeight:800,fontSize:14}},'Crew on this job ('+onJob.length+')'),
       e('button',{onClick:()=>{setOpen(o=>!o);setJustAdded('');},style:{background:'rgba(245,158,11,.15)',border:'1px solid rgba(245,158,11,.3)',borderRadius:7,padding:'6px 10px',color:'var(--amber)',fontWeight:700,fontSize:12,cursor:'pointer'}},open?'Close':'+ Add crew')
     ),
     justAdded&&e('div',{style:{marginTop:8,fontSize:13,color:'var(--green,#22c55e)',fontWeight:600}},'✓ '+justAdded+' added to this job.'),
+
+    /* v4.6.52 — who is actually on the job, with their role for THIS job and a
+       way off it. The role shows "usually X" whenever it differs from their
+       database role, so an override is visible rather than buried. */
+    onJob.length>0&&e('div',{style:{marginTop:10}},
+      onJob.map(c=>{
+        const jr=getJobRole(job,c.id)||c.role||'?';
+        const differs=(c.role&&jr!==c.role);
+        const isLead=job.leadId===c.id;
+        return e('div',{key:c.id,style:{display:'flex',alignItems:'center',gap:8,
+            padding:'8px 0',borderTop:'1px solid var(--border)',flexWrap:'wrap'}},
+          e('div',{style:{flex:1,minWidth:120}},
+            e('div',{style:{fontWeight:700,fontSize:14}},c.name,
+              isLead&&e('span',{style:{marginLeft:6,fontSize:10,fontWeight:800,
+                color:'var(--amber)',letterSpacing:.5}},'LEAD')),
+            differs&&e('div',{style:{fontSize:11,color:'var(--dim)'}},'usually '+c.role)),
+          e('select',{className:'if-sel',value:jr,disabled:busyId===c.id,
+            onChange:ev=>setJobRole(c,ev.target.value),
+            style:{width:'auto',minWidth:124,fontSize:12,padding:'5px 8px'}},
+            ROLES.indexOf(jr)<0&&e('option',{value:jr},jr),
+            ROLES.map(r=>e('option',{key:r,value:r},r))),
+          e('button',{disabled:busyId===c.id,onClick:()=>removeFromJob(c),
+            title:'Remove from this job only',
+            style:{background:'rgba(239,68,68,.12)',border:'1px solid rgba(239,68,68,.3)',
+              borderRadius:7,padding:'5px 9px',color:'#ef4444',fontWeight:700,
+              fontSize:12,cursor:busyId===c.id?'wait':'pointer'}},
+            busyId===c.id?'…':'Remove'),
+          blocked&&blocked.id===c.id&&e('div',{style:{flexBasis:'100%',fontSize:11.5,
+              color:'var(--amber)',lineHeight:1.45,paddingTop:2}},
+            blocked.offline
+              ?'Could not check whether '+c.name+' has tallies on this job, so nothing was changed. Try again with signal.'
+              :c.name+' has tallies recorded on this job. Removing them would hide that work from the pay summary — clear their entries first, or leave them on.',
+            e('button',{onClick:()=>setBlocked(null),style:{marginLeft:6,background:'none',
+              border:'none',color:'var(--dim)',fontSize:11,cursor:'pointer',
+              textDecoration:'underline'}},'dismiss'))
+        );
+      }),
+      e('div',{style:{fontSize:11,color:'var(--dim)',marginTop:8,lineHeight:1.45}},
+        'Role changes here apply to this job only \u2014 the crew member\'s record and other jobs are unchanged.')
+    ),
     open&&e('div',{style:{marginTop:10}},
       e('input',{type:'text',className:'fi',placeholder:'Search crew…',value:q,onChange:ev=>setQ(ev.target.value),style:{marginBottom:8}}),
       avail.length===0&&e('div',{style:{color:'var(--muted)',fontSize:13,padding:'6px 0'}},qq?'No one matching — try + New crew member.':'Everyone on the roster is already on this job.'),
@@ -5678,7 +6192,7 @@ function OverviewTab({job,role,onSend,onBroadcast,canSend,onEditFarm,isDraft,onP
     let cancelled=false;
     const fetchViews=async()=>{
       try{
-        const {data}=await sb.from('job_views').select('crew_id,viewed_at').eq('job_id',job.id).eq('contractor_slug',CONTRACTOR_SLUG);
+        const {data}=await sb.from('job_views').select('crew_id,viewed_at').eq('job_id',job.id).eq('contractor_slug',CONTRACTOR_SLUG).limit(1000);
         if(!cancelled&&data){const v={};data.forEach(r=>{v[r.crew_id]=r.viewed_at;});setViews(v);}
       }catch(e){}
     };
@@ -5738,7 +6252,8 @@ function OverviewTab({job,role,onSend,onBroadcast,canSend,onEditFarm,isDraft,onP
     })(),
     /* Draft → show Publish button instead of Send */
     isDraft&&role==='admin'&&onPublish&&e('div',{className:'send-bar'},
-      e('button',{className:'send-btn',onClick:onPublish,style:{background:'linear-gradient(135deg,#dc2626,#991b1b)',boxShadow:'0 4px 16px rgba(220,38,38,.3)'}},'🚀 Publish Job & Send Cards to Crew')
+      e('button',{className:'send-btn',onClick:()=>onPublish(false),style:{background:'linear-gradient(135deg,#475569,#334155)',marginBottom:8}},'🚀 Publish'),
+      (job.crew||[]).length>0&&e('button',{className:'send-btn',onClick:()=>onPublish(true),style:{background:'linear-gradient(135deg,#dc2626,#991b1b)',boxShadow:'0 4px 16px rgba(220,38,38,.3)'}},'🚀 Publish & send cards to crew')
     ),
     /* SEND JOB CARDS — overview tab only (not shown for drafts) */
     canSend&&e('div',{className:'send-bar'},
@@ -5749,6 +6264,74 @@ function OverviewTab({job,role,onSend,onBroadcast,canSend,onEditFarm,isDraft,onP
   );
 }
 /* ── JOB DETAIL ── */
+/* ══ v4.6.50 — JOB LOG ════════════════════════════════════════════════════════
+   What happened to this job and when: broadcasts and cards sent, crew added,
+   status changes, and the save guards firing. Two sources, merged newest-first —
+   job_events (written from v4.6.50 on) and the guard_* rows in save_failures,
+   which already carry a job_id and go back further.
+
+   Read-only by design. It does not PREVENT a bad override; it makes one visible
+   without anyone querying the database. The prevention is getting crew and rates
+   out of the job blob. */
+function JobLogTab({job}){
+  const [rows,setRows]=useState(null);
+  const [err,setErr]=useState('');
+  useEffect(()=>{
+    let dead=false;
+    (async()=>{
+      try{
+        const [ev,gu]=await Promise.all([
+          withTimeout(sb.from('job_events')
+            .select('occurred_at,kind,actor_role,detail')
+            .eq('contractor_slug',CONTRACTOR_SLUG).eq('job_id',job.id)
+            .order('occurred_at',{ascending:false}).limit(200),8000,'joblog_timeout'),
+          withTimeout(sb.from('save_failures')
+            .select('occurred_at,reason,details')
+            .eq('contractor_slug',CONTRACTOR_SLUG).eq('job_id',job.id)
+            .like('reason','guard_%')
+            .order('occurred_at',{ascending:false}).limit(100),8000,'joblog_timeout')
+        ]);
+        if(dead)return;
+        const a=(((ev||{}).data)||[]).map(r=>({at:r.occurred_at,kind:r.kind,
+          who:r.actor_role,detail:r.detail,guard:false}));
+        const b=(((gu||{}).data)||[]).map(r=>({at:r.occurred_at,kind:r.reason,
+          who:null,detail:(typeof r.details==='string'?r.details:JSON.stringify(r.details||'')),guard:true}));
+        setRows(a.concat(b).sort((x,y)=>String(y.at).localeCompare(String(x.at))));
+      }catch(ex){ if(!dead)setErr(ex.message==='joblog_timeout'?'Timed out — pull to refresh':'Could not load the log'); }
+    })();
+    return ()=>{dead=true;};
+  },[job.id]);
+
+  const LABEL={published:'Published',crew_added:'Crew added',status_changed:'Status changed',
+    broadcast_sent:'Broadcast sent',job_card_sent:'Job card sent',farmer_sms_sent:'Farmer text sent',
+    guard_crew_restored:'Guard: crew restored',guard_status_kept:'Guard: status kept',
+    guard_rates_kept:'Guard: rates kept',guard_mobrate_kept:'Guard: mob rate kept'};
+  const fmt=at=>{const d=new Date(at);return isNaN(d)?String(at):
+    d.toLocaleDateString('en-AU',{day:'2-digit',month:'short'})+' '+
+    d.toLocaleTimeString('en-AU',{hour:'2-digit',minute:'2-digit'});};
+
+  if(err)return e('div',{style:{padding:'22px 16px',color:'var(--red)',fontSize:13}},err);
+  if(!rows)return e('div',{style:{padding:'26px 16px',textAlign:'center',color:'var(--muted)'}},'Loading\u2026');
+  if(rows.length===0)return e('div',{style:{padding:'26px 16px',textAlign:'center',color:'var(--muted)',fontSize:13,lineHeight:1.5}},
+    'Nothing logged for this job yet. Broadcasts, job cards, crew changes and status changes are recorded from here on.');
+
+  return e('div',{style:{padding:'10px 16px 24px'}},
+    rows.map((r,i)=>e('div',{key:i,style:{display:'flex',gap:10,padding:'9px 0',
+        borderTop:i?'1px solid var(--border)':'none'}},
+      e('div',{style:{width:74,flexShrink:0,fontSize:11,color:'var(--dim)',
+        fontVariantNumeric:'tabular-nums',paddingTop:2}},fmt(r.at)),
+      e('div',{style:{flex:1,minWidth:0}},
+        e('div',{style:{fontSize:13,fontWeight:700,
+            color:r.guard?'var(--amber)':'var(--text)'}},
+          LABEL[r.kind]||r.kind),
+        r.detail&&e('div',{style:{fontSize:11.5,color:'var(--muted)',
+          wordBreak:'break-word',lineHeight:1.4,marginTop:1}},r.detail),
+        r.who&&e('div',{style:{fontSize:10.5,color:'var(--dim)',marginTop:1}},'by '+r.who)))),
+    e('div',{style:{fontSize:11,color:'var(--dim)',marginTop:14,lineHeight:1.5}},
+      'Amber entries are the save guards catching a stale device. '
+      +'Events are recorded from v4.6.50 onward; guard entries go back further.')
+  );
+}
 function JobDetailScreen({job,setJob,role,setRole,stale,onBack,onSend,onBroadcast,onEdit,onDeleteJob,onPublish,initialTab,crewList,addCrew}){
   const [tab,setTab]=useState(initialTab||'tallies');
   const [showEditFarm,setShowEditFarm]=useState(false);
@@ -5767,7 +6350,12 @@ function JobDetailScreen({job,setJob,role,setRole,stale,onBack,onSend,onBroadcas
   /* Draft is out of the cycle — Draft → Active only via explicit Publish action */
   const cycleStatus=()=>setJob(prev=>{
     if(prev.status==='Draft')return prev; /* guard — Publish button does this */
-    return {...prev,status:STATUS_SEQ[(STATUS_SEQ.indexOf(prev.status)+1)%STATUS_SEQ.length]};
+    const next=STATUS_SEQ[(STATUS_SEQ.indexOf(prev.status)+1)%STATUS_SEQ.length];
+    /* v4.6.50 — Charged Out is an invoicing state one tap from Completed. Record
+       who moved it and when, so a job that turns up invoiced with the wrong day
+       in it can be traced without diffing snapshots. */
+    logJobEvent(prev.id,'status_changed',prev.status+' \u2192 '+next,role);
+    return {...prev,status:next};
   });
   const isDraft=job.status==='Draft';
   /* v4.6.10 - whiteboard unread badge (per-device seen; opening the tab marks seen) */
@@ -5782,7 +6370,10 @@ function JobDetailScreen({job,setJob,role,setRole,stale,onBack,onSend,onBroadcas
     try{const m=lsGet(LS_WB_SEEN)||{};m[job.id]=new Date().toISOString();lsSet(LS_WB_SEEN,m);}catch(err){}
     setWbCount(0);
   },[tab,job.id]);
-  const tabs=[['tallies','Tallies'],['progress','Progress'],['overview','Overview'],['whiteboard','📋'],['summary','Summary']];
+  /* v4.6.50 — Log tab, admin only. It is a record, not a control: nothing here
+     writes back and the pay engine never reads it. */
+  const tabs=[['tallies','Tallies'],['progress','Progress'],['overview','Overview'],['whiteboard','📋'],['summary','Summary']]
+    .concat(role==='admin'?[['log','Log']]:[]);
   if(role==='admin')tabs.push(['admin','Admin']);
   const canSend=(role==='admin'||role==='shed_lead')&&job.status!=='Completed'&&job.status!=='Charged Out'&&!isDraft;
   return e('div',null,
@@ -5817,12 +6408,16 @@ function JobDetailScreen({job,setJob,role,setRole,stale,onBack,onSend,onBroadcas
           e('div',{className:'draft-banner-t'},'This job is a draft'),
           e('div',{className:'draft-banner-s'},'Crew have NOT been notified. Publish to activate the job and send job cards.')
         ),
-        e('button',{className:'draft-publish-btn',onClick:onPublish},'🚀 Publish')
+        e('button',{className:'draft-publish-btn',onClick:()=>onPublish(false)},'🚀 Publish'),
+      (job.crew||[]).length>0&&e('button',{className:'draft-publish-btn',
+        style:{marginLeft:8,background:'linear-gradient(135deg,#0e7490,#155e75)'},
+        onClick:()=>onPublish(true)},'🚀 Publish & send to crew')
       ),
       e('div',{className:'tabs'},tabs.map(([k,l])=>e('button',{key:k,className:`tab-btn${tab===k?' on':''}`,onClick:()=>setTab(k)},
         (k==='whiteboard'&&wbCount>0)?e('span',null,l,e('span',{style:{marginLeft:4,background:'#e53e3e',color:'#fff',borderRadius:10,fontSize:'10px',padding:'1px 6px',fontWeight:800,verticalAlign:'middle'}},wbCount>9?'9+':wbCount)):l))),
       tab==='tallies'&&e(TallyTab,{job,setJob,role,viewDate,setViewDate}),
       tab==='progress'&&e(ProgressTab,{job}),
+      tab==='log'&&role==='admin'&&e(JobLogTab,{job}),
       tab==='overview'&&e(OverviewTab,{job,role,onSend,onBroadcast,canSend,onEditFarm:role==='admin'?()=>setShowEditFarm(true):null,isDraft,onPublish,setJob,crewList,addCrew}), /* v4.6.13 - crew panel needs roster + writer */
       tab==='whiteboard'&&e(WhiteboardTab,{job,role}),
       tab==='summary'&&e(SummaryTab,{job,setJob,role}),
@@ -5884,6 +6479,10 @@ function BroadcastModal({job,onClose,farmList,crewList}){
       const data=await res.json();
       setSentCount(data.sent||0);
       setStatus(data.failed>0?'partial':'done');
+      /* v4.6.50 — a broadcast left no trace at all before this. */
+      logJobEvent(job&&job.id,'broadcast_sent',
+        'to='+messages.length+'; sent='+(data.sent||0)+'; failed='+(data.failed||0)
+        +'; body="'+String(body||'').slice(0,120)+'"');
     }catch(e){setStatus('error');}
   };
 
@@ -6034,6 +6633,7 @@ function CrewSMSRow({id,c,views,status,onPreview,job,farmList,crewList,appUrl}){
     try{
       await fetch('/api/send-sms',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({messages:[{to:c.phone,body:buildJobCardSMS(job,id,farmList,crewList,appUrl)}]})});
+      logJobEvent(job&&job.id,'job_card_sent',(c.name||id));
       setIndivSent(true);
     }catch(e){}
     setIndivSending(false);
@@ -6076,6 +6676,7 @@ function FarmerSMSRow({job,views,onPreview,farmList,appUrl,farmerName,farmerPhon
     try{
       await fetch('/api/send-sms',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({messages:[{to:farmerPhone,body:buildFarmerSMS(job,farmerName||'there',farmerPhone,farmList,appUrl)}]})});
+      logJobEvent(job&&job.id,'farmer_sms_sent',(farmerName||'farmer'));
       setFSent(true);
     }catch(e){}
     setFSending(false);
@@ -6117,7 +6718,7 @@ function SMSModal({job,onClose,onPreview,farmList,crewList}){
   useEffect(()=>{
     const fetchViews=async()=>{
       try{
-        const {data}=await sb.from('job_views').select('crew_id,viewed_at').eq('job_id',job.id).eq('contractor_slug',CONTRACTOR_SLUG);
+        const {data}=await sb.from('job_views').select('crew_id,viewed_at').eq('job_id',job.id).eq('contractor_slug',CONTRACTOR_SLUG).limit(1000);
         if(data){const v={};data.forEach(r=>{v[r.crew_id]=r.viewed_at;});setViews(v);}
       }catch(e){}
     };
@@ -6363,7 +6964,8 @@ function NewJobModal({onClose,onCreate,farmList,crewList,addFarm,addCrew,jobs}){
 
   const ROLE_ORDER=['Shearer','Crutcher','Wool Handler','Wool Classer','Presser','Penner'];
   const crewByRole=ROLE_ORDER.reduce((acc,r)=>{
-    const members=crewList.filter(c=>c.role===r);
+    /* v4.6.51 — inactive crew are off-season and must not appear when crewing up */
+    const members=crewList.filter(c=>c.role===r&&isActiveCrew(c));
     if(members.length)acc.push({role:r,members});
     return acc;
   },[]);
@@ -6557,7 +7159,7 @@ function EditJobScreen({job,onSave,onClose,farmList,addFarm,crewList,addCrew}){
   const tog=id=>setSelCrew(p=>p.includes(id)?p.filter(x=>x!==id):[...p,id]);
   const handleAddCrew=c=>{addCrew(c);setSelCrew(p=>[...p,c.id]);setShowAddCrew(false);};
   const ROLE_ORDER=['Shearer','Crutcher','Wool Handler','Wool Classer','Presser','Penner'];
-  const crewByRole=ROLE_ORDER.reduce((acc,r)=>{const members=(crewList||[]).filter(c=>c.role===r);if(members.length)acc.push({role:r,members});return acc;},[]);
+  const crewByRole=ROLE_ORDER.reduce((acc,r)=>{const members=(crewList||[]).filter(c=>c.role===r&&isActiveCrew(c));if(members.length)acc.push({role:r,members});return acc;},[]); /* v4.6.51 — active only */
 
   const vf=farmQuery?farmList.filter(f=>f.name.toLowerCase().includes(farmQuery)||f.address.toLowerCase().includes(farmQuery)):farmList;
 
@@ -6705,15 +7307,19 @@ function SeasonStats({jobs,onClose}){
     setBusy(true); setErr('');
     (async()=>{
       try{
-        const r=await withTimeout(
-          sb.from('tally_entries')
-            .select('job_id,cell_date,kind,value,mob_type,mob_desc,crew_id')
-            .eq('contractor_slug',CONTRACTOR_SLUG)
-            .gte('cell_date',f).lte('cell_date',t),
-          12000,'seasonstats_timeout');
+        /* v4.6.55 — paged. Unpaged, a long period silently truncated and the
+           season read lower than the last 30 days. */
+        const data=await sbAll(()=>sb.from('tally_entries')
+          .select('job_id,cell_date,kind,value,mob_type,mob_desc,crew_id')
+          .eq('contractor_slug',CONTRACTOR_SLUG)
+          .gte('cell_date',f).lte('cell_date',t)
+          .order('cell_date',{ascending:true}).order('crew_id',{ascending:true}),
+          'seasonstats_timeout');
         if(dead)return;
-        if(r&&r.error)throw new Error(r.error.message);
-        setRows((r&&r.data)||[]);
+        setRows(data);
+        /* v4.6.55 — if paging could not complete, say so. A short total that
+           looks authoritative is what started this. */
+        if(data&&data._truncated)setErr('Too much data to total reliably for this period \u2014 try a shorter range. The figures below are incomplete.');
       }catch(ex){ if(!dead)setErr(ex.message==='seasonstats_timeout'?'Timed out — try a shorter period':(ex.message||'Load failed')); }
       finally{ if(!dead)setBusy(false); }
     })();
@@ -6722,22 +7328,13 @@ function SeasonStats({jobs,onClose}){
 
   const jobById={}; (jobs||[]).forEach(j=>{jobById[j.id]=j;});
   const shedName=jid=>{const j=jobById[jid];if(!j)return'(unknown job)';
-    const f=gf(j.farmId);return (f&&f.name)||j.jobName||j.jobNumber||'(unnamed)';};
+    const f=gf(j.farmId);const nm=(f&&f.name)||j.jobName||'(unnamed)';
+  return nm+(j.jobNumber?' (#'+j.jobNumber+')':'');};  /* v4.6.46 — identify the job, not just the farm */
 
   /* ── aggregate ──────────────────────────────────────────────────────────── */
   const agg=(()=>{
     const base={sh:0,cr:0,runs:0,bales:0,days:{},best:0,bestDay:null};
     const byPerson={},byShed={},byMonth={};
-    /* v4.6.31 — pay-week buckets, per person. This is the one thing totals cannot
-       show: direction. A shearer can hold a respectable season figure while having
-       dropped 20% over a month, and only a week-by-week view surfaces it.
-       Uses the contractor's own payday so the weeks line up with the pay run. */
-    const payDay=(function(){
-      for(const j of (jobs||[])){const p=j&&j.rates&&j.rates.payDayOfWeek;
-        if(p!==undefined&&p!==null&&p!=='')return Number(p);}
-      return 5; /* Friday */
-    })();
-    const byWeek={};   /* crewId -> weekEnd -> figures */
     let tot={sh:0,cr:0,runs:0,bales:0,days:{},sheds:{}};
     const dayHead={};   /* crew|date -> head, for best-day */
     (rows||[]).forEach(r=>{
@@ -6748,15 +7345,11 @@ function SeasonStats({jobs,onClose}){
       const sName=shedName(r.job_id);
       const sh=bucket(byShed,sName);
       const mo=bucket(byMonth,String(r.cell_date).slice(0,7));
-      const wk=getPeriodForDate(String(r.cell_date),payDay).end;
-      const wb=(byWeek[r.crew_id]||(byWeek[r.crew_id]={}));
-      const w=(wb[wk]||(wb[wk]={sh:0,cr:0,runs:0,days:{}}));
       if(r.kind==='count'){
         /* legacy rows have no mob_type — fall back to the job's own type */
         const type=r.mob_type||(j&&j.type)||'Shearing';
         const key=type==='Crutching'?'cr':'sh';
         [p,sh,mo].forEach(o=>{o[key]+=v;});
-        w[key]+=v; w.days[r.cell_date]=1;
         tot[key]+=v;
         const dk=r.crew_id+'|'+r.cell_date;
         dayHead[dk]=(dayHead[dk]||0)+v;
@@ -6764,7 +7357,6 @@ function SeasonStats({jobs,onClose}){
         tot.days[r.cell_date]=1; tot.sheds[sName]=1;
       }else if(r.kind==='shed_runs'){
         [p,sh,mo].forEach(o=>{o.runs+=v;o.days[r.cell_date]=1;});
-        w.runs+=v; w.days[r.cell_date]=1;
         tot.runs+=v; tot.days[r.cell_date]=1; tot.sheds[sName]=1;
       }else if(r.kind==='bales'){
         [p,sh,mo].forEach(o=>{o.bales+=v;});
@@ -6775,7 +7367,7 @@ function SeasonStats({jobs,onClose}){
       const [cid,d]=dk.split('|'); const p=byPerson[cid]; if(!p)return;
       if(dayHead[dk]>p.best){p.best=dayHead[dk];p.bestDay=d;}
     });
-    return {byPerson,byShed,byMonth,byWeek,tot};
+    return {byPerson,byShed,byMonth,tot};
   })();
 
   const roleOf=id=>{const c=gc(id);return (c&&c.role)||'—';};
@@ -6790,18 +7382,6 @@ function SeasonStats({jobs,onClose}){
     .filter(r=>!q||r.name.toLowerCase().includes(q.toLowerCase()))
     .sort((a,b)=>(b.sh+b.cr)-(a.sh+a.cr));
   const monthRows=Object.keys(agg.byMonth).sort().map(k=>({name:k,...agg.byMonth[k]}));
-  /* Same people, same filters as the person view — newest week first, with the
-     change against the week before so a slide is visible at a glance. */
-  const weekRows=personRows.map(p=>{
-    const wk=agg.byWeek[p.id]||{};
-    const weeks=Object.keys(wk).sort().reverse().map(k=>({end:k,...wk[k]}));
-    weeks.forEach((w,i)=>{
-      const prev=weeks[i+1];
-      w.head=w.sh+w.cr;
-      w.delta=prev?(w.head-(prev.sh+prev.cr)):null;
-    });
-    return {...p,weeks};
-  }).filter(p=>p.weeks.length>0);
 
   const nDays=o=>Object.keys(o.days||{}).length;
   const num=n=>(Number(n)||0).toLocaleString();
@@ -6850,9 +7430,9 @@ function SeasonStats({jobs,onClose}){
             e('div',{style:{fontSize:19,fontWeight:800,fontVariantNumeric:'tabular-nums'}},v)))),
 
         e('div',{style:{display:'flex',borderBottom:'1px solid var(--border)',marginBottom:10}},
-          tab('person','By person'),tab('week','By week'),tab('shed','By shed'),tab('month','By month')),
+          tab('person','By person'),tab('shed','By shed'),tab('month','By month')),
 
-        (view==='person'||view==='week')&&e('div',{style:{display:'flex',gap:6,marginBottom:10}},
+        (view==='person')&&e('div',{style:{display:'flex',gap:6,marginBottom:10}},
           [['all','All'],['shearers','Shearers'],['staff','Shed staff'],['cook','Cook']].map(([k,l])=>
             e('button',{key:k,onClick:()=>setRoleFilt(k),
               style:{padding:'6px 11px',fontSize:12,borderRadius:14,cursor:'pointer',
@@ -6860,7 +7440,7 @@ function SeasonStats({jobs,onClose}){
                 color:roleFilt===k?'var(--amber)':'var(--muted)',
                 border:'1px solid '+(roleFilt===k?'var(--amber)':'var(--border)'),fontWeight:700}},l))),
 
-        view!=='month'&&e('input',{className:'fi',placeholder:view==='shed'?'Search shed\u2026':'Search name or role\u2026',
+        view!=='month'&&e('input',{className:'fi',placeholder:view==='person'?'Search name or role\u2026':'Search shed\u2026',
           value:q,onChange:ev=>setQ(ev.target.value),style:{marginBottom:10}}),
 
         view==='person'&&e('div',null,
@@ -6877,32 +7457,6 @@ function SeasonStats({jobs,onClose}){
               cell('Days',num(nDays(r))),
               cell('Avg/day',nDays(r)?num(Math.round((r.sh+r.cr)/nDays(r))):'\u2014'),
               cell('Best',r.best?num(r.best):'\u2014'))))),
-
-        view==='week'&&e('div',null,
-          e('div',{style:{fontSize:11,color:'var(--dim)',marginBottom:8}},
-            'Pay weeks, newest first. The arrow compares each week with the one before it.'),
-          weekRows.length===0&&e('div',{style:{textAlign:'center',color:'var(--muted)',padding:'26px 0'}},'Nothing in this period.'),
-          weekRows.map(p=>e('div',{key:p.id,style:{borderTop:'1px solid var(--border)',padding:'9px 2px 4px'}},
-            e('div',{style:{display:'flex',alignItems:'baseline',gap:8,marginBottom:4}},
-              e('div',{className:'ss-nm'},p.name),
-              e('div',{className:'ss-rl'},p.role)),
-            p.weeks.map(w=>{
-              const up=w.delta!=null&&w.delta>0, dn=w.delta!=null&&w.delta<0;
-              return e('div',{key:w.end,style:{display:'flex',alignItems:'center',gap:8,
-                  padding:'3px 0 3px 10px',fontSize:12.5}},
-                e('div',{style:{minWidth:78,color:'var(--dim)'}},'wk '+fmtDate(w.end)),
-                e('div',{style:{flex:1,fontVariantNumeric:'tabular-nums'}},
-                  (w.sh?num(w.sh)+' shorn':'')
-                  +(w.sh&&w.cr?' \u00b7 ':'')
-                  +(w.cr?num(w.cr)+' crut':'')
-                  +((w.sh||w.cr)&&w.runs?' \u00b7 ':'')
-                  +(w.runs?num(w.runs)+' runs':'')
-                  +'  \u00b7 '+Object.keys(w.days).length+'d'),
-                w.delta!=null&&w.head>0&&e('div',{style:{minWidth:56,textAlign:'right',fontWeight:700,
-                    color:up?'var(--green)':dn?'var(--red)':'var(--dim)'}},
-                  (up?'\u25b2 +':dn?'\u25bc ':'\u2014 ')+(w.delta!==0?num(w.delta):'')));
-            })
-          ))),
 
         view==='shed'&&e('div',null,
           head(['Shorn','Crut','Bales','Days']),
@@ -6973,21 +7527,25 @@ function MyTallies({myId,me,jobs}){
     setBusy(true);setErr('');setNear(null);
     (async()=>{
       try{
-        const r=await withTimeout(
-          sb.from('tally_entries')
-            .select('job_id,cell_date,kind,value,mob_type')
-            .eq('contractor_slug',CONTRACTOR_SLUG)
-            .eq('crew_id',myId)
-            .gte('cell_date',f).lte('cell_date',t),
-          8000,'mytallies_timeout');
+        /* v4.6.55 — paged. A shearer's own season had the same silent
+           truncation as the contractor's Season stats. */
+        const data=await sbAll(()=>sb.from('tally_entries')
+          .select('job_id,cell_date,kind,value,mob_type')
+          .eq('contractor_slug',CONTRACTOR_SLUG)
+          .eq('crew_id',myId)
+          .gte('cell_date',f).lte('cell_date',t)
+          .order('cell_date',{ascending:true}),
+          'mytallies_timeout',{ms:8000});
         if(dead)return;
-        if(r&&r.error)throw new Error(r.error.message);
-        const data=(r&&r.data)||[];
+        if(data&&data._truncated)setErr('Too much data to total reliably \u2014 try a shorter period.');
         setRows(data);
         if(!data.length){
+          /* only the earliest and latest date are used, so bound it explicitly
+             rather than pulling a whole career */
           const n=await withTimeout(
             sb.from('tally_entries').select('cell_date')
-              .eq('contractor_slug',CONTRACTOR_SLUG).eq('crew_id',myId),
+              .eq('contractor_slug',CONTRACTOR_SLUG).eq('crew_id',myId)
+              .order('cell_date',{ascending:true}).limit(5000),
             8000,'mytallies_near_timeout').catch(()=>null);
           if(dead)return;
           const ds=((n&&n.data)||[]).map(x=>x.cell_date).sort();
@@ -7462,6 +8020,8 @@ function DatabaseScreen({farmList,crewList,addFarm,addCrew,onClose,setFarmList,s
   const [editCrew,setEditCrew]=useState(null);
   const [confirmDeleteFarm,setConfirmDeleteFarm]=useState(null);
   const [confirmDeleteCrew,setConfirmDeleteCrew]=useState(null);
+  const [deleteBlocked,setDeleteBlocked]=useState(null); /* v4.6.51 */
+  const [roleSpread,setRoleSpread]=useState(null);        /* v4.6.52 */
 
   const handleSaveFarm=f=>{
     const idx=FARMS.findIndex(x=>x.id===f.id);
@@ -7471,24 +8031,82 @@ function DatabaseScreen({farmList,crewList,addFarm,addCrew,onClose,setFarmList,s
     setEditFarm(null);setShowAddFarm(false);
   };
   const handleSaveCrew=c=>{
+    /* v4.6.52 — a job snapshots a person's role into its own crewDetails when
+       they are added, so changing the role here does NOT touch jobs that already
+       exist. That is deliberate (a wool handler who presses on some jobs must
+       keep doing so), but it left a shearer moved to penner still on the stand
+       with nothing explaining why. Detect it and offer to apply the change to
+       ACTIVE jobs only — Completed and Charged Out are history and stay put. */
+    const before=CREW.find(x=>x.id===c.id);
+    const roleChanged=!!before&&before.role&&c.role&&before.role!==c.role;
     const idx=CREW.findIndex(x=>x.id===c.id);
     if(idx>=0)CREW.splice(idx,1,c);else CREW.push(c);
     setCrewList(p=>{const n=p.find(x=>x.id===c.id)?p.map(x=>x.id===c.id?c:x):[...p,c];syncLookups(FARMS,n);return n;});
     dbSaveCrew(c).catch(()=>{});
     setEditCrew(null);
+    if(roleChanged){
+      const affected=(JOBS_LU||[]).filter(j=>j&&j.status==='Active'
+        &&(j.crew||[]).indexOf(c.id)>=0
+        &&(getJobRole(j,c.id)||'')===before.role);
+      if(affected.length>0)setRoleSpread({crew:c,from:before.role,to:c.role,jobs:affected});
+    }
+  };
+  /* Apply the new role to the active jobs that still carry the old one. */
+  const applyRoleSpread=async()=>{
+    const sp=roleSpread; if(!sp)return;
+    setRoleSpread(null);
+    for(const j of sp.jobs){
+      const det={...(((j.rates||{}).crewDetails||{})[sp.crew.id]||{}),role:sp.to};
+      const next={...j,rates:{...(j.rates||{}),
+        crewDetails:{...((j.rates||{}).crewDetails||{}),[sp.crew.id]:det}}};
+      const k=(JOBS_LU||[]).findIndex(x=>x&&x.id===j.id);
+      if(k>=0)JOBS_LU.splice(k,1,next);
+      logJobEvent(j.id,'crew_role_changed',
+        (sp.crew.name||sp.crew.id)+': '+sp.from+' \u2192 '+sp.to+' (applied from database)','admin');
+      await dbSaveJob(next).catch(()=>{});
+    }
   };
   const handleDeleteFarm=id=>{
     setFarmList(p=>{const n=p.filter(f=>f.id!==id);syncLookups(n,CREW);return n;});
     dbDeleteFarm(id);setConfirmDeleteFarm(null);
   };
-  const handleDeleteCrew=id=>{
+  /* v4.6.51 — set a crew member active or inactive. The record and all their
+     tally history stay exactly where they are; only their visibility in the
+     pickers changes. */
+  const setCrewActive=(c,active)=>{
+    const next={...c}; if(active)delete next.active; else next.active=false;
+    setCrewList(p=>{const n=p.map(x=>x.id===c.id?next:x);syncLookups(FARMS,n);return n;});
+    dbSaveCrew(next).catch(()=>{});
+  };
+  /* v4.6.51 — a hard delete orphans every tally row the person has, which is how
+     thousands of head went unattributed and someone went unpaid. Check first;
+     if they have recorded work, refuse and point at Inactive instead. The check
+     is one query and only runs when someone actually presses delete. */
+  const handleDeleteCrew=async id=>{
+    try{
+      const r=await withTimeout(
+        sb.from('tally_entries').select('crew_id')
+          .eq('contractor_slug',CONTRACTOR_SLUG).eq('crew_id',id).limit(1),
+        6000,'crew_delete_check_timeout');
+      if(r&&!r.error&&Array.isArray(r.data)&&r.data.length>0){
+        setConfirmDeleteCrew(null);
+        setDeleteBlocked(id);
+        return;
+      }
+    }catch(ex){
+      /* Could not check — refuse rather than risk orphaning history. */
+      setConfirmDeleteCrew(null); setDeleteBlocked(id); return;
+    }
     setCrewList(p=>{const n=p.filter(c=>c.id!==id);syncLookups(FARMS,n);return n;});
     dbDeleteCrew(id); /* v4.6.11a */
     setConfirmDeleteCrew(null);
   };
 
   const ROLE_ORDER=['Shearer','Crutcher','Wool Handler','Wool Classer','Presser','Penner'];
-  const crewByRole=ROLE_ORDER.reduce((acc,r)=>{const members=crewList.filter(c=>c.role===r);if(members.length)acc.push({role:r,members});return acc;},[]);
+  /* v4.6.51 — the database is the one place inactive crew stay visible, so they
+     can be brought back. Pickers elsewhere show active only. */
+  const crewByRole=ROLE_ORDER.reduce((acc,r)=>{const members=crewList.filter(c=>c.role===r&&isActiveCrew(c));if(members.length)acc.push({role:r,members});return acc;},[]);
+  const inactiveCrew=crewList.filter(c=>!isActiveCrew(c));
 
   return e('div',{style:{position:'fixed',inset:0,background:'var(--bg)',zIndex:200,display:'flex',flexDirection:'column'}},
     e('div',{style:{background:'var(--hdr)',padding:'16px',display:'flex',alignItems:'center',gap:12,position:'sticky',top:0,zIndex:10}},
@@ -7564,8 +8182,14 @@ function DatabaseScreen({farmList,crewList,addFarm,addCrew,onClose,setFarmList,s
                 ,
                   e(CrewPinRow,{c:c,onSave:handleSaveCrew}) /* v4.6.12 */
                 ),
-                e('div',{style:{display:'flex',gap:8}},
+                e('div',{style:{display:'flex',gap:8,flexWrap:'wrap',justifyContent:'flex-end'}},
                   e('button',{onClick:()=>{setEditCrew(c.id);setConfirmDeleteCrew(null);},style:{background:'rgba(245,158,11,.15)',border:'1px solid rgba(245,158,11,.3)',borderRadius:7,padding:'6px 10px',color:'var(--amber)',fontWeight:700,fontSize:12,cursor:'pointer'}},'✏️ Edit'),
+                  /* v4.6.51 — the off-season switch. Keeps the person and every
+                     tally they have; just takes them out of the pickers. */
+                  e('button',{onClick:()=>setCrewActive(c,false),style:{background:'var(--card2)',border:'1px solid var(--border)',borderRadius:7,padding:'6px 10px',color:'var(--muted)',fontWeight:700,fontSize:12,cursor:'pointer'}},'Make inactive'),
+                  deleteBlocked===c.id&&e('div',{style:{fontSize:11.5,color:'var(--amber)',maxWidth:210,lineHeight:1.4,textAlign:'right'}},
+                    c.name+' has tallies recorded, so deleting would orphan that work and break past pay summaries. Use Make inactive instead.',
+                    e('button',{onClick:()=>setDeleteBlocked(null),style:{display:'block',marginLeft:'auto',marginTop:4,background:'none',border:'none',color:'var(--dim)',fontSize:11,cursor:'pointer',textDecoration:'underline'}},'dismiss')),
                   confirmDeleteCrew===c.id
                     ?e('div',{style:{display:'flex',gap:6,alignItems:'center'}},
                         e('span',{style:{fontSize:12,color:'#ef4444',fontWeight:600}},'Sure?'),
@@ -7576,7 +8200,45 @@ function DatabaseScreen({farmList,crewList,addFarm,addCrew,onClose,setFarmList,s
                 )
               )
           ))
-        ))
+        )),
+        /* v4.6.51 — inactive crew live here and nowhere else. Reactivating brings
+           back the SAME person, same id, history intact — which also stops a lead
+           creating a second record because the original was not in the list. */
+        /* v4.6.52 — the prompt that closes the gap between the database role and
+           the jobs already carrying the old one. */
+        roleSpread&&e('div',{style:{marginTop:14,padding:'12px 14px',borderRadius:10,
+            background:'rgba(245,158,11,.12)',border:'1px solid var(--amber)'}},
+          e('div',{style:{fontSize:13,fontWeight:700,color:'var(--amber)',marginBottom:4}},
+            roleSpread.crew.name+' is now a '+roleSpread.to),
+          e('div',{style:{fontSize:12,color:'var(--muted)',lineHeight:1.5,marginBottom:10}},
+            roleSpread.jobs.length+' active job'+(roleSpread.jobs.length>1?'s':'')
+            +' still ha'+(roleSpread.jobs.length>1?'ve':'s')+' them as '+roleSpread.from
+            +'. Apply the new role to those too? Completed and charged-out jobs are left alone.'),
+          e('div',{style:{fontSize:11,color:'var(--dim)',marginBottom:10}},
+            roleSpread.jobs.map(j=>j.jobNumber).join(', ')),
+          e('div',{style:{display:'flex',gap:8}},
+            e('button',{onClick:applyRoleSpread,style:{background:'var(--amber)',border:'none',
+              borderRadius:7,padding:'8px 14px',color:'#141414',fontWeight:800,fontSize:12.5,
+              cursor:'pointer'}},'Apply to '+roleSpread.jobs.length+' job'+(roleSpread.jobs.length>1?'s':'')),
+            e('button',{onClick:()=>setRoleSpread(null),style:{background:'var(--card2)',
+              border:'1px solid var(--border)',borderRadius:7,padding:'8px 14px',
+              color:'var(--muted)',fontWeight:700,fontSize:12.5,cursor:'pointer'}},'Leave them'))),
+        inactiveCrew.length>0&&e('div',{style:{marginTop:22}},
+          e('div',{style:{fontFamily:'var(--h)',fontSize:13,fontWeight:700,letterSpacing:1,
+            textTransform:'uppercase',color:'var(--dim)',marginBottom:4}},'Inactive \u00b7 '+inactiveCrew.length),
+          e('div',{style:{fontSize:11.5,color:'var(--dim)',marginBottom:10,lineHeight:1.45}},
+            'Off the crew pickers, but every tally they have is kept. Bring them back next season and they return as the same person.'),
+          inactiveCrew.map(c=>e('div',{key:c.id,style:{background:'var(--card)',borderRadius:12,
+              padding:'12px 14px',marginBottom:8,border:'1px solid var(--border)',opacity:.72,
+              display:'flex',justifyContent:'space-between',alignItems:'center',gap:10}},
+            e('div',null,
+              e('div',{style:{fontWeight:700,fontSize:15}},c.name),
+              e('div',{style:{fontSize:12,color:'var(--muted)',marginTop:2}},c.role+(c.phone?' \u00b7 '+c.phone:''))),
+            e('button',{onClick:()=>setCrewActive(c,true),
+              style:{background:'rgba(34,197,94,.15)',border:'1px solid rgba(34,197,94,.35)',
+                borderRadius:7,padding:'6px 12px',color:'#22c55e',fontWeight:700,fontSize:12,
+                cursor:'pointer',flexShrink:0}},'Reactivate')))
+        )
       )
     )
   );
@@ -8218,6 +8880,17 @@ function App(){
             setFresh(true,'goOnline_refetch');
             dirtyRef.current=false; /* state is now fresh from Supabase, not dirty */
             logSaveFailure('diag_load','goOnline_dbLoad','promoted_to_fresh');
+          }else{
+            /* v4.6.43 — this branch did not exist. The jobs pushed into state
+               above came from the CACHE, but freshness was left alone, so a
+               device that booted cleanly in the morning stayed flagged fresh all
+               day through repeated failed reloads: no stale banner, and the save
+               paths stayed armed because they gate on isFreshRef. That is how a
+               device ends up confidently writing an old copy over a good one.
+               mountLoad and the visibility revalidate both demote correctly;
+               this path was the one that did not. */
+            setFresh(false,'goOnline_from_cache');
+            logSaveFailure('diag_load','goOnline_dbLoad','stale_from_cache;online='+navigator.onLine);
           }
         });
       }else{
@@ -8258,8 +8931,46 @@ function App(){
      self-healing without user action. */
   useEffect(()=>{
     let running=false; /* v4.6.3g — re-entrancy guard: never let a slow flush overlap the next tick */
+    let staleTries=0;
     const tick=async()=>{
       if(running)return;
+      /* v4.6.43a — STALE RECOVERY. Everything below (and autosave, and flushNow)
+         is gated on isFreshRef, so a device demoted to stale stops saving jobs
+         AND stops draining the tally queue. Before v4.6.43 nothing demoted on
+         this path so the trap did not exist; now that goOnline demotes honestly,
+         a device needs a way back that does not depend on the user happening to
+         background and reopen the app. On satellite or a hotspot the browser
+         never fires 'offline', so it never fires 'online' either, and that was
+         the only other way out. Retry a real load every third tick (~60s) while
+         online and stale, and promote if it comes back from the server. */
+      if(navigator.onLine&&!isFreshRef.current&&isLoaded.current){
+        staleTries++;
+        if(staleTries%3===0){
+          running=true;
+          try{
+            const r=await dbLoad();
+            if(r&&!r.fromCache){
+              if(dirtyRef.current){
+                /* Local edits made while saves were blocked. Do NOT replace state
+                   with the server copy — that would destroy a shed's work, which
+                   is worse than the stall this is fixing. Promote only, so the
+                   local changes save up through the guards on the next pass. */
+                setFresh(true,'stale_recovery_dirty');
+                logSaveFailure('diag_load','stale_recovery','promoted_dirty;ticks='+staleTries);
+              }else{
+                syncLookups(r.farms,r.crew);
+                suppressNextSaveRef.current=true;
+                setJobs(r.jobs.map(j=>migrateJobRoles(j,r.crew)));
+                setFarmList(r.farms);setCrewList(r.crew);
+                setFresh(true,'stale_recovery');
+                logSaveFailure('diag_load','stale_recovery','recovered_clean;ticks='+staleTries);
+              }
+            }
+          }catch(e){}finally{running=false;}
+        }
+        return;
+      }
+      staleTries=0;
       if(!navigator.onLine||!isFreshRef.current)return;
       /* Only drain the per-CELL tally queue here. The whole-job queue (LS_QUEUE)
          pushes a stripped job BLOB, and a background push of a stale blob is the
@@ -8490,7 +9201,7 @@ function App(){
   },[]);
 
   const addFarm=async f=>{setFarmList(p=>{const n=[...p,f];syncLookups(n,CREW);return n;});await dbSaveFarm(f).catch(()=>{});};
-  const addCrew=async c=>{if(!c.pin)c.pin=genCrewPin(); /* v4.6.12 - auto-assign at creation */
+  const addCrew=async c=>{if(!c.pin&&crewPinsEnabled())c.pin=genCrewPin(); /* v4.6.12 auto-assign; v4.6.48 skipped when the contractor has crew PINs off */
   setCrewList(p=>{const n=[...p,c];syncLookups(FARMS,n);return n;});await dbSaveCrew(c).catch(()=>{});};
   const gfl=id=>farmList.find(f=>f.id===id);
   const gcl=id=>crewList.find(c=>c.id===id);
@@ -8566,15 +9277,21 @@ function App(){
     setScreen('schedule');setSelJobId(null);
   };
   /* Publish a draft: status→Active, save, open Send Cards modal on the job */
-  const publishJob=async()=>{
+  /* v4.6.49 — publishing is now a choice. It used to always open the SMS modal
+     when the job had crew, so a contractor who publishes first and edits after
+     had the send sheet thrown at them every time and had to dismiss it. Two
+     buttons instead: Publish (status only) and Publish & send to crew. The
+     second only appears when there IS crew, so cards can never go to an empty
+     job. Called with no argument it stays status-only, which is the safe
+     default for any caller I have not seen. */
+  const publishJob=async(sendCards)=>{
     if(!selJob)return;
     const updated={...selJob,status:'Active'};
     setJobs(p=>p.map(j=>j.id===updated.id?updated:j));
     await dbSaveJob(updated).catch(()=>{});
-    /* If crew exists, open SMS modal straight away so user can send cards */
-    if(updated.crew&&updated.crew.length>0){
-      setShowSMS(true);
-    }
+    logJobEvent(updated.id,'published',
+      'crew='+((updated.crew||[]).length)+(sendCards===true?'; cards sheet opened':''),role);
+    if(sendCards===true&&updated.crew&&updated.crew.length>0)setShowSMS(true);
   };
 
   /* v4.6.3d: access gate before anything else. Shows while we're still checking
