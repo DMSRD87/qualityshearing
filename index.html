@@ -599,7 +599,7 @@ const LS_TALLY_QUEUE='mg_tally_queue_'+CONTRACTOR_SLUG; /* per-cell offline queu
 const LS_TALLY_DEAD='mg_tally_dead_'+CONTRACTOR_SLUG; /* v4.6.3g — quarantined cells (permanent rejection). Replayed once on boot in case the server-side blocker (e.g. missing kind constraint) was since fixed. */
 const LS_TALLY_META_QUEUE='mg_tally_meta_queue_'+CONTRACTOR_SLUG; /* v4.6.4 — offline/failed mob metadata (type/desc) updates to existing count cells; flushed alongside the tally queue. */
 const ROLE_TIMEOUT_HOURS=12; /* auto-reset after 12h inactivity */
-const APP_VERSION='v4.6.56';
+const APP_VERSION='v4.6.57';
 const SUPER_RATE=0.12; /* SG rate, 12% from 1 Jul 2025. One-line change if legislated rate moves. */
 /* v4.6.46 (4 Sep 2026): JOB IDENTIFICATION ON PAY OUTPUT. Includes everything in v4.6.45 (abort-on-timeout, APP_VERSION stamping), which was built but never deployed. (1) PAY SUMMARY HEADER gains 'Job #: NNNN-0000 - Type'. The FARM RECORD has carried this since v4.6.3; the pay summary never did, so a printed or shared pay summary identified the FARM only. Two jobs at the same farm were indistinguishable on paper the moment they left the app, and a crew member or payroll officer querying a figure had nothing to quote back. (2) PAY WEEK per-shed lines and the CSV 'shed' column now carry the job number. This is also the grouping key, so two jobs at the same farm within one pay period now report as TWO lines instead of merging into one - deliberate: the same earnings, split across two correctly-labelled lines instead of pooled under one ambiguous one. No amount changes, and per-worker and week totals are identical. Worth knowing before the first pay run on it, because a contractor who is used to seeing one line for a farm will see two. (3) SEASON STATS by-shed likewise. DISPLAY ONLY - no pay calculation, superable base, deduction, tax or total is touched. The CSV shape is the future payroll-export payload, so identifying the job here is a prerequisite for mapping earnings lines to anything external. */
 /* v4.6.45 (4 Sep 2026): TIMED-OUT REQUESTS ARE NOW CANCELLED + BUILD STAMPED ON EVERY DIAGNOSTIC ROW. (1) ABORT ON TIMEOUT - withTimeout was a bare Promise.race across all 26 call sites. When the timer won, the caller queued a retry but the underlying request was never cancelled and stayed on the wire. On satellite the link drops for one to three minutes; requests fired during the window sit in the connection queue while the browser reports online, then all flush at once when it returns, each carrying the blob it was built with minutes earlier, in whatever order the link delivers them. A save that 'failed' lands anyway, at an unpredictable moment, with stale data - and NO guard can stop it, because every guard ran when the request was CONSTRUCTED against a server state that no longer exists. This is why guard_mobrate_kept had never fired fleet-wide while overrides were demonstrably going missing: the damage was never done by a save the guards evaluated. 27 such bursts on the largest contractor in 14 days. postgrest builders are lazy and expose abortSignal(), so attaching a controller inside withTimeout fixes all 26 sites without touching one of them; dbLoad's Promise.all shares one explicit controller since Promise.all has no signal. LIMIT, stated plainly: abort stops a request that has NOT yet reached the server, which during an outage is the common case, but it cannot undo one Postgres has already committed - we simply never hear the reply. Closing that last gap needs optimistic concurrency on the write and is a separate piece of work. (2) APP_VERSION ON EVERY save_failures ROW (column added by migration first) - without it, deciding whether a fix worked meant inferring the build from commit timestamps, and a device running yesterday's cached file is indistinguishable from one running today's. Every measurement from here depends on this. (3) netHealth() tracks consecutive timeouts and lifetime successes, ready for reachability-based offline detection - NOT yet wired to any gating or UI. navigator.onLine is link state, not reachability: 2,224 of 2,229 network failures fleet-wide in 30 days reported online. Replacing that flag changes when saves are attempted or held and deserves its own build. NO pay calculation or report output is touched. */
@@ -2140,7 +2140,7 @@ const mkRates=(ov={})=>{
      keep the old carry-forward behaviour, so a partial default sheet never surprises. */
   const dflt=lsGet(LS_DEFAULT_RATES)||{};
   const pick=(k,hard)=>dflt[k]??last[k]??hard;
-  return {shearingPerHead:pick('shearingPerHead',4.80),crutchingPerHead:pick('crutchingPerHead',1.55),woolHandlerPerRun:pick('woolHandlerPerRun',80),classerPerRun:pick('classerPerRun',110),pennerPerRun:pick('pennerPerRun',85),presserPerRun:pick('presserPerRun',85),presserPerBale:pick('presserPerBale',14.20),baleThreshold:pick('baleThreshold',13),pressCpk:pick('pressCpk',0),travelKmDefault:pick('travelKmDefault',0.85),shedKm:pick('shedKm',0),standFeePerDay:pick('standFeePerDay',0),standFeeSuper:pick('standFeeSuper',true),crewOverrides:{},shearerLoadings:{},loadingType:{},travelRate:{},payDayOfWeek:pick('payDayOfWeek',5),payFrequency:pick('payFrequency','weekly'),farmerShearingRate:pick('farmerShearingRate',6.50),farmerCrutchingRate:pick('farmerCrutchingRate',2.00),cookDayRate:pick('cookDayRate',400),cookHalfDayRate:pick('cookHalfDayRate',200),cookPerHead:pick('cookPerHead',0),crewDetails:{},...ov};
+  return {shearingPerHead:pick('shearingPerHead',4.80),crutchingPerHead:pick('crutchingPerHead',1.55),woolHandlerPerRun:pick('woolHandlerPerRun',80),classerPerRun:pick('classerPerRun',110),pennerPerRun:pick('pennerPerRun',85),presserPerRun:pick('presserPerRun',85),presserPerBale:pick('presserPerBale',14.20),baleThreshold:pick('baleThreshold',13),pressCpk:pick('pressCpk',0),travelKmDefault:pick('travelKmDefault',0.85),shedKm:pick('shedKm',0),standFeePerDay:pick('standFeePerDay',0),standFeeSuper:pick('standFeeSuper',true),crewOverrides:{},shearerLoadings:{},loadingType:{},travelRate:{},crutchLoadings:{},gangerByDate:{},gangerRate:(function(){const g=dflt.gangerRate??last.gangerRate;return (g&&typeof g==='object')?{...g}:{};})(),payDayOfWeek:pick('payDayOfWeek',5),payFrequency:pick('payFrequency','weekly'),farmerShearingRate:pick('farmerShearingRate',6.50),farmerCrutchingRate:pick('farmerCrutchingRate',2.00),cookDayRate:pick('cookDayRate',400),cookHalfDayRate:pick('cookHalfDayRate',200),cookPerHead:pick('cookPerHead',0),crewDetails:{},...ov};
 };
 const INIT_JOBS=[];
 const gf=id=>FARMS.find(f=>f.id===id);
@@ -2622,6 +2622,60 @@ function fmtPeriodLabel(start,end){
   const mo=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   return dn[sdt.getDay()]+' '+sd+' '+mo[sm-1]+' \u2013 '+dn[edt.getDay()]+' '+ed+' '+mo[em-1];
 }
+/* ══ v4.6.57 — LOADINGS, IN ONE PLACE ═════════════════════════════════════════
+   The loading rule was written out separately in calcPeriodStats,
+   generateSummary and payWeekJobData. They had already drifted: calcPeriodStats
+   ignored loadingType entirely, so for a TEAM-loaded ganger it put the loading
+   on his own head instead of the team's and read $20 short on a 300-head day
+   while the other two agreed. Pay was right; a displayed figure was not.
+
+   All three now call these, so the rule exists once.
+
+   What changed, driven by a contractor's real sheds:
+   1. By TYPE. A loading was one number applied to every sheep, so a $0.20
+      shearing premium was also paid on crutched head on a mixed shed.
+      crutchLoadings[id] now sets the crutching premium separately. ABSENT means
+      "same as shearing", so every existing job pays exactly as before.
+   2. GANGER, by DAY. The loading belonged to a person for the whole job, so when
+      the ganger changed mid-shed the premium stayed with the wrong man.
+      gangerRate {Shearing,Crutching} is a job rate; gangerByDate names who ran
+      the board. A day with no entry inherits the most recent earlier one, then
+      the job's designated lead — the ganger is usually the same person all job,
+      so it is set once and only touched when it changes.
+      No gangerRate set = no ganger pay, so nothing changes until it is used.
+
+   Team-mode loadings (a premium on the whole team's tally) are untouched. */
+function gangerOn(job,date){
+  const byDate=((job.rates||{}).gangerByDate)||{};
+  if(byDate[date])return byDate[date];
+  let best=null;
+  Object.keys(byDate).forEach(d=>{if(d<date&&byDate[d]&&(!best||d>best))best=d;});
+  if(best)return byDate[best];
+  return job.leadId||null;
+}
+/* per-head premium added to this person's OWN head for one sheep of this type */
+function ownHeadLoading(job,rates,id,type,date){
+  let add=0;
+  const lt=((rates.loadingType||{})[id])||'individual';
+  if(lt!=='team'){
+    const sh=Number((rates.shearerLoadings||{})[id])||0;
+    const crRaw=(rates.crutchLoadings||{})[id];
+    add+=(type==='Crutching')?((crRaw===undefined||crRaw===null||crRaw==='')?sh:(Number(crRaw)||0)):sh;
+  }
+  const gr=(rates.gangerRate||{})[type];
+  if(gr&&Number(gr)&&gangerOn(job,date)===id)add+=Number(gr)||0;
+  return add;
+}
+/* team-mode premium: base x every head the team did in the period */
+function teamLoadingEarn(job,rates,id,shIds,inP){
+  if(((rates.loadingType||{})[id])!=='team')return 0;
+  const base=Number((rates.shearerLoadings||{})[id])||0;
+  if(!(base>0))return 0;
+  let t=0;
+  Object.entries(job.runs||{}).forEach(([date,rs])=>{if(!inP(date))return;
+    (rs||[]).forEach(run=>mobsOf(run).forEach(mob=>{shIds.forEach(sid=>{t+=((mob.counts||{})[sid])||0;});}));});
+  return base*t;
+}
 function calcPeriodStats(job,period){
   const shIds=pieceIds(job); /* v4.6.18 — data-driven: counts are paid to whoever entered them */
   const rates=job.rates||{};
@@ -2638,7 +2692,9 @@ function calcPeriodStats(job,period){
     }
     return days*((rates.travelRate||{})[id]||0);
   };
-  Object.entries(job.runs||{}).forEach(([date,rs])=>{if(!inP(date))return;rs.forEach(run=>{mobsOf(run).forEach(mob=>{const br=mob.rateOverride!=null?mob.rateOverride:(mob.type==='Shearing'?rates.shearingPerHead:rates.crutchingPerHead)||0;shIds.forEach(id=>{const cnt=mob.counts[id]||0;if(!cnt)return;shorn+=cnt;const load=(rates.shearerLoadings||{})[id]||0;totalEarn+=cnt*(br+load);});});});});
+  Object.entries(job.runs||{}).forEach(([date,rs])=>{if(!inP(date))return;rs.forEach(run=>{mobsOf(run).forEach(mob=>{const br=mob.rateOverride!=null?mob.rateOverride:(mob.type==='Shearing'?rates.shearingPerHead:rates.crutchingPerHead)||0;shIds.forEach(id=>{const cnt=mob.counts[id]||0;if(!cnt)return;shorn+=cnt;totalEarn+=cnt*(br+ownHeadLoading(job,rates,id,mob.type,date));});});});});
+  /* v4.6.57 — team loading was missing here entirely */
+  shIds.forEach(id=>{totalEarn+=teamLoadingEarn(job,rates,id,shIds,inP);});
   // Shed staff
   job.crew.filter(id=>{const r=getJobRole(job,id);return r&&r!=='Shearer'&&r!=='Crutcher'&&r!=='Cook';}).forEach(id=>{
     const ov=(rates.crewOverrides||{})[id];const c=gc(id);if(!c)return;
@@ -2851,7 +2907,7 @@ function generateSummary(job,period){
   const dash='\u2500'.repeat(52);
   const inP=date=>!period||(date>=period.start&&date<=period.end);
   const shornBy={};shIds.forEach(id=>{shornBy[id]={sh:0,shEarn:0,cr:0,crEarn:0,mobs:[],daysSet:{}};});
-  Object.entries(job.runs||{}).forEach(([date,dayRuns])=>{if(!inP(date))return;dayRuns.forEach(run=>{mobsOf(run).forEach(mob=>{const hasOverride=mob.rateOverride!=null;const br=hasOverride?mob.rateOverride:(mob.type==='Shearing'?rates.shearingPerHead:rates.crutchingPerHead)||0;shIds.forEach(id=>{const cnt=mob.counts[id]||0;if(!cnt)return;shornBy[id].daysSet[date]=1;const load=(rates.shearerLoadings||{})[id]||0;const loadType=(rates.loadingType||{})[id]||'individual';const effRate=loadType==='team'?br:(br+load);const earn=cnt*effRate;if(mob.type==='Shearing'){shornBy[id].sh+=cnt;shornBy[id].shEarn+=earn;}else{shornBy[id].cr+=cnt;shornBy[id].crEarn+=earn;}/* merge into same mob bucket if same type/desc/rate */const key=mob.type+'|'+(mob.desc||'')+'|'+effRate.toFixed(4)+'|'+(hasOverride?'O':'B');let bucket=shornBy[id].mobs.find(m=>m.key===key);if(!bucket){bucket={key,type:mob.type,desc:mob.desc||'',rate:effRate,hasOverride,count:0,earn:0};shornBy[id].mobs.push(bucket);}bucket.count+=cnt;bucket.earn+=earn;});});});});
+  Object.entries(job.runs||{}).forEach(([date,dayRuns])=>{if(!inP(date))return;dayRuns.forEach(run=>{mobsOf(run).forEach(mob=>{const hasOverride=mob.rateOverride!=null;const br=hasOverride?mob.rateOverride:(mob.type==='Shearing'?rates.shearingPerHead:rates.crutchingPerHead)||0;shIds.forEach(id=>{const cnt=mob.counts[id]||0;if(!cnt)return;shornBy[id].daysSet[date]=1;const effRate=br+ownHeadLoading(job,rates,id,mob.type,date);const earn=cnt*effRate;if(mob.type==='Shearing'){shornBy[id].sh+=cnt;shornBy[id].shEarn+=earn;}else{shornBy[id].cr+=cnt;shornBy[id].crEarn+=earn;}/* merge into same mob bucket if same type/desc/rate */const key=mob.type+'|'+(mob.desc||'')+'|'+effRate.toFixed(4)+'|'+(hasOverride?'O':'B');let bucket=shornBy[id].mobs.find(m=>m.key===key);if(!bucket){bucket={key,type:mob.type,desc:mob.desc||'',rate:effRate,hasOverride,count:0,earn:0};shornBy[id].mobs.push(bucket);}bucket.count+=cnt;bucket.earn+=earn;});});});});
   const tr=rates.travelRate||{};
   const travelDayCount=id=>Object.entries((job.travelTallies||{})[id]||{}).filter(([d,v])=>v&&inP(d)).length;
   /* v4.6.3c: mode-aware travel helpers. travelMode='km' uses driverKm × travelKmRate; otherwise $/day. */
@@ -3267,9 +3323,7 @@ function payWeekJobData(job,period){
     const br=hasO?mob.rateOverride:(mob.type==='Shearing'?rates.shearingPerHead:rates.crutchingPerHead)||0;
     shIds.forEach(id=>{const cnt=(mob.counts||{})[id]||0;if(!cnt)return;
       (daysSet[id]=daysSet[id]||{})[date]=1;
-      const load=(rates.shearerLoadings||{})[id]||0;
-      const lt=(rates.loadingType||{})[id]||'individual';
-      const eff=lt==='team'?br:(br+load);
+      const eff=br+ownHeadLoading(job,rates,id,mob.type,date);
       const k=id+'|'+date+'|'+mob.type+'|'+eff.toFixed(4);
       if(!agg[k])agg[k]={id,date,type:mob.type,rate:eff,cnt:0};
       agg[k].cnt+=cnt;});
@@ -4720,6 +4774,42 @@ const flushMobDesc=(mid,v)=>{
         );
       })
     ),
+    /* v4.6.57 — GANGER TODAY. Only shown once a ganger rate is set, so a
+       contractor not using it never sees it. The ganger is usually the same
+       person all job, so this defaults to whoever held it last and only needs
+       touching when it changes. Choosing someone writes this day only. */
+    (function(){
+      const gr=(job.rates||{}).gangerRate||{};
+      if(!(Number(gr.Shearing)||Number(gr.Crutching)))return null;
+      const eligible=(job.crew||[]).filter(id=>{const r=getJobRole(job,id);return r==='Shearer'||r==='Crutcher';});
+      if(!eligible.length)return null;
+      const explicit=((job.rates||{}).gangerByDate||{})[viewDate];
+      const cur=gangerOn(job,viewDate);
+      const inherited=!explicit&&!!cur;
+      const setGanger=cid=>{
+        setJob(prev=>{
+          const r=prev.rates||{};
+          const gb={...(r.gangerByDate||{})};
+          if(cid)gb[viewDate]=cid;else delete gb[viewDate];
+          return {...prev,rates:{...r,gangerByDate:gb}};
+        });
+        logJobEvent(job.id,'ganger_set',viewDate+': '+(cid?((gc(cid)||{}).name||cid):'none'),role);
+      };
+      return e('div',{style:{margin:'10px 16px 0',padding:'10px 12px',borderRadius:10,
+          background:'var(--card)',border:'1px solid var(--border)',display:'flex',
+          alignItems:'center',gap:10,flexWrap:'wrap'}},
+        e('div',{style:{flex:1,minWidth:120}},
+          e('div',{style:{fontSize:11,fontWeight:800,letterSpacing:.6,color:'var(--dim)',textTransform:'uppercase'}},'Ganger today'),
+          e('div',{style:{fontSize:11,color:'var(--dim)',marginTop:2}},
+            inherited?'Carried over \u2014 change if someone else ran the board'
+              :'+$'+(Number(gr.Shearing)||0).toFixed(2)+' shear \u00b7 +$'+(Number(gr.Crutching)||0).toFixed(2)+' crutch')),
+        canEdit
+          ?e('select',{className:'if-sel',value:cur||'',onChange:ev=>setGanger(ev.target.value),
+              style:{width:'auto',minWidth:140,fontSize:13,padding:'6px 8px'}},
+              e('option',{value:''},'\u2014 No ganger \u2014'),
+              eligible.map(id=>e('option',{key:id,value:id},(gc(id)||{}).name||id)))
+          :e('div',{style:{fontWeight:700,fontSize:14}},cur?((gc(cur)||{}).name||cur):'None'));
+    })(),
     /* DAY TOTALS */
     e('div',{className:'day-totals'},
       e('div',{className:'dt-cell'},e('div',{className:'dt-lbl'},dtLbl),e('div',{className:'dt-val',style:{fontSize:(daySh>0&&dayCr>0)?'18px':undefined}},fmtSplit(daySh,dayCr))),
@@ -5365,6 +5455,19 @@ function AdminTab({job,setJob,onEdit,onDeleteFarm,onDeleteJob,onPublish}){
   const set=(k,v)=>setDraft(p=>({...p,[k]:v}));
   const setOv=(id,v)=>setDraft(p=>({...p,crewOverrides:{...(p.crewOverrides||{}),[id]:v===''?undefined:parseFloat(v)||0}}));
   const setLoad=(id,v)=>setDraft(p=>({...p,shearerLoadings:{...(p.shearerLoadings||{}),[id]:v===''?0:parseFloat(v)||0}}));
+  /* v4.6.57 — crutching premium. Blank stores nothing, which means "same as
+     shearing" — the old behaviour — so an untouched row pays exactly as before.
+     An explicit 0 means no crutching premium at all. */
+  const setCrLoad=(id,v)=>setDraft(p=>{
+    const cl={...(p.crutchLoadings||{})};
+    if(v===''||v===null||v===undefined)delete cl[id];else cl[id]=parseFloat(v)||0;
+    return {...p,crutchLoadings:cl};
+  });
+  const setGangerRate=(type,v)=>setDraft(p=>{
+    const g={...(p.gangerRate||{})};
+    if(v===''||v===null)delete g[type];else g[type]=parseFloat(v)||0;
+    return {...p,gangerRate:g};
+  });
   const setTR=(id,v)=>setDraft(p=>({...p,travelRate:{...(p.travelRate||{}),[id]:parseFloat(v)||0}}));
   const setDet=(id,k,v)=>setDraft(p=>({...p,crewDetails:{...(p.crewDetails||{}),[id]:{...(p.crewDetails||{})[id],[k]:v}}}));
 
@@ -5521,17 +5624,25 @@ function AdminTab({job,setJob,onEdit,onDeleteFarm,onDeleteJob,onPublish}){
 
     /* RATE LOADINGS — shearers + crutchers, $/head */
     loadingCrew.length>0&&e('div',{className:'admin-section'},
-      e('div',{className:'admin-sec-hdr'},e('div',{className:'admin-sec-title'},'Rate Loadings'),e('div',{className:'admin-sec-sub'},'Added on top of base rate $/head — entire job')),
+      e('div',{className:'admin-sec-hdr'},e('div',{className:'admin-sec-title'},'Rate Loadings'),e('div',{className:'admin-sec-sub'},'Personal premium on their own head. Shear and crutch can differ \u2014 leave crutch blank to match shear.')),
       loadingCrew.map(id=>{
         const c=gc(id);if(!c)return null;
         const cur=(draft.shearerLoadings||{})[id]??'';
         const ltype=(draft.loadingType||{})[id]||'individual';
+        const crRaw=(draft.crutchLoadings||{})[id];
+        const crCur=(crRaw===undefined||crRaw===null)?'':crRaw;
         return e('div',{key:id,className:'loading-row',style:{flexWrap:'wrap',gap:8}},
           e('div',{className:'lr-l'},e(Av,{name:c.name,size:32}),e('div',null,e('div',{className:'lr-name'},c.name),e('div',{className:'lr-role'},getJobRole(job,id)||c.role))),
           e('div',{className:'lr-r',style:{gap:6}},
             e('span',{className:'lr-prefix'},'+$'),
             e('input',{type:'number',onWheel:ev=>ev.currentTarget.blur(),className:'lr-inp',value:cur,placeholder:'0',step:'0.05',onChange:ev=>setLoad(id,ev.target.value)}),
-            e('span',{className:'lr-unit'},'/head'),
+            e('span',{className:'lr-unit'},ltype==='team'?'/head':'shear'),
+            /* v4.6.57 — crutching premium, individual mode only */
+            ltype!=='team'&&e('span',{className:'lr-prefix',style:{marginLeft:6}},'+$'),
+            ltype!=='team'&&e('input',{type:'number',onWheel:ev=>ev.currentTarget.blur(),className:'lr-inp',
+              value:crCur,placeholder:(cur===''||cur===0)?'0':String(cur),step:'0.05',
+              title:'Blank = same as shearing',onChange:ev=>setCrLoad(id,ev.target.value)}),
+            ltype!=='team'&&e('span',{className:'lr-unit'},'crutch'),
             e('select',{style:{fontSize:11,padding:'3px 6px',borderRadius:6,border:'1px solid var(--border)',background:'var(--card)',color:'var(--text)',marginLeft:4},value:ltype,onChange:ev=>setDraft(p=>({...p,loadingType:{...(p.loadingType||{}),[id]:ev.target.value}}))},
               e('option',{value:'individual'},'Individual total'),
               e('option',{value:'team'},'Team total')
@@ -5539,6 +5650,30 @@ function AdminTab({job,setJob,onEdit,onDeleteFarm,onDeleteJob,onPublish}){
           )
         );
       })
+    ),
+
+    /* v4.6.57 — GANGER LOADING. A job rate, not a person's: whoever runs the
+       board on a given day earns it on their own head that day. Chosen per day
+       on the Tally tab; unset days inherit the last ganger, then the designated
+       lead. Leave both blank and nobody earns a ganger premium. */
+    loadingCrew.length>0&&e('div',{className:'admin-section'},
+      e('div',{className:'admin-sec-hdr'},
+        e('div',{className:'admin-sec-title'},'Ganger Loading'),
+        e('div',{className:'admin-sec-sub'},'Paid to whoever runs the board that day, on their own head. Pick the ganger on the Tally tab \u2014 it carries forward until changed.')),
+      e('div',{className:'loading-row',style:{flexWrap:'wrap',gap:8}},
+        e('div',{className:'lr-l'},e('div',null,e('div',{className:'lr-name'},'Ganger rate'),
+          e('div',{className:'lr-role'},'Applies to this job'))),
+        e('div',{className:'lr-r',style:{gap:6}},
+          e('span',{className:'lr-prefix'},'+$'),
+          e('input',{type:'number',onWheel:ev=>ev.currentTarget.blur(),className:'lr-inp',
+            value:((draft.gangerRate||{}).Shearing??''),placeholder:'0',step:'0.05',
+            onChange:ev=>setGangerRate('Shearing',ev.target.value)}),
+          e('span',{className:'lr-unit'},'shear'),
+          e('span',{className:'lr-prefix',style:{marginLeft:6}},'+$'),
+          e('input',{type:'number',onWheel:ev=>ev.currentTarget.blur(),className:'lr-inp',
+            value:((draft.gangerRate||{}).Crutching??''),placeholder:'0',step:'0.05',
+            onChange:ev=>setGangerRate('Crutching',ev.target.value)}),
+          e('span',{className:'lr-unit'},'crutch')))
     ),
 
     /* TRAVEL RATES — days tracked on Tally tab, rates/mode set here. v4.6.3c adds c/km mode. */
