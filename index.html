@@ -599,7 +599,7 @@ const LS_TALLY_QUEUE='mg_tally_queue_'+CONTRACTOR_SLUG; /* per-cell offline queu
 const LS_TALLY_DEAD='mg_tally_dead_'+CONTRACTOR_SLUG; /* v4.6.3g — quarantined cells (permanent rejection). Replayed once on boot in case the server-side blocker (e.g. missing kind constraint) was since fixed. */
 const LS_TALLY_META_QUEUE='mg_tally_meta_queue_'+CONTRACTOR_SLUG; /* v4.6.4 — offline/failed mob metadata (type/desc) updates to existing count cells; flushed alongside the tally queue. */
 const ROLE_TIMEOUT_HOURS=12; /* auto-reset after 12h inactivity */
-const APP_VERSION='v4.6.55';
+const APP_VERSION='v4.6.56';
 const SUPER_RATE=0.12; /* SG rate, 12% from 1 Jul 2025. One-line change if legislated rate moves. */
 /* v4.6.46 (4 Sep 2026): JOB IDENTIFICATION ON PAY OUTPUT. Includes everything in v4.6.45 (abort-on-timeout, APP_VERSION stamping), which was built but never deployed. (1) PAY SUMMARY HEADER gains 'Job #: NNNN-0000 - Type'. The FARM RECORD has carried this since v4.6.3; the pay summary never did, so a printed or shared pay summary identified the FARM only. Two jobs at the same farm were indistinguishable on paper the moment they left the app, and a crew member or payroll officer querying a figure had nothing to quote back. (2) PAY WEEK per-shed lines and the CSV 'shed' column now carry the job number. This is also the grouping key, so two jobs at the same farm within one pay period now report as TWO lines instead of merging into one - deliberate: the same earnings, split across two correctly-labelled lines instead of pooled under one ambiguous one. No amount changes, and per-worker and week totals are identical. Worth knowing before the first pay run on it, because a contractor who is used to seeing one line for a farm will see two. (3) SEASON STATS by-shed likewise. DISPLAY ONLY - no pay calculation, superable base, deduction, tax or total is touched. The CSV shape is the future payroll-export payload, so identifying the job here is a prerequisite for mapping earnings lines to anything external. */
 /* v4.6.45 (4 Sep 2026): TIMED-OUT REQUESTS ARE NOW CANCELLED + BUILD STAMPED ON EVERY DIAGNOSTIC ROW. (1) ABORT ON TIMEOUT - withTimeout was a bare Promise.race across all 26 call sites. When the timer won, the caller queued a retry but the underlying request was never cancelled and stayed on the wire. On satellite the link drops for one to three minutes; requests fired during the window sit in the connection queue while the browser reports online, then all flush at once when it returns, each carrying the blob it was built with minutes earlier, in whatever order the link delivers them. A save that 'failed' lands anyway, at an unpredictable moment, with stale data - and NO guard can stop it, because every guard ran when the request was CONSTRUCTED against a server state that no longer exists. This is why guard_mobrate_kept had never fired fleet-wide while overrides were demonstrably going missing: the damage was never done by a save the guards evaluated. 27 such bursts on the largest contractor in 14 days. postgrest builders are lazy and expose abortSignal(), so attaching a controller inside withTimeout fixes all 26 sites without touching one of them; dbLoad's Promise.all shares one explicit controller since Promise.all has no signal. LIMIT, stated plainly: abort stops a request that has NOT yet reached the server, which during an outage is the common case, but it cannot undo one Postgres has already committed - we simply never hear the reply. Closing that last gap needs optimistic concurrency on the write and is a separate piece of work. (2) APP_VERSION ON EVERY save_failures ROW (column added by migration first) - without it, deciding whether a fix worked meant inferring the build from commit timestamps, and a device running yesterday's cached file is indistinguishable from one running today's. Every measurement from here depends on this. (3) netHealth() tracks consecutive timeouts and lifetime successes, ready for reachability-based offline detection - NOT yet wired to any gating or UI. navigator.onLine is link state, not reachability: 2,224 of 2,229 network failures fleet-wide in 30 days reported online. Replacing that flag changes when saves are attempted or held and deserves its own build. NO pay calculation or report output is touched. */
@@ -2340,7 +2340,18 @@ function addDays(d,n){const [y,mo,dy]=d.split('-').map(Number);const dt=new Date
 function fmtDate(d){const [y,mo,dy]=d.split('-').map(Number);return new Date(y,mo-1,dy).toLocaleDateString('en-AU',{day:'2-digit',month:'2-digit',year:'numeric'});}
 function fmtDateLong(d){const [y,mo,dy]=d.split('-').map(Number);return new Date(y,mo-1,dy).toLocaleDateString('en-AU',{weekday:'short',day:'numeric',month:'short'});}
 function localToday(){const n=new Date();return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-${String(n.getDate()).padStart(2,'0')}`;}
-function jobDates(j){
+/* v4.6.56 — jobDates(j, {calendar:true}) draws what HAPPENED, not every day up
+   to today. The overrun extension below exists so a shed running past its
+   allocated days still offers today's date chip on the tally screen — right
+   there. But the calendar calls the same function, so any Active job left
+   un-completed drew a bar from its start date to today and grew a day longer
+   every day: a one-day job read as a 51-day bar, and 22 jobs fleet-wide were
+   sprawling across the schedule.
+   Calendar mode keeps the allocated days and every date that actually has data,
+   and drops only the extend-to-today behaviour. A shed genuinely still running
+   has recent tallies, so its bar still reaches today on its own. */
+function jobDates(j,opts){
+  const calendar=!!(opts&&opts.calendar);
   const ds=[];
   /* Legacy jobs (no includeWeekends field) default to true for backward compatibility.
      If includeWeekends===false, skip Sat (dow=6) and Sun (dow=0) when iterating. */
@@ -2361,7 +2372,7 @@ function jobDates(j){
      date strip past daysAllocated up to today so tallies can still be entered.
      Honors includeWeekends. Inactive jobs (Completed/Charged Out/Draft/
      Dispatched) remain capped at daysAllocated. */
-  if((j.status||'Active')==='Active'){
+  if(!calendar&&(j.status||'Active')==='Active'){
     const today=localToday();
     let cursor=ds.length>0?ds[ds.length-1]:j.startDate;
     let safety=0;
@@ -2393,7 +2404,7 @@ function jobDates(j){
      both sitting on the 5th). The overrun extension above is untouched — a job running
      past its allocated days still reaches today, because that loop walks forward from
      the last planned day. */
-  if((j.status||'Active')==='Active'&&localToday()>=j.startDate)ensure(localToday());
+  if(!calendar&&(j.status||'Active')==='Active'&&localToday()>=j.startDate)ensure(localToday());
   Object.keys(j.runs||{}).forEach(ensure);
   ['shedTallies','shedRoleRuns','baleTallies','baleWeights','travelTallies','messTallies','cookDays','cookHeads'].forEach(k=>{
     const t=j[k];if(!t)return;
@@ -6429,7 +6440,7 @@ function JobDetailScreen({job,setJob,role,setRole,stale,onBack,onSend,onBroadcas
 /* ── JOB CARD ── */
 function JobCardView({job,crewId,onClose}){
   const farm=gf(job.farmId),crew=gc(crewId),team=job.crew.map(gc).filter(Boolean);
-  const jds=jobDates(job);
+  const jds=jobDates(job,{calendar:true}); /* v4.6.56 — the card shows the planned end, not today */
   const endD=fmtDate(jds.length?jds[jds.length-1]:job.startDate);
   return e('div',{className:'overlay overlay2'},e('div',{className:'jc-white'},
     e('div',{className:'sheet-handle',style:{background:'#ddd'}}),
@@ -6564,7 +6575,7 @@ function buildJobCardSMS(job,crewId,farmList,crewList,appUrl){
   const farm=gfl(job.farmId);
   const crew=gcl(crewId);
   if(!crew)return null;
-  const jds=jobDates(job);
+  const jds=jobDates(job,{calendar:true}); /* v4.6.56 — an overrunning job must not text crew an end date of today */
   const endDate=jds.length?jds[jds.length-1]:job.startDate;
   const teamNames=job.crew.map(id=>{const c=gcl(id);if(!c)return null;return {c,id};}).filter(Boolean).map(({c,id})=>c.name+' ('+(getJobRole(job,id)||c.role)+')').join(', ');
   const jobName=job.jobName||(farm?farm.name:'Farm');
@@ -6593,7 +6604,7 @@ function buildJobCardSMS(job,crewId,farmList,crewList,appUrl){
 function buildFarmerSMS(job,farmerName,farmerPhone,farmList,appUrl){
   const farm=farmList.find(f=>f.id===job.farmId);
   const jobName=job.jobName||(farm?farm.name:'Farm');
-  const jds=jobDates(job);
+  const jds=jobDates(job,{calendar:true}); /* v4.6.56 — nor the farmer */
   const endDate=jds.length?jds[jds.length-1]:job.startDate;
   return [
     'Hi '+farmerName+'! '+CONTRACTOR_NAME+' has you scheduled for shearing.',
@@ -8276,7 +8287,7 @@ function ScheduleScreen({jobs,role,setRole,onBack,onJob,onNew,onNewDraft}){
     const map={};
     filtJobs.forEach(job=>{
       if(!job.startDate||!job.daysAllocated)return;
-      const days=jobDates(job);
+      const days=jobDates(job,{calendar:true});
       days.forEach((d,idx)=>{
         if(!map[d])map[d]=[];
         map[d].push({job,isStart:idx===0,dayIdx:idx});
@@ -8297,7 +8308,7 @@ function ScheduleScreen({jobs,role,setRole,onBack,onJob,onNew,onNewDraft}){
   const jobsInRange=filtJobs.filter(j=>{
     if(!j.startDate||!j.daysAllocated)return false;
     /* Use actual jobDates so includeWeekends=false jobs get the real end */
-    const jds=jobDates(j);
+    const jds=jobDates(j,{calendar:true});
     const end=jds.length?jds[jds.length-1]:j.startDate;
     /* overlap test */
     return !(end<rangeStart||j.startDate>rangeEnd);
