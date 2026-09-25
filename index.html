@@ -481,6 +481,28 @@ textarea.fi{resize:none;line-height:1.5}
 .sched-hdr-row{display:flex;align-items:center;justify-content:space-between;gap:10px}
 .sched-range{font-family:var(--h);font-size:17px;font-weight:800;color:var(--text);letter-spacing:.2px;line-height:1.1;flex:1;min-width:0}
 .sched-range-sub{font-size:11px;color:var(--muted);font-weight:500;margin-top:1px}
+/* v4.6.59 — ROSTER VIEW. The week view is a calendar: days across, jobs as
+   tiles. A contractor running 6–12 sheds a week plans the opposite way — sheds
+   down the side, days across the top, people dropped into the squares. That is
+   what the Excel sheet they keep instead of using this is. Horizontal scroll on
+   the day columns with the shed name frozen, because 7 days will not fit a phone. */
+.rost-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:0 0 12px}
+.rost-grid{min-width:700px;border-collapse:separate;border-spacing:0;width:100%}
+.rost-grid th,.rost-grid td{border-bottom:1px solid var(--border);vertical-align:top}
+.rost-hd{position:sticky;top:0;z-index:2;background:var(--hdr);color:#fff;
+  font-size:10px;letter-spacing:.5px;text-transform:uppercase;padding:6px 4px;text-align:center;font-weight:800}
+.rost-hd.today{background:var(--amber);color:#141414}
+.rost-shed{position:sticky;left:0;z-index:1;background:var(--card);min-width:132px;max-width:132px;
+  padding:7px 8px;border-right:2px solid var(--border)}
+.rost-shed-nm{font-size:12.5px;font-weight:800;line-height:1.25;word-break:break-word}
+.rost-shed-sub{font-size:10px;color:var(--dim);margin-top:2px}
+.rost-cell{min-width:82px;padding:4px;cursor:pointer}
+.rost-cell.on{background:rgba(245,158,11,.07)}
+.rost-cell:active{background:rgba(245,158,11,.18)}
+.rost-chip{display:block;font-size:11px;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rost-empty{font-size:16px;color:var(--border);text-align:center;line-height:1.2}
+.rost-draft{display:inline-block;font-size:9px;font-weight:800;padding:1px 5px;border-radius:8px;
+  background:rgba(245,158,11,.2);color:var(--amber);margin-top:3px}
 .sched-view-toggle{display:flex;background:var(--card2);border:1px solid var(--border);border-radius:8px;overflow:hidden;flex-shrink:0}
 .svt-btn{padding:6px 13px;font-size:12px;font-weight:700;background:none;border:none;color:var(--muted);cursor:pointer;transition:.12s}
 .svt-btn.on{background:var(--amber);color:#000}
@@ -599,7 +621,7 @@ const LS_TALLY_QUEUE='mg_tally_queue_'+CONTRACTOR_SLUG; /* per-cell offline queu
 const LS_TALLY_DEAD='mg_tally_dead_'+CONTRACTOR_SLUG; /* v4.6.3g — quarantined cells (permanent rejection). Replayed once on boot in case the server-side blocker (e.g. missing kind constraint) was since fixed. */
 const LS_TALLY_META_QUEUE='mg_tally_meta_queue_'+CONTRACTOR_SLUG; /* v4.6.4 — offline/failed mob metadata (type/desc) updates to existing count cells; flushed alongside the tally queue. */
 const ROLE_TIMEOUT_HOURS=12; /* auto-reset after 12h inactivity */
-const APP_VERSION='v4.6.57';
+const APP_VERSION='v4.6.60';
 const SUPER_RATE=0.12; /* SG rate, 12% from 1 Jul 2025. One-line change if legislated rate moves. */
 /* v4.6.46 (4 Sep 2026): JOB IDENTIFICATION ON PAY OUTPUT. Includes everything in v4.6.45 (abort-on-timeout, APP_VERSION stamping), which was built but never deployed. (1) PAY SUMMARY HEADER gains 'Job #: NNNN-0000 - Type'. The FARM RECORD has carried this since v4.6.3; the pay summary never did, so a printed or shared pay summary identified the FARM only. Two jobs at the same farm were indistinguishable on paper the moment they left the app, and a crew member or payroll officer querying a figure had nothing to quote back. (2) PAY WEEK per-shed lines and the CSV 'shed' column now carry the job number. This is also the grouping key, so two jobs at the same farm within one pay period now report as TWO lines instead of merging into one - deliberate: the same earnings, split across two correctly-labelled lines instead of pooled under one ambiguous one. No amount changes, and per-worker and week totals are identical. Worth knowing before the first pay run on it, because a contractor who is used to seeing one line for a farm will see two. (3) SEASON STATS by-shed likewise. DISPLAY ONLY - no pay calculation, superable base, deduction, tax or total is touched. The CSV shape is the future payroll-export payload, so identifying the job here is a prerequisite for mapping earnings lines to anything external. */
 /* v4.6.45 (4 Sep 2026): TIMED-OUT REQUESTS ARE NOW CANCELLED + BUILD STAMPED ON EVERY DIAGNOSTIC ROW. (1) ABORT ON TIMEOUT - withTimeout was a bare Promise.race across all 26 call sites. When the timer won, the caller queued a retry but the underlying request was never cancelled and stayed on the wire. On satellite the link drops for one to three minutes; requests fired during the window sit in the connection queue while the browser reports online, then all flush at once when it returns, each carrying the blob it was built with minutes earlier, in whatever order the link delivers them. A save that 'failed' lands anyway, at an unpredictable moment, with stale data - and NO guard can stop it, because every guard ran when the request was CONSTRUCTED against a server state that no longer exists. This is why guard_mobrate_kept had never fired fleet-wide while overrides were demonstrably going missing: the damage was never done by a save the guards evaluated. 27 such bursts on the largest contractor in 14 days. postgrest builders are lazy and expose abortSignal(), so attaching a controller inside withTimeout fixes all 26 sites without touching one of them; dbLoad's Promise.all shares one explicit controller since Promise.all has no signal. LIMIT, stated plainly: abort stops a request that has NOT yet reached the server, which during an outage is the common case, but it cannot undo one Postgres has already committed - we simply never hear the reply. Closing that last gap needs optimistic concurrency on the write and is a separate piece of work. (2) APP_VERSION ON EVERY save_failures ROW (column added by migration first) - without it, deciding whether a fix worked meant inferring the build from commit timestamps, and a device running yesterday's cached file is indistinguishable from one running today's. Every measurement from here depends on this. (3) netHealth() tracks consecutive timeouts and lifetime successes, ready for reachability-based offline detection - NOT yet wired to any gating or UI. navigator.onLine is link state, not reachability: 2,224 of 2,229 network failures fleet-wide in 30 days reported online. Replacing that flag changes when saves are attempted or held and deserves its own build. NO pay calculation or report output is touched. */
@@ -1557,7 +1579,10 @@ function logJobEvent(jobId,kind,detail,actorRole){
       job_id:jobId,
       kind:String(kind).slice(0,40),
       actor_role:actorRole||null,
-      detail:(detail==null?null:String(detail).slice(0,500))
+      /* v4.6.58 — 2000, not 500. The log is a record of what was actually sent,
+         and a broadcast clipped mid-sentence is not a record. A multi-segment SMS
+         runs past 500 characters easily. */
+      detail:(detail==null?null:String(detail).slice(0,2000))
     }).then(()=>{},()=>{});
   }catch(e){}
 }
@@ -6450,6 +6475,7 @@ function JobLogTab({job}){
 
   const LABEL={published:'Published',crew_added:'Crew added',status_changed:'Status changed',
     broadcast_sent:'Broadcast sent',job_card_sent:'Job card sent',farmer_sms_sent:'Farmer text sent',
+    broadcast_failed:'Broadcast FAILED \u2014 not sent',job_card_failed:'Job card FAILED \u2014 not sent',
     guard_crew_restored:'Guard: crew restored',guard_status_kept:'Guard: status kept',
     guard_rates_kept:'Guard: rates kept',guard_mobrate_kept:'Guard: mob rate kept'};
   const fmt=at=>{const d=new Date(at);return isNaN(d)?String(at):
@@ -6468,13 +6494,29 @@ function JobLogTab({job}){
         fontVariantNumeric:'tabular-nums',paddingTop:2}},fmt(r.at)),
       e('div',{style:{flex:1,minWidth:0}},
         e('div',{style:{fontSize:13,fontWeight:700,
-            color:r.guard?'var(--amber)':'var(--text)'}},
+            color:(r.guard||/_failed$/.test(r.kind))?'var(--amber)':'var(--text)'}},
           LABEL[r.kind]||r.kind),
-        r.detail&&e('div',{style:{fontSize:11.5,color:'var(--muted)',
-          wordBreak:'break-word',lineHeight:1.4,marginTop:1}},r.detail),
+        /* v4.6.58 — a message that was SENT is shown verbatim, in a quoted block,
+           at a size you can actually read. The first line carries the delivery
+           counts; everything after it is the message exactly as it went out.
+           whiteSpace:pre-wrap so the sender's own line breaks survive. */
+        r.detail&&(function(){
+          const isMsg=/^(broadcast_sent|job_card_sent|farmer_sms_sent|broadcast_failed)$/.test(r.kind);
+          const nl=String(r.detail).indexOf('\n');
+          const head=isMsg&&nl>=0?String(r.detail).slice(0,nl):null;
+          const body=isMsg&&nl>=0?String(r.detail).slice(nl+1):null;
+          if(!head)return e('div',{style:{fontSize:11.5,color:'var(--muted)',
+            wordBreak:'break-word',lineHeight:1.4,marginTop:1,whiteSpace:'pre-wrap'}},r.detail);
+          return e('div',null,
+            e('div',{style:{fontSize:11.5,color:'var(--muted)',marginTop:1}},head),
+            e('div',{style:{marginTop:5,padding:'7px 9px',borderRadius:7,
+                background:'var(--card2)',borderLeft:'3px solid var(--border)',
+                fontSize:13,color:'var(--text)',lineHeight:1.45,
+                whiteSpace:'pre-wrap',wordBreak:'break-word'}},body));
+        })(),
         r.who&&e('div',{style:{fontSize:10.5,color:'var(--dim)',marginTop:1}},'by '+r.who)))),
     e('div',{style:{fontSize:11,color:'var(--dim)',marginTop:14,lineHeight:1.5}},
-      'Amber entries are the save guards catching a stale device. '
+      'Sent messages are recorded word for word. Amber entries are the save guards catching a stale device. '
       +'Events are recorded from v4.6.50 onward; guard entries go back further.')
   );
 }
@@ -6626,10 +6668,25 @@ function BroadcastModal({job,onClose,farmList,crewList}){
       setSentCount(data.sent||0);
       setStatus(data.failed>0?'partial':'done');
       /* v4.6.50 — a broadcast left no trace at all before this. */
+      /* v4.6.58 — store the message IN FULL, on its own line under the delivery
+         counts, so the log reads as a transcript rather than a summary. It was
+         clipped at 120 characters, which cut most broadcasts mid-sentence. */
       logJobEvent(job&&job.id,'broadcast_sent',
-        'to='+messages.length+'; sent='+(data.sent||0)+'; failed='+(data.failed||0)
-        +'; body="'+String(body||'').slice(0,120)+'"');
-    }catch(e){setStatus('error');}
+        'Sent to '+messages.length+' \u00b7 delivered '+(data.sent||0)
+        +(data.failed>0?' \u00b7 failed '+data.failed:'')
+        +'\n'+String(body||''));
+    }catch(e){
+      setStatus('error');
+      /* v4.6.60 — A BROADCAST THAT FAILS MUST SAY SO IN THE LOG.
+         The log call sat after the fetch, so a send that never left the phone —
+         out of service at a shed — wrote nothing at all. A contractor worked out
+         his travel update had not gone only because the log was EMPTY where he
+         expected an entry. Absence is not a record: the log now carries the
+         attempt, the reason, and the message he tried to send. */
+      logJobEvent(job&&job.id,'broadcast_failed',
+        'NOT SENT to '+messages.length+' \u00b7 '+((e&&e.message)||'no connection')
+        +'\n'+String(body||''));
+    }
   };
 
   return e('div',{className:'overlay'},e('div',{className:'sheet'},
@@ -6777,11 +6834,16 @@ function CrewSMSRow({id,c,views,status,onPreview,job,farmList,crewList,appUrl}){
     if(!c.phone)return;
     setIndivSending(true);
     try{
+      /* v4.6.58 — build once, send it, and log exactly what was sent. */
+      const cardBody=buildJobCardSMS(job,id,farmList,crewList,appUrl);
       await fetch('/api/send-sms',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({messages:[{to:c.phone,body:buildJobCardSMS(job,id,farmList,crewList,appUrl)}]})});
-      logJobEvent(job&&job.id,'job_card_sent',(c.name||id));
+        body:JSON.stringify({messages:[{to:c.phone,body:cardBody}]})});
+      logJobEvent(job&&job.id,'job_card_sent','To '+(c.name||id)+'\n'+cardBody);
       setIndivSent(true);
-    }catch(e){}
+    }catch(e){
+      /* v4.6.60 — same: a card that did not go is recorded, not silent. */
+      logJobEvent(job&&job.id,'job_card_failed','NOT SENT to '+(c.name||id)+' \u00b7 '+((e&&e.message)||'no connection'));
+    }
     setIndivSending(false);
   };
   return e('div',{className:'sms-row'},
@@ -6820,9 +6882,11 @@ function FarmerSMSRow({job,views,onPreview,farmList,appUrl,farmerName,farmerPhon
     if(!ready)return;
     setFSending(true);
     try{
+      /* v4.6.58 — same: the farmer's text is recorded verbatim. */
+      const farmerBody=buildFarmerSMS(job,farmerName||'there',farmerPhone,farmList,appUrl);
       await fetch('/api/send-sms',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({messages:[{to:farmerPhone,body:buildFarmerSMS(job,farmerName||'there',farmerPhone,farmList,appUrl)}]})});
-      logJobEvent(job&&job.id,'farmer_sms_sent',(farmerName||'farmer'));
+        body:JSON.stringify({messages:[{to:farmerPhone,body:farmerBody}]})});
+      logJobEvent(job&&job.id,'farmer_sms_sent','To '+(farmerName||'farmer')+'\n'+farmerBody);
       setFSent(true);
     }catch(e){}
     setFSending(false);
@@ -8396,7 +8460,126 @@ function DatabaseScreen({farmList,crewList,addFarm,addCrew,onClose,setFarmList,s
    Full-screen calendar with month + week views.
    Week starts Monday always.
 ═══════════════════════ */
-function ScheduleScreen({jobs,role,setRole,onBack,onJob,onNew,onNewDraft}){
+/* ══ v4.6.59 — ROSTER GRID ════════════════════════════════════════════════════
+   A contractor running 6–12 sheds a week was planning in a spreadsheet: sheds
+   down the side, days across the top, names in the squares, reshuffled every
+   couple of days. Creating those jobs one form at a time, then re-picking five
+   to seven people per shed, cost more than the app gave back — so they stopped
+   entering tallies at the end of August.
+
+   The model deliberately does NOT change. rosterByDate is additive metadata:
+   who is expected at this shed on this day. job.crew stays the source of truth
+   for everything else and the roster only ever ADDS to it, never removes — so
+   moving someone from one shed to another mid-week cannot strip them off the
+   shed they already worked, and pay (which comes from tallies) is untouched.
+   A job with no roster behaves exactly as it always has. */
+/* One square: who is at this shed on this day. Tapping a name already on
+   another shed that day MOVES them — the case that made the spreadsheet win,
+   since people shuffle between sheds every couple of days. */
+function RosterCellEditor({job,date,allJobs,onClose,setJob}){
+  const cur=((job.rosterByDate||{})[date])||(jobDates(job,{calendar:true}).indexOf(date)>=0?(job.crew||[]):[]);
+  const [sel,setSel]=useState(cur.slice());
+  const [q,setQ]=useState('');
+  /* where else is each person booked that day? */
+  const elsewhere={};
+  allJobs.forEach(j=>{
+    if(j.id===job.id)return;
+    const r=((j.rosterByDate||{})[date])||[];
+    r.forEach(id=>{const f=gf(j.farmId);elsewhere[id]=j.jobName||(f?f.name:'another shed');});
+  });
+  const roster=(CREW||[]).filter(c=>isActiveCrew(c)).filter(c=>!q||(c.name||'').toLowerCase().includes(q.toLowerCase()));
+  const toggle=id=>setSel(p=>p.indexOf(id)>=0?p.filter(x=>x!==id):p.concat([id]));
+  const save=()=>{
+    setJob(job.id,prev=>{
+      const rb={...(prev.rosterByDate||{})};
+      if(sel.length)rb[date]=sel.slice();else delete rb[date];
+      /* only ever ADD to crew — never strip someone off a shed they worked */
+      const crew=(prev.crew||[]).slice();
+      sel.forEach(id=>{if(crew.indexOf(id)<0)crew.push(id);});
+      return {...prev,rosterByDate:rb,crew};
+    });
+    onClose();
+  };
+  const f=gf(job.farmId);
+  const [y,m,d]=date.split('-').map(Number);
+  const dt=new Date(y,m-1,d);
+  return e('div',{className:'overlay'},e('div',{className:'sheet',style:{maxWidth:520}},
+    e('div',{className:'sheet-handle'}),
+    e('div',{className:'sheet-title'},(job.jobName||(f?f.name:'Shed'))+' \u2014 '+DAY_NAMES[dt.getDay()]+' '+fmtDate(date)),
+    e('div',{className:'sheet-scroll'},
+      e('input',{className:'fi',placeholder:'Search crew\u2026',value:q,onChange:ev=>setQ(ev.target.value),style:{marginBottom:10}}),
+      sel.length>0&&e('div',{style:{fontSize:11.5,color:'var(--dim)',marginBottom:8}},sel.length+' on this shed'),
+      roster.map(c=>{
+        const on=sel.indexOf(c.id)>=0;
+        const other=elsewhere[c.id];
+        return e('div',{key:c.id,onClick:()=>toggle(c.id),
+            style:{display:'flex',alignItems:'center',gap:10,padding:'9px 2px',
+              borderTop:'1px solid var(--border)',cursor:'pointer'}},
+          e('div',{style:{width:20,fontSize:15,color:on?'var(--amber)':'var(--border)'}},on?'\u2713':'\u25cb'),
+          e('div',{style:{flex:1,minWidth:0}},
+            e('div',{style:{fontSize:14,fontWeight:on?800:600}},c.name),
+            e('div',{style:{fontSize:11,color:'var(--dim)'}},
+              (getJobRole(job,c.id)||c.role||'')+(other&&!on?'  \u00b7  at '+other+' this day':''))),
+          other&&!on&&e('span',{style:{fontSize:10,fontWeight:800,padding:'2px 7px',borderRadius:9,
+            background:'rgba(245,158,11,.18)',color:'var(--amber)'}},'MOVE'));
+      })),
+    e('div',{className:'sheet-footer',style:{display:'flex',gap:8}},
+      e('button',{onClick:onClose,style:{flex:1,padding:'12px',borderRadius:8,border:'1px solid var(--border)',
+        background:'var(--card2)',color:'var(--text)',fontWeight:700,fontSize:14,cursor:'pointer'}},'Cancel'),
+      e('button',{onClick:save,style:{flex:2,padding:'12px',borderRadius:8,border:'none',
+        background:'var(--amber)',color:'#141414',fontWeight:800,fontSize:14,cursor:'pointer'}},'Save this day'))
+  ));
+}
+function RosterGrid({jobs,weekDays,today,setJob,onJob,onNew}){
+  const [cell,setCell]=useState(null);   /* {jobId,date} */
+  const rows=jobs.slice().sort((a,b)=>String(a.startDate).localeCompare(String(b.startDate)));
+  const onFor=(job,date)=>{
+    const r=((job.rosterByDate||{})[date])||null;
+    if(r)return r;
+    /* no roster yet: fall back to the job's crew on days the job runs, so an
+       existing job shows something useful the first time it is opened here */
+    return jobDates(job,{calendar:true}).indexOf(date)>=0?(job.crew||[]):[];
+  };
+  const dayHdr=d=>{
+    const [y,m,dd]=d.split('-').map(Number);const dt=new Date(y,m-1,dd);
+    return DAY_NAMES[dt.getDay()]+' '+String(dt.getDate()).padStart(2,'0');
+  };
+  const openJob=rows.find(j=>cell&&j.id===cell.jobId);
+  return e('div',null,
+    rows.length===0&&e('div',{style:{textAlign:'center',padding:'34px 20px',color:'var(--muted)',fontSize:13,lineHeight:1.5}},
+      'No sheds this week.',
+      e('div',{style:{marginTop:10}},
+        e('button',{onClick:onNew,style:{background:'var(--amber)',border:'none',borderRadius:8,
+          padding:'10px 18px',color:'#141414',fontWeight:800,fontSize:13,cursor:'pointer'}},'+ Add a shed'))),
+    rows.length>0&&e('div',{className:'rost-wrap'},
+      e('table',{className:'rost-grid'},
+        e('thead',null,e('tr',null,
+          e('th',{className:'rost-hd rost-shed',style:{textAlign:'left'}},'Shed'),
+          weekDays.map(d=>e('th',{key:d,className:'rost-hd'+(d===today?' today':'')},dayHdr(d))))),
+        e('tbody',null,rows.map(job=>{
+          const f=gf(job.farmId);
+          return e('tr',{key:job.id},
+            e('td',{className:'rost-shed',onClick:()=>onJob(job.id)},
+              e('div',{className:'rost-shed-nm'},job.jobName||(f?f.name:'Unnamed')),
+              e('div',{className:'rost-shed-sub'},(job.totalSheep?job.totalSheep+' · ':'')+(job.type||'')),
+              job.status==='Draft'&&e('span',{className:'rost-draft'},'DRAFT')),
+            weekDays.map(d=>{
+              const ids=onFor(job,d);
+              return e('td',{key:d,className:'rost-cell'+(ids.length?' on':''),
+                  onClick:()=>setCell({jobId:job.id,date:d})},
+                ids.length===0
+                  ?e('div',{className:'rost-empty'},'+')
+                  :ids.slice(0,6).map(id=>e('span',{key:id,className:'rost-chip'},sn((gc(id)||{}).name||'?'))),
+                ids.length>6&&e('span',{className:'rost-chip',style:{color:'var(--dim)'}},'+'+(ids.length-6)+' more'));
+            }));
+        }))) ),
+    rows.length>0&&e('div',{style:{textAlign:'center',marginBottom:14}},
+      e('button',{onClick:onNew,style:{background:'var(--card2)',border:'1px solid var(--border)',
+        borderRadius:8,padding:'9px 16px',color:'var(--text)',fontWeight:700,fontSize:13,cursor:'pointer'}},'+ Add a shed')),
+    cell&&openJob&&e(RosterCellEditor,{job:openJob,date:cell.date,allJobs:rows,
+      onClose:()=>setCell(null),setJob}));
+}
+function ScheduleScreen({jobs,role,setRole,onBack,onJob,onNew,onNewDraft,onRosterSave}){
   const today=localToday();
   /* v4.6.10 - crew view: read_only devices with an identity see only their own jobs */
   const myIdSched=(role==='read_only')?(lsGet(LS_MY_ID)||null):null;
@@ -8438,8 +8621,8 @@ function ScheduleScreen({jobs,role,setRole,onBack,onJob,onNew,onNewDraft}){
   const monthCells=monthCellsFor(ay,am);
 
   /* Range-wide jobs for stats strip */
-  const rangeStart=view==='week'?mondayStr:monthCells[0].date;
-  const rangeEnd=view==='week'?weekDays[6]:monthCells[monthCells.length-1].date;
+  const rangeStart=(view==='week'||view==='roster')?mondayStr:monthCells[0].date;
+  const rangeEnd=(view==='week'||view==='roster')?weekDays[6]:monthCells[monthCells.length-1].date;
   const jobsInRange=filtJobs.filter(j=>{
     if(!j.startDate||!j.daysAllocated)return false;
     /* Use actual jobDates so includeWeekends=false jobs get the real end */
@@ -8453,14 +8636,14 @@ function ScheduleScreen({jobs,role,setRole,onBack,onJob,onNew,onNewDraft}){
   const draftsInRange=jobsInRange.filter(j=>j.status==='Draft').length;
 
   const prev=()=>{
-    if(view==='week')setAnchor(addDays(mondayStr,-7));
+    if(view==='week'||view==='roster')setAnchor(addDays(mondayStr,-7));
     else{
       const d=new Date(ay,am-1,1);d.setMonth(d.getMonth()-1);
       setAnchor(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-01`);
     }
   };
   const next=()=>{
-    if(view==='week')setAnchor(addDays(mondayStr,7));
+    if(view==='week'||view==='roster')setAnchor(addDays(mondayStr,7));
     else{
       const d=new Date(ay,am-1,1);d.setMonth(d.getMonth()+1);
       setAnchor(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-01`);
@@ -8521,11 +8704,12 @@ function ScheduleScreen({jobs,role,setRole,onBack,onJob,onNew,onNewDraft}){
         e('div',{className:'sched-hdr-row'},
           e('div',null,
             e('div',{className:'sched-range'},view==='week'?weekRange:monthTitle),
-            e('div',{className:'sched-range-sub'},view==='week'?'Week view — Mon to Sun':'Month view — tap a day for that week')
+            e('div',{className:'sched-range-sub'},view==='week'?'Week view \u2014 Mon to Sun':view==='roster'?'Roster \u2014 tap a square to set who is on':'Month view \u2014 tap a day for that week')
           ),
           e('div',{className:'sched-view-toggle'},
             e('button',{className:`svt-btn${view==='week'?' on':''}`,onClick:()=>setView('week')},'Week'),
-            e('button',{className:`svt-btn${view==='month'?' on':''}`,onClick:()=>setView('month')},'Month')
+            e('button',{className:`svt-btn${view==='month'?' on':''}`,onClick:()=>setView('month')},'Month'),
+            e('button',{className:`svt-btn${view==='roster'?' on':''}`,onClick:()=>setView('roster')},'Roster')
           )
         ),
         e('div',{className:'sched-nav-row'},
@@ -8569,6 +8753,10 @@ function ScheduleScreen({jobs,role,setRole,onBack,onJob,onNew,onNewDraft}){
               e('span',{style:{color:'var(--muted)'}},fmtDate(j.startDate)));})
         );
       })(),
+
+      /* v4.6.59 — ROSTER VIEW: sheds down, days across, people in the squares.
+         Tap a square to set who is at that shed that day. */
+      view==='roster'&&e(RosterGrid,{jobs:jobsInRange,weekDays,today,setJob:onRosterSave,onJob,onNew}),
 
       /* WEEK VIEW */
       view==='week'&&e('div',{className:'week-board'},
@@ -9497,7 +9685,18 @@ function App(){
   return e('div',{style:{paddingTop:(!isOnline||(isOnline&&!isFreshState&&isLoaded.current)||(isOnline&&isFreshState&&isLoaded.current&&pendingCount>0))?20:0}},
     e(StatusBar),
     screen==='home'&&e(HomeScreen,{jobs,role,setRole:persistRole,onJob:goJob,onNew:()=>setShowNew(true),onDatabase:()=>setShowDatabase(true),onSchedule:goSchedule,contractorName:CONTRACTOR_NAME}),
-    screen==='schedule'&&role!=='read_only'&&role!=='shed_lead'&&e(ScheduleScreen,{jobs,role,setRole:persistRole,onBack:goHome,onJob:goJob,onNew:()=>setShowNew(true),onNewDraft:()=>setShowNew(true)}),
+    screen==='schedule'&&role!=='read_only'&&role!=='shed_lead'&&e(ScheduleScreen,{jobs,role,setRole:persistRole,onBack:goHome,onJob:goJob,onNew:()=>setShowNew(true),onNewDraft:()=>setShowNew(true),
+      /* v4.6.59 — the roster writes straight to the job and saves it, so a week
+         can be planned without opening each shed. */
+      onRosterSave:(jobId,fn)=>{
+        setJobs(prev=>prev.map(j=>{
+          if(j.id!==jobId)return j;
+          const next=fn(j);
+          dbSaveJob(next).catch(()=>{});
+          logJobEvent(jobId,'roster_set','week planner',role);
+          return next;
+        }));
+      }}),
     screen==='job'&&selJob&&!leadBlocked(selJob)&&e(JobDetailScreen,{job:selJob,setJob:setSelJob,role,setRole:persistRole,stale:!isFreshState&&isLoaded.current,onBack:goHome,onSend:()=>setShowSMS(true),onBroadcast:()=>setShowBroadcast(true),gfl,gcl,onEdit:()=>setShowEdit(true),onPublish:publishJob,onDeleteJob:async()=>{const id=selJob.id;setSelJobId(null);await dbDeleteJob(id);setJobs(p=>p.filter(j=>j.id!==id));setScreen('home');setShowSMS(false);setPreviewId(null);setJobPinPending(null);},initialTab:deepLinkTab,crewList,addCrew,key:selJobId+(deepLinkTab||'')}),
     showSMS&&selJob&&e(SMSModal,{job:selJob,onClose:()=>{setShowSMS(false);setPreviewId(null);},onPreview:id=>setPreviewId(id),farmList,crewList}),
     showBroadcast&&selJob&&e(BroadcastModal,{job:selJob,onClose:()=>setShowBroadcast(false),farmList,crewList}),
