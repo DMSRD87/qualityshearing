@@ -621,7 +621,7 @@ const LS_TALLY_QUEUE='mg_tally_queue_'+CONTRACTOR_SLUG; /* per-cell offline queu
 const LS_TALLY_DEAD='mg_tally_dead_'+CONTRACTOR_SLUG; /* v4.6.3g — quarantined cells (permanent rejection). Replayed once on boot in case the server-side blocker (e.g. missing kind constraint) was since fixed. */
 const LS_TALLY_META_QUEUE='mg_tally_meta_queue_'+CONTRACTOR_SLUG; /* v4.6.4 — offline/failed mob metadata (type/desc) updates to existing count cells; flushed alongside the tally queue. */
 const ROLE_TIMEOUT_HOURS=12; /* auto-reset after 12h inactivity */
-const APP_VERSION='v4.6.60';
+const APP_VERSION='v4.6.61';
 const SUPER_RATE=0.12; /* SG rate, 12% from 1 Jul 2025. One-line change if legislated rate moves. */
 /* v4.6.46 (4 Sep 2026): JOB IDENTIFICATION ON PAY OUTPUT. Includes everything in v4.6.45 (abort-on-timeout, APP_VERSION stamping), which was built but never deployed. (1) PAY SUMMARY HEADER gains 'Job #: NNNN-0000 - Type'. The FARM RECORD has carried this since v4.6.3; the pay summary never did, so a printed or shared pay summary identified the FARM only. Two jobs at the same farm were indistinguishable on paper the moment they left the app, and a crew member or payroll officer querying a figure had nothing to quote back. (2) PAY WEEK per-shed lines and the CSV 'shed' column now carry the job number. This is also the grouping key, so two jobs at the same farm within one pay period now report as TWO lines instead of merging into one - deliberate: the same earnings, split across two correctly-labelled lines instead of pooled under one ambiguous one. No amount changes, and per-worker and week totals are identical. Worth knowing before the first pay run on it, because a contractor who is used to seeing one line for a farm will see two. (3) SEASON STATS by-shed likewise. DISPLAY ONLY - no pay calculation, superable base, deduction, tax or total is touched. The CSV shape is the future payroll-export payload, so identifying the job here is a prerequisite for mapping earnings lines to anything external. */
 /* v4.6.45 (4 Sep 2026): TIMED-OUT REQUESTS ARE NOW CANCELLED + BUILD STAMPED ON EVERY DIAGNOSTIC ROW. (1) ABORT ON TIMEOUT - withTimeout was a bare Promise.race across all 26 call sites. When the timer won, the caller queued a retry but the underlying request was never cancelled and stayed on the wire. On satellite the link drops for one to three minutes; requests fired during the window sit in the connection queue while the browser reports online, then all flush at once when it returns, each carrying the blob it was built with minutes earlier, in whatever order the link delivers them. A save that 'failed' lands anyway, at an unpredictable moment, with stale data - and NO guard can stop it, because every guard ran when the request was CONSTRUCTED against a server state that no longer exists. This is why guard_mobrate_kept had never fired fleet-wide while overrides were demonstrably going missing: the damage was never done by a save the guards evaluated. 27 such bursts on the largest contractor in 14 days. postgrest builders are lazy and expose abortSignal(), so attaching a controller inside withTimeout fixes all 26 sites without touching one of them; dbLoad's Promise.all shares one explicit controller since Promise.all has no signal. LIMIT, stated plainly: abort stops a request that has NOT yet reached the server, which during an outage is the common case, but it cannot undo one Postgres has already committed - we simply never hear the reply. Closing that last gap needs optimistic concurrency on the write and is a separate piece of work. (2) APP_VERSION ON EVERY save_failures ROW (column added by migration first) - without it, deciding whether a fix worked meant inferring the build from commit timestamps, and a device running yesterday's cached file is indistinguishable from one running today's. Every measurement from here depends on this. (3) netHealth() tracks consecutive timeouts and lifetime successes, ready for reachability-based offline detection - NOT yet wired to any gating or UI. navigator.onLine is link state, not reachability: 2,224 of 2,229 network failures fleet-wide in 30 days reported online. Replacing that flag changes when saves are attempted or held and deserves its own build. NO pay calculation or report output is touched. */
@@ -4787,6 +4787,21 @@ const flushMobDesc=(mid,v)=>{
   const roleGroups=[{lbl:'WOOL HANDLER',ids:shedStaff.filter(id=>(getJobRole(job,id)||gc(id)?.role)==='Wool Handler')},{lbl:'CLASSER',ids:shedStaff.filter(id=>(getJobRole(job,id)||gc(id)?.role)==='Wool Classer')},{lbl:'PENNER',ids:shedStaff.filter(id=>(getJobRole(job,id)||gc(id)?.role)==='Penner')}].filter(g=>g.ids.length>0);
 
   return e('div',null,
+    /* v4.6.61 — the mob names already used on this job, newest first. Built from
+       the job's own runs so it needs no extra query and is always current. */
+    (function(){
+      const seen=[],out=[];
+      Object.keys(job.runs||{}).sort().reverse().forEach(d=>{
+        ((job.runs||{})[d]||[]).forEach(run=>mobsOf(run).forEach(m=>{
+          const v=String((m&&m.desc)||'').trim();
+          if(!v)return;
+          const k=v.toLowerCase();
+          if(seen.indexOf(k)<0){seen.push(k);out.push(v);}
+        }));
+      });
+      if(!out.length)return null;
+      return e('datalist',{id:'mobs-'+job.id},out.slice(0,40).map(v=>e('option',{key:v,value:v})));
+    })(),
     /* DATE STRIP */
     e('div',{className:'date-strip'},
       dates.map(date=>{
@@ -4872,7 +4887,18 @@ const flushMobDesc=(mid,v)=>{
           return e('div',{key:mob.id,className:'mob-entry'},
             e('div',{className:'mob-type-row'},
               e('span',{className:`mob-type-btn${mob.type==='Shearing'?' sh':' cr'}`},mob.type),
-              e('input',{className:'mob-desc',placeholder:'Mob description (e.g. Merino Ewes red tag)',value:mob.desc||'',disabled:!canEdit,onChange:ev=>setMobDesc(run.id,mob.id,ev.target.value),onBlur:ev=>flushMobDesc(mob.id,ev.target.value)}),
+              /* v4.6.61 — pick the mob instead of retyping it. Tallies get entered
+                 at knock-off and the same mob runs all day, so typing "Mixed ewes"
+                 into every run was the slowest part of the job.
+                 It also closes a bug we have already paid for: retyping produced
+                 'Mixe', 'Mixed e' and 'Mixed ewes' as three separate mobs on one
+                 job, which printed as three lines on the grower's record. You
+                 cannot half-type a name you picked from a list.
+                 A datalist, so typing a brand new mob still works exactly as before. */
+              e('input',{className:'mob-desc',placeholder:'Mob description (e.g. Merino Ewes red tag)',
+                list:'mobs-'+job.id,value:mob.desc||'',disabled:!canEdit,
+                onChange:ev=>setMobDesc(run.id,mob.id,ev.target.value),
+                onBlur:ev=>flushMobDesc(mob.id,ev.target.value)}),
               canEdit&&mobsOf(run).length>1&&e('button',{className:'mob-del-btn',onClick:()=>{if(window.confirm('Delete this mob and its tallies for '+fmtDateLong(viewDate)+'?'))delMob(run.id,mob.id);}},'✕')
             ),
             isAdmin&&e('div',{className:'rate-override-row'},
@@ -6306,6 +6332,14 @@ function JobCrewPanel({job,setJob,role,crewList,addCrew}){
     /* v4.6.52 — who is actually on the job, with their role for THIS job and a
        way off it. The role shows "usually X" whenever it differs from their
        database role, so an override is visible rather than buried. */
+    /* v4.6.61 — what was booked vs what is on */
+    positionsSummary(job).length>0&&e('div',{style:{marginTop:10,padding:'8px 10px',borderRadius:8,
+        background:positionsShort(job)>0?'rgba(245,158,11,.12)':'rgba(34,197,94,.12)',
+        border:'1px solid '+(positionsShort(job)>0?'var(--amber)':'rgba(34,197,94,.35)')}},
+      e('div',{style:{fontSize:11,fontWeight:800,letterSpacing:.5,textTransform:'uppercase',
+        color:positionsShort(job)>0?'var(--amber)':'#22c55e'}},
+        positionsShort(job)>0?('Still needed \u2014 '+positionsShort(job)+' to fill'):'Fully crewed'),
+      e('div',{style:{fontSize:12,color:'var(--muted)',marginTop:3}},positionsSummary(job).join('  \u00b7  '))),
     onJob.length>0&&e('div',{style:{marginTop:10}},
       onJob.map(c=>{
         const jr=getJobRole(job,c.id)||c.role||'?';
@@ -7135,6 +7169,30 @@ function LeadPickField({selCrew,crewList,leadId,setLeadId}){
     )
   );
 }
+/* ══ v4.6.61 — POSITIONS REQUIRED ═════════════════════════════════════════════
+   One office books the shed from the farmer's form; someone else allocates the
+   staff. The booker knew "5 shearers, classer, penner, presser" but had nowhere
+   to put it, so the allocator opened the job and could not tell what was wanted.
+   Positions are a PLAN, not a roster: names still go on in the crew panel or the
+   week roster. A job with no positions set behaves exactly as it always has. */
+const POSITION_ROLES=['Shearer','Crutcher','Wool Handler','Wool Classer','Presser','Penner','Cook'];
+function positionsFilled(job,role){
+  return ((job&&job.crew)||[]).filter(id=>(getJobRole(job,id)||((gc(id)||{}).role))===role).length;
+}
+function positionsSummary(job){
+  const p=(job&&job.positions)||{};const out=[];
+  POSITION_ROLES.forEach(r=>{
+    const need=Number(p[r])||0; if(!need)return;
+    out.push(positionsFilled(job,r)+'/'+need+' '+r.toLowerCase()+(need>1?'s':''));
+  });
+  return out;
+}
+function positionsShort(job){
+  const p=(job&&job.positions)||{};let short=0;
+  POSITION_ROLES.forEach(r=>{const need=Number(p[r])||0;if(!need)return;
+    short+=Math.max(0,need-positionsFilled(job,r));});
+  return short;
+}
 function NewJobModal({onClose,onCreate,farmList,crewList,addFarm,addCrew,jobs}){
   /* Only UI-driving state — NO controlled text inputs */
   const [type,setType]=useState('Shearing');
@@ -7147,6 +7205,7 @@ function NewJobModal({onClose,onCreate,farmList,crewList,addFarm,addCrew,jobs}){
     rJobNum.current.value=suggestJobNumber(jobs,f?f.name:'');
   },[farmId]);
   const [evos,setEvos]=useState('Supplied at shed');
+  const [positions,setPositions]=useState({}); /* v4.6.61 */
   const [transport,setTransport]=useState(false);
   /* v4.6.22 — contractor-level default for Meals. One contractor runs
      meals-Provided on 52 of 54 jobs and was re-toggling it on every single job
@@ -7218,6 +7277,8 @@ function NewJobModal({onClose,onCreate,farmList,crewList,addFarm,addCrew,jobs}){
       daysAllocated:parseInt(days),
       includeWeekends,
       totalSheep:parseInt(sheep),
+      /* v4.6.61 — the plan for who is needed; omitted entirely when unused */
+      positions:(function(){const o={};POSITION_ROLES.forEach(r=>{const v=parseInt(positions[r]);if(v>0)o[r]=v;});return Object.keys(o).length?o:undefined;})(),
       evos,crutchingTrailer,transport,meals,
       accommodation:rAccomm.current?.value||'',
       status:asDraft?'Draft':'Active',crew:selCrew,
@@ -7275,6 +7336,17 @@ function NewJobModal({onClose,onCreate,farmList,crewList,addFarm,addCrew,jobs}){
       ),
       e(FF,{label:'Job Number'},e('input',{type:'text',className:'fi',ref:rJobNum,onInput:()=>{jnTouched.current=true;},placeholder:'auto e.g. NOTT-0001',maxLength:16,style:{textTransform:'uppercase'}})),
       e(FF,{label:'Total Sheep'},e('input',{type:'text',className:'fi',placeholder:'e.g. 3000',ref:rSheep,inputMode:'numeric',pattern:'[0-9]*'})),
+      e(FF,{label:'Positions needed (optional)'},
+        e('div',{style:{fontSize:11,color:'var(--dim)',marginBottom:6}},'Leave blank if you are picking the crew yourself.'),
+        e('div',{style:{display:'flex',flexWrap:'wrap',gap:6}},
+          POSITION_ROLES.map(r=>e('div',{key:r,style:{display:'flex',alignItems:'center',gap:4,
+              background:'var(--card2)',border:'1px solid var(--border)',borderRadius:8,padding:'4px 7px'}},
+            e('span',{style:{fontSize:11.5,color:'var(--muted)'}},r),
+            e('input',{type:'text',inputMode:'numeric',pattern:'[0-9]*',value:(positions[r]===undefined?'':positions[r]),
+              placeholder:'0',onChange:ev=>{const v=ev.target.value.replace(/[^0-9]/g,'');
+                setPositions(pp=>({...pp,[r]:v===''?'':parseInt(v)||0}));},
+              style:{width:34,textAlign:'center',fontSize:13,padding:'3px 2px',borderRadius:6,
+                border:'1px solid var(--border)',background:'var(--card)',color:'var(--text)'}}))))),
       e(FF,{label:'EVOs'},e('div',{className:'tog-row'},...['BYO','Supplied at shed'].map(o=>e('button',{key:o,className:`tog-opt${evos===o?' on':''}`,onClick:()=>setEvos(o)},o)))),
       e(FF,{label:'Transport'},e('div',{className:'tog-row'},...[['Yes',true],['No',false]].map(([l,v])=>e('button',{key:l,className:`tog-opt${transport===v?' on':''}`,onClick:()=>setTransport(v)},l)))),
       e(FF,{label:'Crutching Trailer'},e('div',{className:'tog-row'},...[['Provided',true],['Not Provided',false]].map(([l,v])=>e('button',{key:l,className:`tog-opt${crutchingTrailer===v?' on':''}`,onClick:()=>setCrutchingTrailer(v)},l)))),
@@ -8562,6 +8634,11 @@ function RosterGrid({jobs,weekDays,today,setJob,onJob,onNew}){
             e('td',{className:'rost-shed',onClick:()=>onJob(job.id)},
               e('div',{className:'rost-shed-nm'},job.jobName||(f?f.name:'Unnamed')),
               e('div',{className:'rost-shed-sub'},(job.totalSheep?job.totalSheep+' · ':'')+(job.type||'')),
+              /* v4.6.61 — the booker's plan, so the allocator can see what is
+                 still to fill without opening the job or ringing the office. */
+              positionsSummary(job).length>0&&e('div',{style:{fontSize:10,marginTop:2,
+                color:positionsShort(job)>0?'var(--amber)':'#22c55e',fontWeight:700,lineHeight:1.3}},
+                positionsShort(job)>0?positionsSummary(job).join(' · '):'\u2713 fully crewed'),
               job.status==='Draft'&&e('span',{className:'rost-draft'},'DRAFT')),
             weekDays.map(d=>{
               const ids=onFor(job,d);
