@@ -621,7 +621,7 @@ const LS_TALLY_QUEUE='mg_tally_queue_'+CONTRACTOR_SLUG; /* per-cell offline queu
 const LS_TALLY_DEAD='mg_tally_dead_'+CONTRACTOR_SLUG; /* v4.6.3g — quarantined cells (permanent rejection). Replayed once on boot in case the server-side blocker (e.g. missing kind constraint) was since fixed. */
 const LS_TALLY_META_QUEUE='mg_tally_meta_queue_'+CONTRACTOR_SLUG; /* v4.6.4 — offline/failed mob metadata (type/desc) updates to existing count cells; flushed alongside the tally queue. */
 const ROLE_TIMEOUT_HOURS=12; /* auto-reset after 12h inactivity */
-const APP_VERSION='v4.6.64';
+const APP_VERSION='v4.6.65';
 const SUPER_RATE=0.12; /* SG rate, 12% from 1 Jul 2025. One-line change if legislated rate moves. */
 /* v4.6.46 (4 Sep 2026): JOB IDENTIFICATION ON PAY OUTPUT. Includes everything in v4.6.45 (abort-on-timeout, APP_VERSION stamping), which was built but never deployed. (1) PAY SUMMARY HEADER gains 'Job #: NNNN-0000 - Type'. The FARM RECORD has carried this since v4.6.3; the pay summary never did, so a printed or shared pay summary identified the FARM only. Two jobs at the same farm were indistinguishable on paper the moment they left the app, and a crew member or payroll officer querying a figure had nothing to quote back. (2) PAY WEEK per-shed lines and the CSV 'shed' column now carry the job number. This is also the grouping key, so two jobs at the same farm within one pay period now report as TWO lines instead of merging into one - deliberate: the same earnings, split across two correctly-labelled lines instead of pooled under one ambiguous one. No amount changes, and per-worker and week totals are identical. Worth knowing before the first pay run on it, because a contractor who is used to seeing one line for a farm will see two. (3) SEASON STATS by-shed likewise. DISPLAY ONLY - no pay calculation, superable base, deduction, tax or total is touched. The CSV shape is the future payroll-export payload, so identifying the job here is a prerequisite for mapping earnings lines to anything external. */
 /* v4.6.45 (4 Sep 2026): TIMED-OUT REQUESTS ARE NOW CANCELLED + BUILD STAMPED ON EVERY DIAGNOSTIC ROW. (1) ABORT ON TIMEOUT - withTimeout was a bare Promise.race across all 26 call sites. When the timer won, the caller queued a retry but the underlying request was never cancelled and stayed on the wire. On satellite the link drops for one to three minutes; requests fired during the window sit in the connection queue while the browser reports online, then all flush at once when it returns, each carrying the blob it was built with minutes earlier, in whatever order the link delivers them. A save that 'failed' lands anyway, at an unpredictable moment, with stale data - and NO guard can stop it, because every guard ran when the request was CONSTRUCTED against a server state that no longer exists. This is why guard_mobrate_kept had never fired fleet-wide while overrides were demonstrably going missing: the damage was never done by a save the guards evaluated. 27 such bursts on the largest contractor in 14 days. postgrest builders are lazy and expose abortSignal(), so attaching a controller inside withTimeout fixes all 26 sites without touching one of them; dbLoad's Promise.all shares one explicit controller since Promise.all has no signal. LIMIT, stated plainly: abort stops a request that has NOT yet reached the server, which during an outage is the common case, but it cannot undo one Postgres has already committed - we simply never hear the reply. Closing that last gap needs optimistic concurrency on the write and is a separate piece of work. (2) APP_VERSION ON EVERY save_failures ROW (column added by migration first) - without it, deciding whether a fix worked meant inferring the build from commit timestamps, and a device running yesterday's cached file is indistinguishable from one running today's. Every measurement from here depends on this. (3) netHealth() tracks consecutive timeouts and lifetime successes, ready for reachability-based offline detection - NOT yet wired to any gating or UI. navigator.onLine is link state, not reachability: 2,224 of 2,229 network failures fleet-wide in 30 days reported online. Replacing that flag changes when saves are attempted or held and deserves its own build. NO pay calculation or report output is touched. */
@@ -5979,11 +5979,17 @@ function AdminTab({job,setJob,onEdit,onDeleteFarm,onDeleteJob,onPublish}){
       /* v4.6.63 — say what the edit will move before it moves it */
       confirmReprice&&e('div',{style:{marginBottom:10,padding:'12px 14px',borderRadius:10,
           background:'rgba(245,158,11,.12)',border:'1px solid var(--amber)'}},
+        /* v4.6.65 — the first wording read as "this only affects one day" and a
+           contractor asked whether his change had applied to the whole job. It
+           had. Rates belong to the JOB, every day of it. The day count was only
+           ever about how much already-entered work gets recalculated. Say that. */
         e('div',{style:{fontSize:13.5,fontWeight:800,color:'var(--amber)',marginBottom:6}},
-          'This reprices '+daysTallied+' day'+(daysTallied>1?'s':'')+' already tallied'),
+          'These rates apply to the whole job'),
         e('div',{style:{fontSize:12,color:'var(--muted)',lineHeight:1.5,marginBottom:8}},
-          'A new rate normally applies from when it was agreed, not to work already done at the old one. '
-          +'If this is a correction, go ahead \u2014 the change is written to the job log either way.'),
+          daysTallied+' day'+(daysTallied>1?'s are':' is')+' already tallied and will be recalculated, '
+          +'along with every day still to come. A new rate normally applies from when it was agreed, '
+          +'not to work already done at the old one \u2014 so if this is a correction, go ahead. '
+          +'The change is written to the job log either way.'),
         e('div',{style:{fontSize:12,color:'var(--text)',lineHeight:1.6,marginBottom:10,
           whiteSpace:'pre-wrap'}},confirmReprice.join('\n')),
         e('div',{style:{display:'flex',gap:8}},
@@ -5992,7 +5998,7 @@ function AdminTab({job,setJob,onEdit,onDeleteFarm,onDeleteJob,onPublish}){
             fontWeight:700,fontSize:13,cursor:'pointer'}},'Cancel'),
           e('button',{onClick:doSave,style:{flex:2,padding:'10px',borderRadius:8,border:'none',
             background:'var(--amber)',color:'#141414',fontWeight:800,fontSize:13,cursor:'pointer'}},
-            'Reprice '+daysTallied+' day'+(daysTallied>1?'s':'')))),
+            'Apply to whole job'))),
       e('button',{className:'btn-p',onClick:doSave,style:{width:'100%',fontSize:16,padding:'14px'}},saved?'✓ Saved!':'💾 Save Rate Changes')
     ),
 
