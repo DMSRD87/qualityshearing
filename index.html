@@ -621,7 +621,7 @@ const LS_TALLY_QUEUE='mg_tally_queue_'+CONTRACTOR_SLUG; /* per-cell offline queu
 const LS_TALLY_DEAD='mg_tally_dead_'+CONTRACTOR_SLUG; /* v4.6.3g — quarantined cells (permanent rejection). Replayed once on boot in case the server-side blocker (e.g. missing kind constraint) was since fixed. */
 const LS_TALLY_META_QUEUE='mg_tally_meta_queue_'+CONTRACTOR_SLUG; /* v4.6.4 — offline/failed mob metadata (type/desc) updates to existing count cells; flushed alongside the tally queue. */
 const ROLE_TIMEOUT_HOURS=12; /* auto-reset after 12h inactivity */
-const APP_VERSION='v4.6.65';
+const APP_VERSION='v4.6.66';
 const SUPER_RATE=0.12; /* SG rate, 12% from 1 Jul 2025. One-line change if legislated rate moves. */
 /* v4.6.46 (4 Sep 2026): JOB IDENTIFICATION ON PAY OUTPUT. Includes everything in v4.6.45 (abort-on-timeout, APP_VERSION stamping), which was built but never deployed. (1) PAY SUMMARY HEADER gains 'Job #: NNNN-0000 - Type'. The FARM RECORD has carried this since v4.6.3; the pay summary never did, so a printed or shared pay summary identified the FARM only. Two jobs at the same farm were indistinguishable on paper the moment they left the app, and a crew member or payroll officer querying a figure had nothing to quote back. (2) PAY WEEK per-shed lines and the CSV 'shed' column now carry the job number. This is also the grouping key, so two jobs at the same farm within one pay period now report as TWO lines instead of merging into one - deliberate: the same earnings, split across two correctly-labelled lines instead of pooled under one ambiguous one. No amount changes, and per-worker and week totals are identical. Worth knowing before the first pay run on it, because a contractor who is used to seeing one line for a farm will see two. (3) SEASON STATS by-shed likewise. DISPLAY ONLY - no pay calculation, superable base, deduction, tax or total is touched. The CSV shape is the future payroll-export payload, so identifying the job here is a prerequisite for mapping earnings lines to anything external. */
 /* v4.6.45 (4 Sep 2026): TIMED-OUT REQUESTS ARE NOW CANCELLED + BUILD STAMPED ON EVERY DIAGNOSTIC ROW. (1) ABORT ON TIMEOUT - withTimeout was a bare Promise.race across all 26 call sites. When the timer won, the caller queued a retry but the underlying request was never cancelled and stayed on the wire. On satellite the link drops for one to three minutes; requests fired during the window sit in the connection queue while the browser reports online, then all flush at once when it returns, each carrying the blob it was built with minutes earlier, in whatever order the link delivers them. A save that 'failed' lands anyway, at an unpredictable moment, with stale data - and NO guard can stop it, because every guard ran when the request was CONSTRUCTED against a server state that no longer exists. This is why guard_mobrate_kept had never fired fleet-wide while overrides were demonstrably going missing: the damage was never done by a save the guards evaluated. 27 such bursts on the largest contractor in 14 days. postgrest builders are lazy and expose abortSignal(), so attaching a controller inside withTimeout fixes all 26 sites without touching one of them; dbLoad's Promise.all shares one explicit controller since Promise.all has no signal. LIMIT, stated plainly: abort stops a request that has NOT yet reached the server, which during an outage is the common case, but it cannot undo one Postgres has already committed - we simply never hear the reply. Closing that last gap needs optimistic concurrency on the write and is a separate piece of work. (2) APP_VERSION ON EVERY save_failures ROW (column added by migration first) - without it, deciding whether a fix worked meant inferring the build from commit timestamps, and a device running yesterday's cached file is indistinguishable from one running today's. Every measurement from here depends on this. (3) netHealth() tracks consecutive timeouts and lifetime successes, ready for reachability-based offline detection - NOT yet wired to any gating or UI. navigator.onLine is link state, not reachability: 2,224 of 2,229 network failures fleet-wide in 30 days reported online. Replacing that flag changes when saves are attempted or held and deserves its own build. NO pay calculation or report output is touched. */
@@ -2219,7 +2219,7 @@ const mkRates=(ov={})=>{
    hand), so that floor sat UNDER the award for any contractor with no default of
    their own. Raised to the fleet rate. A contractor's own default still wins, and
    they can set whatever they like per job. */
-presserPerBale:pick('presserPerBale',18.00),baleThreshold:pick('baleThreshold',20),pressCpk:pick('pressCpk',0),travelKmDefault:pick('travelKmDefault',0.85),shedKm:pick('shedKm',0),standFeePerDay:pick('standFeePerDay',0),standFeeSuper:pick('standFeeSuper',true),crewOverrides:{},shearerLoadings:{},loadingType:{},travelRate:{},crutchLoadings:{},gangerByDate:{},gangerRate:(function(){const g=dflt.gangerRate??last.gangerRate;return (g&&typeof g==='object')?{...g}:{};})(),payDayOfWeek:pick('payDayOfWeek',5),payFrequency:pick('payFrequency','weekly'),farmerShearingRate:pick('farmerShearingRate',6.50),farmerCrutchingRate:pick('farmerCrutchingRate',2.00),cookDayRate:pick('cookDayRate',400),cookHalfDayRate:pick('cookHalfDayRate',200),cookPerHead:pick('cookPerHead',0),crewDetails:{},...ov};
+presserPerBale:pick('presserPerBale',18.00),baleThreshold:pick('baleThreshold',20),pressCpk:pick('pressCpk',0),travelKmDefault:pick('travelKmDefault',0.85),shedKm:pick('shedKm',0),standFeePerDay:pick('standFeePerDay',0),standFeeSuper:pick('standFeeSuper',true),crewOverrides:{},crewRoleOverrides:{},shearerLoadings:{},loadingType:{},travelRate:{},crutchLoadings:{},gangerByDate:{},gangerRate:(function(){const g=dflt.gangerRate??last.gangerRate;return (g&&typeof g==='object')?{...g}:{};})(),payDayOfWeek:pick('payDayOfWeek',5),payFrequency:pick('payFrequency','weekly'),farmerShearingRate:pick('farmerShearingRate',6.50),farmerCrutchingRate:pick('farmerCrutchingRate',2.00),cookDayRate:pick('cookDayRate',400),cookHalfDayRate:pick('cookHalfDayRate',200),cookPerHead:pick('cookPerHead',0),crewDetails:{},...ov};
 };
 const INIT_JOBS=[];
 const gf=id=>FARMS.find(f=>f.id===id);
@@ -2271,8 +2271,24 @@ const roleFromShedKey=(code,job,id)=>SHED_CODE_ROLE[code]||getJobRole(job,id);
    handler on $95 would class at $95. Role default applies instead. For an
    unsplit day role always equals the job role, so this is identical to the old
    `ov||defR||80`. */
+/* v4.6.66 — AN OVERRIDE CAN NOW BE SET PER ROLE.
+   crewOverrides holds ONE rate per person, applied only when they are working
+   their job role. That covered a worker who steps into another role at the house
+   rate, but not the real case a contractor hit at billing: someone who needs a
+   NON-default rate in two different roles.
+
+   A learner classer is on $100 a run classing — below the house classer rate —
+   and $85 when she picks up a fleece as a wool handler. Another is on $100 shed
+   handling, above the house rate, and classes as well. One number cannot say
+   both, so whichever role was not their job role silently paid the house rate.
+
+   crewRoleOverrides[id][role] now holds an explicit rate per role. Resolution:
+   explicit role rate, then the legacy single override for their job role, then
+   the house rate for that role. Nothing set = exactly the old behaviour. */
 function shedRunRate(job,id,role){
   const rates=job.rates||{};
+  const perRole=((rates.crewRoleOverrides||{})[id]||{})[role];
+  if(perRole!==undefined&&perRole!==null&&perRole!==''&&Number(perRole)>0)return Number(perRole);
   const ov=(rates.crewOverrides||{})[id];
   if(ov&&role===getJobRole(job,id))return ov;
   const defR=role==='Wool Classer'?rates.classerPerRun
@@ -2779,7 +2795,9 @@ function calcPeriodStats(job,period){
     const ov=(rates.crewOverrides||{})[id];const c=gc(id);if(!c)return;
     const role=getJobRole(job,id);
     const defR=role==='Wool Classer'?rates.classerPerRun:role==='Penner'?rates.pennerPerRun:role==='Presser'?rates.presserPerRun:rates.woolHandlerPerRun;
-    const rpr=ov||defR||80;
+    /* v4.6.66 — through the one resolver, so a per-role override applies here
+       too. With none set this is identical to ov||defR||80. */
+    const rpr=shedRunRate(job,id,role);
     /* v4.6.18 — a day split across shed roles prices each bucket at its own
        rate and always PER RUN (see hasRoleRuns). Ordinary days fall through to
        the untouched paths below and are byte-identical to v4.6.16d. */
@@ -3133,7 +3151,9 @@ function generateSummary(job,period){
     const role=getJobRole(job,id);
     const ov=(rates.crewOverrides||{})[id];
     const defR=role==='Wool Classer'?rates.classerPerRun:role==='Penner'?rates.pennerPerRun:role==='Presser'?rates.presserPerRun:rates.woolHandlerPerRun;
-    const rpr=ov||defR||80;
+    /* v4.6.66 — through the one resolver, so a per-role override applies here
+       too. With none set this is identical to ov||defR||80. */
+    const rpr=shedRunRate(job,id,role);
     const totalRuns=Object.entries(job.shedTallies[id]||{}).filter(([d])=>inP(d)).reduce((a,[,b])=>a+b,0);
     const travel=trvl(id);let earn=0,earnLine='';
     if(role==='Presser'){
@@ -3420,7 +3440,9 @@ function payWeekJobData(job,period){
   stIds.forEach(id=>{const role=getJobRole(job,id);const d=dEt(id);
     const ov=(rates.crewOverrides||{})[id];
     const defR=role==='Wool Classer'?rates.classerPerRun:role==='Penner'?rates.pennerPerRun:role==='Presser'?rates.presserPerRun:rates.woolHandlerPerRun;
-    const rpr=ov||defR||80;
+    /* v4.6.66 — through the one resolver, so a per-role override applies here
+       too. With none set this is identical to ov||defR||80. */
+    const rpr=shedRunRate(job,id,role);
     /* v4.6.18 — days split across shed roles: each bucket at its own rate, always
        per run. Itemised one line per role so the payslip reads '2 runs Wool
        Classer' / '2 runs Presser' rather than a single unexplained figure. */
@@ -5559,6 +5581,16 @@ function AdminTab({job,setJob,onEdit,onDeleteFarm,onDeleteJob,onPublish}){
   const [draft,setDraft]=useState(()=>({...mkRates(),...(job.rates||{})}));
   const set=(k,v)=>setDraft(p=>({...p,[k]:v}));
   const setOv=(id,v)=>setDraft(p=>({...p,crewOverrides:{...(p.crewOverrides||{}),[id]:v===''?undefined:parseFloat(v)||0}}));
+  /* v4.6.66 — a rate for one specific role. Blank removes it and that role falls
+     back to the house rate. */
+  const setRoleOv=(id,role,v)=>setDraft(p=>{
+    const all={...(p.crewRoleOverrides||{})};
+    const mine={...(all[id]||{})};
+    if(v===''||v===null)delete mine[role];else mine[role]=parseFloat(v)||0;
+    if(Object.keys(mine).length)all[id]=mine;else delete all[id];
+    return {...p,crewRoleOverrides:all};
+  });
+  const [openRoles,setOpenRoles]=useState({});
   const setLoad=(id,v)=>setDraft(p=>({...p,shearerLoadings:{...(p.shearerLoadings||{}),[id]:v===''?0:parseFloat(v)||0}}));
   /* v4.6.57 — crutching premium. Blank stores nothing, which means "same as
      shearing" — the old behaviour — so an untouched row pays exactly as before.
@@ -5732,15 +5764,49 @@ function AdminTab({job,setJob,onEdit,onDeleteFarm,onDeleteJob,onPublish}){
 
     /* PER PERSON OVERRIDES */
     shedStaff.length>0&&e('div',{className:'admin-section'},
-      e('div',{className:'admin-sec-hdr'},e('div',{className:'admin-sec-title'},'Per Person Rate Overrides'),e('div',{className:'admin-sec-sub'},'Override default $/run for individuals')),
+      e('div',{className:'admin-sec-hdr'},e('div',{className:'admin-sec-title'},'Per Person Rate Overrides'),e('div',{className:'admin-sec-sub'},'Override $/run per person. Someone who works two roles can have a rate for each \u2014 tap By role.')),
       shedStaff.map(id=>{
         const c=gc(id);if(!c)return null;
         const role=getJobRole(job,id);
         const cur=(draft.crewOverrides||{})[id]??'';
         const defR=role==='Wool Classer'?draft.classerPerRun:role==='Penner'?draft.pennerPerRun:role==='Presser'?draft.presserPerRun:draft.woolHandlerPerRun;
-        return e('div',{key:id,className:'loading-row'},
-          e('div',{className:'lr-l'},e(Av,{name:c.name,size:32}),e('div',null,e('div',{className:'lr-name'},c.name),e('div',{className:'lr-role'},role+' — default $'+defR+'/run'))),
-          e('div',{className:'lr-r'},e('span',{className:'lr-prefix'},'$'),e('input',{type:'number',onWheel:ev=>ev.currentTarget.blur(),className:'lr-inp',value:cur,placeholder:defR,step:'1',onChange:ev=>setOv(id,ev.target.value)}),e('span',{className:'lr-unit'},'/run'))
+        /* v4.6.66 — roles this person has actually worked on the job, so the
+           rows that matter show themselves rather than having to be found. */
+        const worked=[];
+        Object.values((job.shedRoleRuns||{})[id]||{}).forEach(byRole=>{
+          Object.keys(byRole||{}).forEach(r=>{if((Number(byRole[r])||0)>0&&worked.indexOf(r)<0)worked.push(r);});
+        });
+        const mine=(draft.crewRoleOverrides||{})[id]||{};
+        const extra=SHED_ROLES.filter(r=>r!==role&&(worked.indexOf(r)>=0||mine[r]!==undefined));
+        const expanded=!!openRoles[id]||extra.length>0;
+        const defFor=r=>r==='Wool Classer'?draft.classerPerRun:r==='Penner'?draft.pennerPerRun
+                      :r==='Presser'?draft.presserPerRun:draft.woolHandlerPerRun;
+        return e('div',{key:id},
+          e('div',{className:'loading-row'},
+            e('div',{className:'lr-l'},e(Av,{name:c.name,size:32}),e('div',null,e('div',{className:'lr-name'},c.name),
+              e('div',{className:'lr-role'},role+' \u2014 default $'+defR+'/run'))),
+            e('div',{className:'lr-r'},e('span',{className:'lr-prefix'},'$'),
+              e('input',{type:'number',onWheel:ev=>ev.currentTarget.blur(),className:'lr-inp',
+                value:(mine[role]!==undefined?mine[role]:cur),placeholder:defR,step:'1',
+                onChange:ev=>{ if(mine[role]!==undefined)setRoleOv(id,role,ev.target.value);
+                               else setOv(id,ev.target.value); }}),
+              e('span',{className:'lr-unit'},'/run'))),
+          /* a rate per role, for someone who works more than one */
+          expanded&&SHED_ROLES.filter(r=>r!==role).map(r=>e('div',{key:r,className:'loading-row',
+              style:{paddingLeft:44,borderTop:'none',opacity:(worked.indexOf(r)>=0||mine[r]!==undefined)?1:.55}},
+            e('div',{className:'lr-l'},e('div',null,
+              e('div',{className:'lr-role',style:{fontSize:12.5,fontWeight:700,color:'var(--text)'}},
+                r+(worked.indexOf(r)>=0?'  \u00b7  worked this job':'')),
+              e('div',{className:'lr-role'},'default $'+defFor(r)+'/run'))),
+            e('div',{className:'lr-r'},e('span',{className:'lr-prefix'},'$'),
+              e('input',{type:'number',onWheel:ev=>ev.currentTarget.blur(),className:'lr-inp',
+                value:(mine[r]===undefined?'':mine[r]),placeholder:defFor(r),step:'1',
+                onChange:ev=>setRoleOv(id,r,ev.target.value)}),
+              e('span',{className:'lr-unit'},'/run')))),
+          !expanded&&e('div',{style:{paddingLeft:44,marginTop:-4,marginBottom:6}},
+            e('button',{onClick:()=>setOpenRoles(p=>({...p,[id]:true})),
+              style:{background:'none',border:'none',padding:0,color:'var(--amber)',fontSize:11.5,
+                fontWeight:700,cursor:'pointer',textDecoration:'underline'}},'By role \u2014 set a rate for another role'))
         );
       })
     ),
