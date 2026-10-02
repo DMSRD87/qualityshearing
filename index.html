@@ -621,7 +621,7 @@ const LS_TALLY_QUEUE='mg_tally_queue_'+CONTRACTOR_SLUG; /* per-cell offline queu
 const LS_TALLY_DEAD='mg_tally_dead_'+CONTRACTOR_SLUG; /* v4.6.3g — quarantined cells (permanent rejection). Replayed once on boot in case the server-side blocker (e.g. missing kind constraint) was since fixed. */
 const LS_TALLY_META_QUEUE='mg_tally_meta_queue_'+CONTRACTOR_SLUG; /* v4.6.4 — offline/failed mob metadata (type/desc) updates to existing count cells; flushed alongside the tally queue. */
 const ROLE_TIMEOUT_HOURS=12; /* auto-reset after 12h inactivity */
-const APP_VERSION='v4.6.68';
+const APP_VERSION='v4.6.69';
 const SUPER_RATE=0.12; /* SG rate, 12% from 1 Jul 2025. One-line change if legislated rate moves. */
 /* v4.6.46 (4 Sep 2026): JOB IDENTIFICATION ON PAY OUTPUT. Includes everything in v4.6.45 (abort-on-timeout, APP_VERSION stamping), which was built but never deployed. (1) PAY SUMMARY HEADER gains 'Job #: NNNN-0000 - Type'. The FARM RECORD has carried this since v4.6.3; the pay summary never did, so a printed or shared pay summary identified the FARM only. Two jobs at the same farm were indistinguishable on paper the moment they left the app, and a crew member or payroll officer querying a figure had nothing to quote back. (2) PAY WEEK per-shed lines and the CSV 'shed' column now carry the job number. This is also the grouping key, so two jobs at the same farm within one pay period now report as TWO lines instead of merging into one - deliberate: the same earnings, split across two correctly-labelled lines instead of pooled under one ambiguous one. No amount changes, and per-worker and week totals are identical. Worth knowing before the first pay run on it, because a contractor who is used to seeing one line for a farm will see two. (3) SEASON STATS by-shed likewise. DISPLAY ONLY - no pay calculation, superable base, deduction, tax or total is touched. The CSV shape is the future payroll-export payload, so identifying the job here is a prerequisite for mapping earnings lines to anything external. */
 /* v4.6.45 (4 Sep 2026): TIMED-OUT REQUESTS ARE NOW CANCELLED + BUILD STAMPED ON EVERY DIAGNOSTIC ROW. (1) ABORT ON TIMEOUT - withTimeout was a bare Promise.race across all 26 call sites. When the timer won, the caller queued a retry but the underlying request was never cancelled and stayed on the wire. On satellite the link drops for one to three minutes; requests fired during the window sit in the connection queue while the browser reports online, then all flush at once when it returns, each carrying the blob it was built with minutes earlier, in whatever order the link delivers them. A save that 'failed' lands anyway, at an unpredictable moment, with stale data - and NO guard can stop it, because every guard ran when the request was CONSTRUCTED against a server state that no longer exists. This is why guard_mobrate_kept had never fired fleet-wide while overrides were demonstrably going missing: the damage was never done by a save the guards evaluated. 27 such bursts on the largest contractor in 14 days. postgrest builders are lazy and expose abortSignal(), so attaching a controller inside withTimeout fixes all 26 sites without touching one of them; dbLoad's Promise.all shares one explicit controller since Promise.all has no signal. LIMIT, stated plainly: abort stops a request that has NOT yet reached the server, which during an outage is the common case, but it cannot undo one Postgres has already committed - we simply never hear the reply. Closing that last gap needs optimistic concurrency on the write and is a separate piece of work. (2) APP_VERSION ON EVERY save_failures ROW (column added by migration first) - without it, deciding whether a fix worked meant inferring the build from commit timestamps, and a device running yesterday's cached file is indistinguishable from one running today's. Every measurement from here depends on this. (3) netHealth() tracks consecutive timeouts and lifetime successes, ready for reachability-based offline detection - NOT yet wired to any gating or UI. navigator.onLine is link state, not reachability: 2,224 of 2,229 network failures fleet-wide in 30 days reported online. Replacing that flag changes when saves are attempted or held and deserves its own build. NO pay calculation or report output is touched. */
@@ -1285,7 +1285,7 @@ function stampFor(job){
   if(job._srvRates){
     try{rates=canonJSON(JSON.parse(job._srvRates));}catch(e){rates=null;}
   }
-  return {status:job._srvStatus,rates:rates,mobRates:job._srvMobRates||null};
+  return {status:job._srvStatus,rates:rates,mobRates:job._srvMobRates||null,crew:job._srvCrew||null};
 }
 async function dbLoad(){
   try{
@@ -1343,6 +1343,8 @@ async function dbLoad(){
       jobs:(jr.data||[]).map(r=>({...r.data,
         _srvStatus:(r.data||{}).status,
         _srvRates:JSON.stringify((r.data||{}).rates||{}),
+        /* v4.6.69 — crew membership too. See guard_crew_kept. */
+        _srvCrew:JSON.stringify(((r.data||{}).crew||[]).slice().sort()),
         _srvMobRates:(function(){
           /* v4.6.34 — mob rate overrides live inside runs, NOT in job.rates, so
              the rates guard never covered them. Three were lost this way, all of
@@ -1705,6 +1707,7 @@ function buildStrippedJobBlob(job){
   delete out._srvStatus; /* v4.6.30 — transient load-time markers, never persisted */
   delete out._srvRates;
   delete out._srvMobRates;
+  delete out._srvCrew; /* v4.6.69 */
   return out;
 }
 
@@ -1983,6 +1986,44 @@ async function dbSaveJob(job){
         }catch(rateErr){
           logSaveFailure('guard_rates_error',job.id,(rateErr&&rateErr.message)||'unknown');
         }
+        /* ══ v4.6.69 — CREW MEMBERSHIP, NOT JUST CREW WITH WORK ═══════════════
+           guard_crew_restored (v4.6.32) puts back anyone on the server crew who
+           has tally rows. That saved a wool handler's five runs. It cannot save
+           someone who has just been added: no tallies, nothing to restore from.
+           A wool handler was added to a live job, texted her card, and wiped by a
+           stale device — three times in one morning, with four guard_rates_kept
+           entries on the same job proving the stale device was there.
+
+           Same rule as rates and status: if this device's outgoing crew is
+           exactly what it last saw from the server, it has not touched the crew,
+           and the server's list — which may hold someone added elsewhere — wins.
+           A device that added or removed anyone differs from its stamp and is
+           written through, so a deliberate edit is never undone. */
+        try{
+          if(_stamp.crew&&Array.isArray(srv.crew)){
+            /* Compare what THIS DEVICE meant to send (job.crew, untouched) — not
+               jobForBlob.crew, which the work guard above may already have
+               restored someone into. Otherwise a restore of one person made the
+               crew look "changed" and silently cost a second person who had no
+               tallies yet. */
+            const outCrew=JSON.stringify((job.crew||[]).slice().sort());
+            const srvCrew=JSON.stringify((srv.crew||[]).slice().sort());
+            if(outCrew===_stamp.crew&&srvCrew!==outCrew){
+              const kept=(srv.crew||[]).filter(id=>(jobForBlob.crew||[]).indexOf(id)<0);
+              logSaveFailure('guard_crew_kept',job.id,'device_unchanged;server_differs;kept='+kept.join(','));
+              jobForBlob.crew=srv.crew.slice();
+              /* their job-role snapshot travels with them */
+              if(srv.rates&&srv.rates.crewDetails){
+                jobForBlob.rates=jobForBlob.rates||{};
+                jobForBlob.rates.crewDetails={...(jobForBlob.rates.crewDetails||{})};
+                kept.forEach(id=>{if(srv.rates.crewDetails[id]&&!jobForBlob.rates.crewDetails[id])
+                  jobForBlob.rates.crewDetails[id]=srv.rates.crewDetails[id];});
+              }
+            }
+          }
+        }catch(crewErr){
+          logSaveFailure('guard_crew_error',job.id,(crewErr&&crewErr.message)||'unknown');
+        }
         /* v4.6.34 — per-mob rate overrides. Same rule as the others: if this
            device is carrying the same value it last saw, it is not changing the
            override and has no business clearing one set elsewhere. A deliberate
@@ -2069,7 +2110,8 @@ async function dbSaveJob(job){
       _srvStamp.set(job.id,{
         status:jobForBlob.status,
         rates:canonJSON(jobForBlob.rates||{}),
-        mobRates:mobRateMap(jobForBlob.runs)
+        mobRates:mobRateMap(jobForBlob.runs),
+        crew:JSON.stringify((jobForBlob.crew||[]).slice().sort())
       });
     }catch(stampErr){
       logSaveFailure('stamp_refresh_error',job.id,(stampErr&&stampErr.message)||'unknown');
