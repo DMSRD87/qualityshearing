@@ -621,7 +621,7 @@ const LS_TALLY_QUEUE='mg_tally_queue_'+CONTRACTOR_SLUG; /* per-cell offline queu
 const LS_TALLY_DEAD='mg_tally_dead_'+CONTRACTOR_SLUG; /* v4.6.3g — quarantined cells (permanent rejection). Replayed once on boot in case the server-side blocker (e.g. missing kind constraint) was since fixed. */
 const LS_TALLY_META_QUEUE='mg_tally_meta_queue_'+CONTRACTOR_SLUG; /* v4.6.4 — offline/failed mob metadata (type/desc) updates to existing count cells; flushed alongside the tally queue. */
 const ROLE_TIMEOUT_HOURS=12; /* auto-reset after 12h inactivity */
-const APP_VERSION='v4.6.67';
+const APP_VERSION='v4.6.68';
 const SUPER_RATE=0.12; /* SG rate, 12% from 1 Jul 2025. One-line change if legislated rate moves. */
 /* v4.6.46 (4 Sep 2026): JOB IDENTIFICATION ON PAY OUTPUT. Includes everything in v4.6.45 (abort-on-timeout, APP_VERSION stamping), which was built but never deployed. (1) PAY SUMMARY HEADER gains 'Job #: NNNN-0000 - Type'. The FARM RECORD has carried this since v4.6.3; the pay summary never did, so a printed or shared pay summary identified the FARM only. Two jobs at the same farm were indistinguishable on paper the moment they left the app, and a crew member or payroll officer querying a figure had nothing to quote back. (2) PAY WEEK per-shed lines and the CSV 'shed' column now carry the job number. This is also the grouping key, so two jobs at the same farm within one pay period now report as TWO lines instead of merging into one - deliberate: the same earnings, split across two correctly-labelled lines instead of pooled under one ambiguous one. No amount changes, and per-worker and week totals are identical. Worth knowing before the first pay run on it, because a contractor who is used to seeing one line for a farm will see two. (3) SEASON STATS by-shed likewise. DISPLAY ONLY - no pay calculation, superable base, deduction, tax or total is touched. The CSV shape is the future payroll-export payload, so identifying the job here is a prerequisite for mapping earnings lines to anything external. */
 /* v4.6.45 (4 Sep 2026): TIMED-OUT REQUESTS ARE NOW CANCELLED + BUILD STAMPED ON EVERY DIAGNOSTIC ROW. (1) ABORT ON TIMEOUT - withTimeout was a bare Promise.race across all 26 call sites. When the timer won, the caller queued a retry but the underlying request was never cancelled and stayed on the wire. On satellite the link drops for one to three minutes; requests fired during the window sit in the connection queue while the browser reports online, then all flush at once when it returns, each carrying the blob it was built with minutes earlier, in whatever order the link delivers them. A save that 'failed' lands anyway, at an unpredictable moment, with stale data - and NO guard can stop it, because every guard ran when the request was CONSTRUCTED against a server state that no longer exists. This is why guard_mobrate_kept had never fired fleet-wide while overrides were demonstrably going missing: the damage was never done by a save the guards evaluated. 27 such bursts on the largest contractor in 14 days. postgrest builders are lazy and expose abortSignal(), so attaching a controller inside withTimeout fixes all 26 sites without touching one of them; dbLoad's Promise.all shares one explicit controller since Promise.all has no signal. LIMIT, stated plainly: abort stops a request that has NOT yet reached the server, which during an outage is the common case, but it cannot undo one Postgres has already committed - we simply never hear the reply. Closing that last gap needs optimistic concurrency on the write and is a separate piece of work. (2) APP_VERSION ON EVERY save_failures ROW (column added by migration first) - without it, deciding whether a fix worked meant inferring the build from commit timestamps, and a device running yesterday's cached file is indistinguishable from one running today's. Every measurement from here depends on this. (3) netHealth() tracks consecutive timeouts and lifetime successes, ready for reachability-based offline detection - NOT yet wired to any gating or UI. navigator.onLine is link state, not reachability: 2,224 of 2,229 network failures fleet-wide in 30 days reported online. Replacing that flag changes when saves are attempted or held and deserves its own build. NO pay calculation or report output is touched. */
@@ -2219,7 +2219,10 @@ const mkRates=(ov={})=>{
    hand), so that floor sat UNDER the award for any contractor with no default of
    their own. Raised to the fleet rate. A contractor's own default still wins, and
    they can set whatever they like per job. */
-presserPerBale:pick('presserPerBale',18.00),baleThreshold:pick('baleThreshold',20),pressCpk:pick('pressCpk',0),travelKmDefault:pick('travelKmDefault',0.85),shedKm:pick('shedKm',0),standFeePerDay:pick('standFeePerDay',0),standFeeSuper:pick('standFeeSuper',true),crewOverrides:{},crewRoleOverrides:{},shearerLoadings:{},loadingType:{},travelRate:{},crutchLoadings:{},gangerByDate:{},gangerRate:(function(){const g=dflt.gangerRate??last.gangerRate;return (g&&typeof g==='object')?{...g}:{};})(),payDayOfWeek:pick('payDayOfWeek',5),payFrequency:pick('payFrequency','weekly'),farmerShearingRate:pick('farmerShearingRate',6.50),farmerCrutchingRate:pick('farmerCrutchingRate',2.00),cookDayRate:pick('cookDayRate',400),cookHalfDayRate:pick('cookHalfDayRate',200),cookPerHead:pick('cookPerHead',0),crewDetails:{},...ov};
+presserPerBale:pick('presserPerBale',18.00),baleThreshold:pick('baleThreshold',20),
+/* v4.6.68 — classer per fleece. No hardcoded rate: the feature is off until a
+   contractor (or their default sheet) sets one. 1,000 is the threshold they use. */
+classerPerFleece:pick('classerPerFleece',undefined),classerFleeceThreshold:pick('classerFleeceThreshold',1000),pressCpk:pick('pressCpk',0),travelKmDefault:pick('travelKmDefault',0.85),shedKm:pick('shedKm',0),standFeePerDay:pick('standFeePerDay',0),standFeeSuper:pick('standFeeSuper',true),crewOverrides:{},crewRoleOverrides:{},shearerLoadings:{},loadingType:{},travelRate:{},crutchLoadings:{},gangerByDate:{},gangerRate:(function(){const g=dflt.gangerRate??last.gangerRate;return (g&&typeof g==='object')?{...g}:{};})(),payDayOfWeek:pick('payDayOfWeek',5),payFrequency:pick('payFrequency','weekly'),farmerShearingRate:pick('farmerShearingRate',6.50),farmerCrutchingRate:pick('farmerCrutchingRate',2.00),cookDayRate:pick('cookDayRate',400),cookHalfDayRate:pick('cookHalfDayRate',200),cookPerHead:pick('cookPerHead',0),crewDetails:{},...ov};
 };
 const INIT_JOBS=[];
 const gf=id=>FARMS.find(f=>f.id===id);
@@ -2390,6 +2393,58 @@ function cookIds(job){
 }
 /* Earnings for one cook-day. Returns {earn,basis,rate,units,half} — basis names
    which arm won so the pay summary can show WHY, not an unexplained figure. */
+/* ══ v4.6.68 — WOOL CLASSER PER FLEECE ════════════════════════════════════════
+   A classer is paid per run — until the shed does a big day. The award is
+   piecework ($548.58 per thousand fleeces at the recommended rate) with a daily
+   minimum, which is greater-of by construction. Contractors apply it as a
+   threshold: 1,000+ shorn in the shed that day and the classer goes to per-fleece.
+
+   A fleece is a SHORN sheep. Crutched head never counts, so a 1,200-head
+   crutching day does not trigger it.
+
+   The threshold is per shed-day, on the whole shed's shorn count, not per
+   classer. If two classers split the day (one before lunch, one after) each gets
+   the shed's fleeces in proportion to their classer runs that day — a case the
+   contractor says is near-unheard-of, but it must not pay the full count twice.
+
+   Greater-of, not a hard swap. At 1,000 fleeces x 47c = $470 against 4 runs x
+   $110 = $440 the result is the same as "per fleece instead"; but a classer on
+   $130 a run would otherwise be CUT from $520 to $470 by crossing the line, which
+   is the presser cliff again. Nobody is paid less for a bigger day.
+
+   Off until a rate is set: classerPerFleece and classerFleeceThreshold both
+   absent means exactly the old behaviour. One helper, three callers. */
+function shedShornOn(job,date){
+  let n=0;
+  (((job||{}).runs||{})[date]||[]).forEach(run=>mobsOf(run).forEach(m=>{
+    if(m&&m.type==='Shearing')Object.values(m.counts||{}).forEach(v=>{n+=Number(v)||0;});
+  }));
+  return n;
+}
+/* every classer run in the shed that day, whoever did them — the denominator
+   for sharing the shed's fleeces */
+function classerRunsOn(job,date){
+  let t=0;
+  ((job||{}).crew||[]).forEach(id=>{
+    if(hasRoleRuns(job,id,date)){t+=Number((shedRunsByRole(job,id,date)['Wool Classer'])||0);}
+    else if(getJobRole(job,id)==='Wool Classer'){t+=Number((((job.shedTallies||{})[id]||{})[date])||0);}
+  });
+  return t;
+}
+function classerDayEarn(job,id,date,runs,rpr){
+  const rates=(job||{}).rates||{};
+  runs=Number(runs)||0; rpr=Number(rpr)||0;
+  const runEarn=runs*rpr;
+  const asRuns={earn:runEarn,basis:'runs',units:runs,rate:rpr};
+  const pf=Number(rates.classerPerFleece)||0, thr=Number(rates.classerFleeceThreshold)||0;
+  if(!(pf>0)||!(thr>0)||!(runs>0))return asRuns;
+  const shorn=shedShornOn(job,date);
+  if(shorn<thr)return asRuns;
+  const tot=classerRunsOn(job,date)||runs;
+  const fleeces=Math.round(shorn*runs/tot);
+  const fEarn=fleeces*pf;
+  return fEarn>runEarn?{earn:fEarn,basis:'fleeces',units:fleeces,rate:pf}:asRuns;
+}
 function cookDayEarn(job,id,date){
   const rates=job.rates||{};
   const frac=Number(((job.cookDays||{})[id]||{})[date])||0;
@@ -2817,7 +2872,11 @@ function calcPeriodStats(job,period){
     const splitDates=Object.keys((job.shedRoleRuns||{})[id]||{}).filter(d=>hasRoleRuns(job,id,d)&&inP(d));
     splitDates.forEach(date=>{
       const byRole=shedRunsByRole(job,id,date);
-      Object.keys(byRole).forEach(r=>{totalEarn+=byRole[r]*shedRunRate(job,id,r);});
+      Object.keys(byRole).forEach(r=>{
+        /* v4.6.68 — classer runs may go to per-fleece */
+        if(r==='Wool Classer'){totalEarn+=classerDayEarn(job,id,date,byRole[r],shedRunRate(job,id,r)).earn;return;}
+        totalEarn+=byRole[r]*shedRunRate(job,id,r);
+      });
     });
     const skip=d=>splitDates.indexOf(d)>=0;
     if(role==='Presser'){
@@ -2845,7 +2904,9 @@ function calcPeriodStats(job,period){
         }
       });
     }
-    else{Object.entries(job.shedTallies[id]||{}).forEach(([date,runs])=>{if(!inP(date)||skip(date))return;totalEarn+=runs*rpr;});}
+    else{Object.entries(job.shedTallies[id]||{}).forEach(([date,runs])=>{if(!inP(date)||skip(date))return;
+      /* v4.6.68 — classer per fleece on a big day */
+      totalEarn+=(role==='Wool Classer')?classerDayEarn(job,id,date,runs,rpr).earn:runs*rpr;});}
     totalEarn+=travelEarn(id);
   });
   /* v4.6.19 — cook: per day, whichever is greater of day rate vs per head.
@@ -3213,6 +3274,25 @@ function generateSummary(job,period){
         else if(bEarn>0){earnLine='  '+paidBales+' bales @ $'+(rates.presserPerBale||14.20).toFixed(2)+'/bale = $'+earn.toFixed(2);}
         else{earnLine='  '+paidRuns+' runs @ $'+rpr.toFixed(2)+'/run = $'+earn.toFixed(2);}
       }
+    }else if(role==='Wool Classer'){
+      /* v4.6.68 — per day, so a 1,000+ shorn day can pay per fleece. Split days
+         are priced here at plain runs x rate ON PURPOSE: the split block below
+         subtracts exactly flatRemoved x rpr and re-adds them correctly, so the
+         flat figure for those days must be the plain one or the subtraction
+         would be wrong. */
+      const splitSet=Object.keys((job.shedRoleRuns||{})[id]||{}).filter(dt=>hasRoleRuns(job,id,dt)&&inP(dt));
+      let runsAtRate=0,fleeceLines=[];earn=0;
+      Object.entries(job.shedTallies[id]||{}).filter(([d])=>inP(d)).sort((a,b)=>a[0]<b[0]?-1:1).forEach(([date,runs])=>{
+        if(!runs)return;
+        if(splitSet.indexOf(date)>=0){earn+=runs*rpr;runsAtRate+=runs;return;}
+        const cd=classerDayEarn(job,id,date,runs,rpr);
+        earn+=cd.earn;
+        if(cd.basis==='fleeces')fleeceLines.push('  '+fmtDate(date)+': '+cd.units.toLocaleString()+' fleeces @ $'+cd.rate.toFixed(2)+' = $'+cd.earn.toFixed(2)+' (beat '+runs+' runs)');
+        else runsAtRate+=runs;
+      });
+      const parts=[];
+      if(runsAtRate>0)parts.push('  '+runsAtRate+' run'+(runsAtRate===1?'':'s')+' @ $'+rpr.toFixed(2)+'/run = $'+(runsAtRate*rpr).toFixed(2));
+      earnLine=parts.concat(fleeceLines).join('\n');
     }else{earn=totalRuns*rpr;earnLine='  '+totalRuns+' runs @ $'+rpr.toFixed(2)+'/run = $'+earn.toFixed(2);}
     /* v4.6.21a — split shed-role days. v4.6.18 added these to calcPeriodStats and
        payWeekJobData but NOT here, so the printed summary priced a split day at
@@ -3227,9 +3307,11 @@ function generateSummary(job,period){
           const byRole=shedRunsByRole(job,id,date);
           Object.keys(byRole).forEach(r=>{
             const rr=shedRunRate(job,id,r);
-            splitEarn+=byRole[r]*rr;splitRuns+=byRole[r];
+            /* v4.6.68 — classer runs on a split day may go to per-fleece */
+            const e=(r==='Wool Classer')?classerDayEarn(job,id,date,byRole[r],rr).earn:byRole[r]*rr;
+            splitEarn+=e;splitRuns+=byRole[r];
             if(!byRoleTot[r])byRoleTot[r]={runs:0,earn:0};
-            byRoleTot[r].runs+=byRole[r];byRoleTot[r].earn+=byRole[r]*rr;
+            byRoleTot[r].runs+=byRole[r];byRoleTot[r].earn+=e;
           });
         });
         /* strip the split days out of the flat figure computed above, then add
@@ -3463,7 +3545,16 @@ function payWeekJobData(job,period){
     splitD.forEach(date=>{
       const byRole=shedRunsByRole(job,id,date);
       Object.keys(byRole).sort().forEach(r=>{
-        const rr=shedRunRate(job,id,r);const units=byRole[r];const earn=units*rr;const w=W(id);
+        const rr=shedRunRate(job,id,r);const units=byRole[r];const w=W(id);
+        /* v4.6.68 — classer runs may go to per-fleece on a 1,000+ day */
+        if(r==='Wool Classer'){
+          const cd=classerDayEarn(job,id,date,units,rr);
+          w.staffEarn+=cd.earn;
+          w.lines.push({date,shed,item:cd.basis==='fleeces'?(cd.units.toLocaleString()+' fleeces classed'):(units+' run'+(units===1?'':'s')+' '+r),
+            units:cd.units,rate:cd.rate,amount:cd.earn,superable:true});
+          return;
+        }
+        const earn=units*rr;
         w.staffEarn+=earn;
         w.lines.push({date,shed,item:units+' run'+(units===1?'':'s')+' '+r,units,rate:rr,amount:earn,superable:true});
       });
@@ -3490,7 +3581,16 @@ function payWeekJobData(job,period){
     }else{
       Object.entries((job.shedTallies||{})[id]||{}).filter(x=>inP(x[0])&&!skipD(x[0])).sort((a,b)=>a[0]<b[0]?-1:1).forEach(x=>{
         const date=x[0],runs=x[1];
-        if(!runs)return;const earn=runs*rpr;const w=W(id);w.staffEarn+=earn;
+        if(!runs)return;const w=W(id);
+        /* v4.6.68 — classer per fleece on a big day */
+        if(role==='Wool Classer'){
+          const cd=classerDayEarn(job,id,date,runs,rpr);
+          w.staffEarn+=cd.earn;
+          w.lines.push({date,shed,item:cd.basis==='fleeces'?(cd.units.toLocaleString()+' fleeces classed'):(runs+' runs'),
+            units:cd.units,rate:cd.rate,amount:cd.earn,superable:true});
+          return;
+        }
+        const earn=runs*rpr;w.staffEarn+=earn;
         w.lines.push({date,shed,item:runs+' runs',units:runs,rate:rpr,amount:earn,superable:true});
       });
     }
@@ -5635,6 +5735,7 @@ function AdminTab({job,setJob,onEdit,onDeleteFarm,onDeleteJob,onPublish}){
   const RATE_LABELS={shearingPerHead:'Shearing $/head',crutchingPerHead:'Crutching $/head',
     woolHandlerPerRun:'Wool handler $/run',classerPerRun:'Classer $/run',pennerPerRun:'Penner $/run',
     presserPerRun:'Presser $/run',presserPerBale:'Presser $/bale',baleThreshold:'Bale threshold',
+    classerPerFleece:'Classer $/fleece',classerFleeceThreshold:'Fleece threshold',
     travelKmDefault:'Travel $/km',standFeePerDay:'Stand fee $/day'};
   const rateDiff=()=>{
     const out=[];
@@ -5752,6 +5853,10 @@ function AdminTab({job,setJob,onEdit,onDeleteFarm,onDeleteJob,onPublish}){
       e('div',{className:'rate-grid'},
         e(RCell,{lbl:'Wool Handler',k:'woolHandlerPerRun',prefix:'$',draft,onSet:set}),
         e(RCell,{lbl:'Classer',k:'classerPerRun',prefix:'$',draft,onSet:set}),
+        /* v4.6.68 — classer per fleece on a 1,000+ shorn day; greater-of against
+           the run rate. Blank = off. */
+        e(RCell,{lbl:'Classer $/fleece',k:'classerPerFleece',prefix:'$',hi:true,draft,onSet:set}),
+        e(RCell,{lbl:'Fleece threshold/day',k:'classerFleeceThreshold',hi:true,draft,onSet:set}),
         e(RCell,{lbl:'Penner',k:'pennerPerRun',prefix:'$',draft,onSet:set}),
         e(RCell,{lbl:'Presser (per run)',k:'presserPerRun',prefix:'$',draft,onSet:set}),
         e(RCell,{lbl:'Presser $/bale',k:'presserPerBale',prefix:'$',hi:true,draft,onSet:set}),
