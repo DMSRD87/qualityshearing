@@ -621,7 +621,7 @@ const LS_TALLY_QUEUE='mg_tally_queue_'+CONTRACTOR_SLUG; /* per-cell offline queu
 const LS_TALLY_DEAD='mg_tally_dead_'+CONTRACTOR_SLUG; /* v4.6.3g — quarantined cells (permanent rejection). Replayed once on boot in case the server-side blocker (e.g. missing kind constraint) was since fixed. */
 const LS_TALLY_META_QUEUE='mg_tally_meta_queue_'+CONTRACTOR_SLUG; /* v4.6.4 — offline/failed mob metadata (type/desc) updates to existing count cells; flushed alongside the tally queue. */
 const ROLE_TIMEOUT_HOURS=12; /* auto-reset after 12h inactivity */
-const APP_VERSION='v4.6.69';
+const APP_VERSION='v4.6.70';
 const SUPER_RATE=0.12; /* SG rate, 12% from 1 Jul 2025. One-line change if legislated rate moves. */
 /* v4.6.46 (4 Sep 2026): JOB IDENTIFICATION ON PAY OUTPUT. Includes everything in v4.6.45 (abort-on-timeout, APP_VERSION stamping), which was built but never deployed. (1) PAY SUMMARY HEADER gains 'Job #: NNNN-0000 - Type'. The FARM RECORD has carried this since v4.6.3; the pay summary never did, so a printed or shared pay summary identified the FARM only. Two jobs at the same farm were indistinguishable on paper the moment they left the app, and a crew member or payroll officer querying a figure had nothing to quote back. (2) PAY WEEK per-shed lines and the CSV 'shed' column now carry the job number. This is also the grouping key, so two jobs at the same farm within one pay period now report as TWO lines instead of merging into one - deliberate: the same earnings, split across two correctly-labelled lines instead of pooled under one ambiguous one. No amount changes, and per-worker and week totals are identical. Worth knowing before the first pay run on it, because a contractor who is used to seeing one line for a farm will see two. (3) SEASON STATS by-shed likewise. DISPLAY ONLY - no pay calculation, superable base, deduction, tax or total is touched. The CSV shape is the future payroll-export payload, so identifying the job here is a prerequisite for mapping earnings lines to anything external. */
 /* v4.6.45 (4 Sep 2026): TIMED-OUT REQUESTS ARE NOW CANCELLED + BUILD STAMPED ON EVERY DIAGNOSTIC ROW. (1) ABORT ON TIMEOUT - withTimeout was a bare Promise.race across all 26 call sites. When the timer won, the caller queued a retry but the underlying request was never cancelled and stayed on the wire. On satellite the link drops for one to three minutes; requests fired during the window sit in the connection queue while the browser reports online, then all flush at once when it returns, each carrying the blob it was built with minutes earlier, in whatever order the link delivers them. A save that 'failed' lands anyway, at an unpredictable moment, with stale data - and NO guard can stop it, because every guard ran when the request was CONSTRUCTED against a server state that no longer exists. This is why guard_mobrate_kept had never fired fleet-wide while overrides were demonstrably going missing: the damage was never done by a save the guards evaluated. 27 such bursts on the largest contractor in 14 days. postgrest builders are lazy and expose abortSignal(), so attaching a controller inside withTimeout fixes all 26 sites without touching one of them; dbLoad's Promise.all shares one explicit controller since Promise.all has no signal. LIMIT, stated plainly: abort stops a request that has NOT yet reached the server, which during an outage is the common case, but it cannot undo one Postgres has already committed - we simply never hear the reply. Closing that last gap needs optimistic concurrency on the write and is a separate piece of work. (2) APP_VERSION ON EVERY save_failures ROW (column added by migration first) - without it, deciding whether a fix worked meant inferring the build from commit timestamps, and a device running yesterday's cached file is indistinguishable from one running today's. Every measurement from here depends on this. (3) netHealth() tracks consecutive timeouts and lifetime successes, ready for reachability-based offline detection - NOT yet wired to any gating or UI. navigator.onLine is link state, not reachability: 2,224 of 2,229 network failures fleet-wide in 30 days reported online. Replacing that flag changes when saves are attempted or held and deserves its own build. NO pay calculation or report output is touched. */
@@ -7606,7 +7606,11 @@ function NewJobModal({onClose,onCreate,farmList,crewList,addFarm,addCrew,jobs}){
     return acc;
   },[]);
 
-  const doCreate=(asDraft=false)=>{
+  /* v4.6.70 — "Publish & send to crew" from the creation form itself. The
+     send sheet existed after publish, but on the Overview tab, below the fold:
+     create, back out, open the job, scroll, find Send. Contractors doing six
+     sheds a week asked for it on the button they are already pressing. */
+  const doCreate=(asDraft=false,sendCards=false)=>{
     const days=rDays.current?.value?.trim();
     const sheep=rSheep.current?.value?.trim();
     const startDate=rStartDate.current?.value||localToday();
@@ -7636,6 +7640,7 @@ function NewJobModal({onClose,onCreate,farmList,crewList,addFarm,addCrew,jobs}){
       return;
     }
     onCreate({
+      _sendCards:(!asDraft&&sendCards===true&&selCrew.length>0),  /* transient, stripped by the parent */
       id:'j'+Date.now(),
       jobNumber:jnFinal,
       farmId,type,
@@ -7744,9 +7749,12 @@ function NewJobModal({onClose,onCreate,farmList,crewList,addFarm,addCrew,jobs}){
       submitErr&&e('div',{style:{padding:'0 16px 12px',fontSize:'13px',color:'var(--red)',fontWeight:600}},submitErr)
     ),
     e('div',{style:{position:'fixed',bottom:0,left:0,right:0,background:'var(--card)',borderTop:'1px solid var(--border)',padding:'12px 16px',display:'flex',gap:8,zIndex:10}},
-      e('button',{className:'btn-g',onClick:onClose,style:{flex:0,padding:'13px 14px'}},'Cancel'),
-      e('button',{className:'btn-draft',onClick:()=>doCreate(true),style:{flex:1}},'◌ Save as Draft'),
-      e('button',{className:'btn-p',onClick:()=>doCreate(false),style:{flex:1.4}},'🚀 Publish')
+      e('button',{className:'btn-g',onClick:onClose,style:{flex:0,padding:'13px 12px'}},'Cancel'),
+      e('button',{className:'btn-draft',onClick:()=>doCreate(true),style:{flex:1,padding:'13px 6px',fontSize:13}},'◌ Draft'),
+      e('button',{className:'btn-p',onClick:()=>doCreate(false),style:{flex:1,padding:'13px 6px',fontSize:13}},'🚀 Publish'),
+      /* v4.6.70 — only when there is someone to send to */
+      selCrew.length>0&&e('button',{className:'btn-p',onClick:()=>doCreate(false,true),
+        style:{flex:1.5,padding:'13px 6px',fontSize:13,background:'linear-gradient(135deg,#0e7490,#155e75)'}},'🚀 Publish & send')
     )
   );
 }
@@ -10037,6 +10045,9 @@ function App(){
     setScreen('home');setSelJobId(null);setShowSMS(false);setPreviewId(null);setJobPinPending(null);
   };
   const doCreate=async job=>{
+    /* v4.6.70 — a transient marker from the creation form; never persisted */
+    const sendCards=job._sendCards===true;
+    delete job._sendCards;
     syncLookups(farmList,crewList);
     lsSet(LS_LAST_RATES,job.rates); /* save rates for next job */
     setJobs(p=>[job,...p]);
@@ -10047,6 +10058,10 @@ function App(){
     } else {
       setSelJobId(job.id);
       setScreen('job');
+      if(sendCards){
+        setShowSMS(true);
+        logJobEvent(job.id,'published','crew='+((job.crew||[]).length)+'; cards sheet opened from New Job',role);
+      }
     }
     await dbSaveJob(job).catch(()=>{});
   };
