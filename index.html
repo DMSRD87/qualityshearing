@@ -624,7 +624,8 @@ const LS_TALLY_QUEUE='mg_tally_queue_'+CONTRACTOR_SLUG; /* per-cell offline queu
 const LS_TALLY_DEAD='mg_tally_dead_'+CONTRACTOR_SLUG; /* v4.6.3g — quarantined cells (permanent rejection). Replayed once on boot in case the server-side blocker (e.g. missing kind constraint) was since fixed. */
 const LS_TALLY_META_QUEUE='mg_tally_meta_queue_'+CONTRACTOR_SLUG; /* v4.6.4 — offline/failed mob metadata (type/desc) updates to existing count cells; flushed alongside the tally queue. */
 const ROLE_TIMEOUT_HOURS=12; /* auto-reset after 12h inactivity */
-const APP_VERSION='v4.6.72c';
+const APP_VERSION='v4.6.72d';
+/* v4.6.72d (15 Oct 2026): (1) TEAM CHAT - one channel per contractor on the home board (crew, lead, admin; never farmers): name: message, 30-day retention hard-deleted nightly by pg_cron (chat_messages table, Realtime on), live via Supabase Realtime while open + 60s poll, unread badge on the home-board bar, admin can delete, failed sends marked and retryable, no offline queue. Built because SMS broadcasts were being used as a group chat ($250 of the $534 all-time Twilio bill was one contractor). (2) SMS SMART-PUNCTUATION NORMALISER - curly quotes/long dashes flipped bodies to UCS-2 (half the characters per segment); every outgoing body now passes smsClean. (3) BROADCAST COST LINE - segments x recipients and an AUD estimate shown before Send, with a warning when emoji keep the body UCS-2. No pay, sync or settings change. */
 /* v4.6.72c (15 Oct 2026): PAY-DAY REMINDER on the home board for lead + admin - the day before and on pay day: 'Pay day tomorrow/today - make sure every tally is entered and the app has synced before pay is run.' Pay day resolves like Pay Week (default_rates -> latest non-draft job -> Friday); end-of-shed payers never see it; dismiss hides it until the next pay date. UI only - no pay, sync, DB or settings change. Still NO Xero code. */
 /* v4.6.72b (12 Oct 2026): CREW + FARMER SMS TRIM to Dale's wording. Crew: 'Hi X, you have been added to a job with <contractor> starting <date>. Tap the link for details:' + link (+ one lead PIN line) + 'Do not reply'. Farmer: 'Hi X, <contractor> have your shearing locked in. Tap the link to see details:' + link + 'Hit Farmer - PIN <pin>'. Both hold 2 GSM-7 segments at the longest fleet contractor name. Job detail stays behind the link (viewed receipt). SMS text only - no pay, sync, DB or settings change. Built on v4.6.72a; still NO Xero code (that is 4.6.73+, Knights only). */
 /* v4.6.72a (6 Oct 2026): nudge bar no longer hides the home-board buttons - while it shows, the fab-stack lifts clear of it (body.a2hs-on). Shed-name placeholder neutralised to 'e.g. Hilltop' (leak list - old value was a real station name). UI only - no pay, sync or data change. */
@@ -7044,18 +7045,23 @@ function BroadcastModal({job,onClose,farmList,crewList}){
   const fContacts=farmerContacts(farm);
   const farmerPhone=(farm&&farm.farmerPhone||'').trim();
   const crewWithPhone=job.crew.filter(id=>{const c=gcl(id);return c&&c.phone;});
+  /* v4.6.72d - what this tap costs, before it is tapped */
+  const _bcBody=msg.trim()?smsClean(['Update from '+CONTRACTOR_NAME+' re: '+jobName+' -','',msg.trim(),'','Do not reply to this message - contact me directly.','- '+CONTRACTOR_NAME+' via myGang'].join('\n')):'';
+  const _bcSegs=_bcBody?smsSegments(_bcBody):0;
+  const _bcRecips=crewWithPhone.length+(alsoFarmer?fContacts.length:0);
+  const _bcUcs2=!!_bcBody&&!smsIsGsm(_bcBody);
 
   const doSend=async()=>{
     if(!msg.trim())return;
     setStatus('sending');
-    const body=[
+    const body=smsClean([
       'Update from '+CONTRACTOR_NAME+' re: '+jobName+' -',
       '',
       msg.trim(),
       '',
       'Do not reply to this message - contact me directly.',
       '- '+CONTRACTOR_NAME+' via myGang'
-    ].join('\n');
+    ].join('\n')); /* v4.6.72d - smart quotes cost double */
     const messages=crewWithPhone.map(id=>{const c=gcl(id);return{to:c.phone,body};});
     if(alsoFarmer)fContacts.forEach(fc=>messages.push({to:fc.phone,body}));
     try{
@@ -7129,6 +7135,13 @@ function BroadcastModal({job,onClose,farmList,crewList}){
           msg.trim()
             ?'Update from '+CONTRACTOR_NAME+' re: '+jobName+' —\n\n'+msg.trim()+'\n\nDo not reply to this message — contact me directly.\n— '+CONTRACTOR_NAME+' via myGang'
             :'Type your message above to preview...'
+        ),
+        _bcSegs>0&&e('div',{style:{margin:'10px 16px 0',padding:'8px 12px',borderRadius:8,fontSize:12,lineHeight:1.5,
+          background:_bcUcs2?'var(--amberD)':'var(--card2)',border:'1px solid '+(_bcUcs2?'var(--amberB)':'var(--border)'),color:'var(--text)'}},
+          e('b',null,_bcSegs+' segment'+(_bcSegs===1?'':'s')+' \u00d7 '+_bcRecips+' '+(_bcRecips===1?'person':'people')+' = '+(_bcSegs*_bcRecips)+' segments'),
+          ' (~$'+(_bcSegs*_bcRecips*SMS_AUD_PER_SEGMENT).toFixed(2)+')',
+          _bcUcs2?e('div',{style:{color:'var(--muted)',marginTop:2}},'Emoji or symbols in this message halve the characters per segment - remove them to roughly halve the cost.'):null,
+          e('div',{style:{color:'var(--muted)',marginTop:2}},'Not urgent? Team chat on the home board is free.')
         )
       ),
       status==='sending'&&e('div',{className:'sent-state'},
@@ -7160,6 +7173,26 @@ function BroadcastModal({job,onClose,farmList,crewList}){
 
 
 /* ── SMS MODAL ── */
+/* ── v4.6.72d SMS COST HYGIENE ──
+   Twilio bills GSM-7 at 153 chars/segment and UCS-2 at 67. Phones auto-type curly
+   quotes and long dashes; ONE such character flips the whole body to UCS-2, so a
+   3-segment broadcast bills as 7. The 15 Oct log audit put $88 of the all-time bill
+   on the apostrophe alone. Every outgoing body passes through smsClean. Emoji still
+   force UCS-2 (we do not strip what people deliberately typed) - the broadcast
+   modal says so before Send. */
+const SMS_SMART={'\u2019':"'",'\u2018':"'",'\u201c':'"','\u201d':'"',
+  '\u2013':'-','\u2014':'-','\u2026':'...','\u00a0':' ','\u2022':'-'};
+function smsClean(s){return String(s||'').replace(/[\u2019\u2018\u201c\u201d\u2013\u2014\u2026\u00a0\u2022]/g,c=>SMS_SMART[c]||c);}
+const SMS_GSM="@\u00a3$\u00a5\u00e8\u00e9\u00f9\u00ec\u00f2\u00c7\n\u00d8\u00f8\r\u00c5\u00e5\u0394_\u03a6\u0393\u039b\u03a9\u03a0\u03a8\u03a3\u0398\u039e\u00c6\u00e6\u00df\u00c9 !\"#\u00a4%&'()*+,-./0123456789:;<=>?\u00a1ABCDEFGHIJKLMNOPQRSTUVWXYZ\u00c4\u00d6\u00d1\u00dc\u00a7\u00bfabcdefghijklmnopqrstuvwxyz\u00e4\u00f6\u00f1\u00fc\u00e0";
+const SMS_GSM_EXT="^{}\\[~]|\u20ac";
+function smsIsGsm(s){for(const c of String(s||'')){if(SMS_GSM.indexOf(c)<0&&SMS_GSM_EXT.indexOf(c)<0)return false;}return true;}
+function smsSegments(s){
+  s=String(s||'');if(!s)return 0;
+  if(smsIsGsm(s)){let n=0;for(const c of s)n+=SMS_GSM_EXT.indexOf(c)>=0?2:1;return n<=160?1:Math.ceil(n/153);}
+  return s.length<=70?1:Math.ceil(s.length/67);
+}
+const SMS_AUD_PER_SEGMENT=0.08; /* Twilio AU outbound ~USD 0.0515 -> AUD, rounded up */
+
 function buildJobCardSMS(job,crewId,farmList,crewList,appUrl){
   const gcl=id=>crewList.find(c=>c.id===id);
   const gfl=id=>farmList.find(f=>f.id===id);
@@ -7177,7 +7210,7 @@ function buildJobCardSMS(job,crewId,farmList,crewList,appUrl){
      doubles the bill). Full job detail lives behind the link, not in the SMS. */
   /* v4.6.72b — TRIMMED to Dale's wording (7 Oct 2026). Two segments including the lead
      line; the old body ran to three for a lead. GSM-7 strictly: no emoji, no em-dash. */
-  return [
+  return smsClean([
     'Hi '+crew.name.split(' ')[0]+', you have been added to a job with '+CONTRACTOR_NAME+' starting '+fmtDate(job.startDate)+'. Tap the link for details:',
     appUrl+'/?job='+job.id+'&crew='+crewId, /* v4.6.11f - query not fragment: fragments are stripped by Android PWA intent launches and some SMS linkifiers */
     /* v4.6.13 — lead line goes ONLY to the designated lead. */
@@ -7185,7 +7218,7 @@ function buildJobCardSMS(job,crewId,farmList,crewList,appUrl){
       'You are shed lead - tap Lead in the app, PIN '+crew.pin
     ]:[]),
     'Do not reply to this text - contact us directly.'
-  ].join('\n');
+  ].join('\n'));
 }
 
 function buildFarmerSMS(job,farmerName,farmerPhone,farmList,appUrl){
@@ -7196,12 +7229,12 @@ function buildFarmerSMS(job,farmerName,farmerPhone,farmList,appUrl){
   /* v4.6.72b — TRIMMED to Dale's wording (7 Oct 2026): the job detail lives behind the
      link (same teaser principle as the crew text). Two segments. Plain ASCII only: this
      whole body must stay GSM-7 or Twilio bills every segment at UCS-2 rates. */
-  return [
+  return smsClean([
     'Hi '+(String(farmerName||'').split(' ')[0]||'there')+', '+CONTRACTOR_NAME+' have your shearing locked in. Tap the link to see details:',
     appUrl+'/?job='+job.id+'&crew=farmer.'+job.farmId, /* v4.6.11f - query not fragment */ /* v4.6.11c - farmer identity so the tap writes a job_views receipt via the existing deep-link handler */
     /* v4.6.15 - farmer PIN rides with the card. */
     (farm&&farm.farmerPin)?('Hit Farmer - PIN '+farm.farmerPin):''
-  ].filter(l=>l!==null&&l!=='').join('\n');
+  ].filter(l=>l!==null&&l!=='').join('\n'));
 }
 
 function fmtViewed(ts){
@@ -8320,6 +8353,7 @@ function HomeScreen({jobs:allJobs,role,setRole,onJob,onNew,onDatabase,onSchedule
   }catch(err){}})();return()=>{alive=false;};},[]);
   /* v4.6.10 - crew identity (read_only devices): visibility filter, not authentication */
   const [myId,setMyId]=useState(lsGet(LS_MY_ID)||null);
+  const [showChat,setShowChat]=useState(false); /* v4.6.72d */
   const [pinClaim,setPinClaim]=useState(null); /* v4.6.12 */
   const [pinErr,setPinErr]=useState('');
   const [crewSearch,setCrewSearch]=useState('');
@@ -8396,6 +8430,8 @@ function HomeScreen({jobs:allJobs,role,setRole,onJob,onNew,onDatabase,onSchedule
   return e('div',null,
     e(TopBar,{role,setRole,onSchedule}),
     e(PayDayNudge,{jobs:allJobs,role}), /* v4.6.72c - under the header, above the stats card */
+    role!=='farmer'&&e(TeamChatBar,{key:'chatbar-'+(myId||''),role,onOpen:()=>setShowChat(true)}), /* v4.6.72d */
+    showChat&&role!=='farmer'&&e(TeamChat,{role,onClose:()=>setShowChat(false)}),
     /* v4.6.11 - FARMER VIEW: farmer devices see only their farm's jobs */
     role==='farmer'&&e('div',{style:{position:'fixed',top:58,left:0,right:0,bottom:0,background:'var(--bg)',zIndex:150,overflowY:'auto',WebkitOverflowScrolling:'touch',padding:'16px'}},
       (function(){
@@ -9338,6 +9374,166 @@ function a2hsEnv(){
   const ios=/iPad|iPhone|iPod/.test(ua)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
   const android=/Android/i.test(ua);
   return {standalone,ios,android};
+}
+/* ── v4.6.72d TEAM CHAT ──
+   One channel per contractor, on the home board, for the gang talk that was going
+   out as SMS broadcasts (pick-up runs, "anyone got a speaker") at $3-7 a tap.
+   name: message, newest at the bottom, 30-day retention (pg_cron hard-deletes
+   nightly; the app never loads past 30 days). Live via Supabase Realtime while the
+   sheet is open, 60s poll as the Starlink fallback. Farmers never see it (they have
+   the SMS portal). Posting needs an identity: crew pick their name on the home
+   board (LS_MY_ID), the lead is the bound lead, admin posts as the contractor.
+   Send needs a connection - a failed send stays in the box marked, no queue (chat
+   is not tally data). Admin can delete any message. No push yet (phase 2). */
+const LS_CHAT_SEEN='mg_chat_seen_'+CONTRACTOR_SLUG;
+const CHAT_DAYS=30;
+function chatSinceIso(){return new Date(Date.now()-CHAT_DAYS*86400000).toISOString();}
+function chatIdentity(role){
+  const crew=(CREW&&CREW.length?CREW:(lsGet(LS_CREW)||[]));
+  const find=id=>id?crew.find(c=>c&&c.id===id):null;
+  if(role==='admin'){const c=find(lsGet(LS_MY_ID));return {crewId:c?c.id:null,name:c?c.name:CONTRACTOR_NAME,role:'admin',canPost:true};}
+  if(role==='shed_lead'){const c=find(lsGet(LS_LEAD_ID))||find(lsGet(LS_MY_ID));return {crewId:c?c.id:null,name:c?c.name:'Lead',role:'lead',canPost:true};}
+  if(role==='read_only'){const c=find(lsGet(LS_MY_ID));return c?{crewId:c.id,name:c.name,role:'crew',canPost:true}:{crewId:null,name:'',role:'crew',canPost:false};}
+  return null;
+}
+async function chatLoad(sinceIso){
+  const q=sb.from('chat_messages').select('id,crew_id,name,role,body,created_at')
+    .eq('contractor_slug',CONTRACTOR_SLUG).eq('channel','team')
+    .gt('created_at',sinceIso||chatSinceIso()).order('created_at',{ascending:true}).limit(500);
+  const r=await withTimeout(q,8000,'chat_load_timeout');
+  if(r&&r.error)throw new Error(r.error.message);
+  return (r&&r.data)||[];
+}
+function chatUnreadCount(msgs,me){
+  const seen=lsGet(LS_CHAT_SEEN)||'';
+  return msgs.filter(m=>m.created_at>seen&&!(me&&me.crewId&&m.crew_id===me.crewId)).length;
+}
+function chatFmtTime(iso){const d=new Date(iso);return d.toLocaleTimeString('en-AU',{hour:'numeric',minute:'2-digit'}).toLowerCase().replace(' ','');}
+function chatDayLabel(iso){
+  const d=new Date(iso);const t=new Date();const y=new Date(Date.now()-86400000);
+  const same=(a,b)=>a.getFullYear()===b.getFullYear()&&a.getMonth()===b.getMonth()&&a.getDate()===b.getDate();
+  if(same(d,t))return 'Today';if(same(d,y))return 'Yesterday';
+  return d.toLocaleDateString('en-AU',{weekday:'short',day:'numeric',month:'short'});
+}
+/* Home-board bar: unread count, opens the sheet. Polls every 60s while on the board. */
+function TeamChatBar({role,onOpen}){
+  const me=chatIdentity(role);
+  const [unread,setUnread]=useState(0);
+  const [last,setLast]=useState(null);
+  useEffect(()=>{
+    let dead=false;
+    const tick=async()=>{try{const m=await chatLoad();if(dead)return;setUnread(chatUnreadCount(m,me));setLast(m.length?m[m.length-1]:null);}catch(e){}};
+    tick();const t=setInterval(tick,60000);
+    return()=>{dead=true;clearInterval(t);};
+  },[role]);
+  return e('button',{onClick:onOpen,style:{display:'flex',alignItems:'center',gap:10,width:'calc(100% - 32px)',margin:'10px 16px 0',padding:'10px 12px',
+      borderRadius:10,background:'var(--card)',border:'1px solid var(--border)',color:'var(--text)',textAlign:'left',cursor:'pointer',fontFamily:'var(--b)',fontSize:14}},
+    e('span',{style:{fontSize:18,lineHeight:1}},'\uD83D\uDCAC'),
+    e('div',{style:{flex:1,minWidth:0}},
+      e('div',{style:{fontWeight:700}},'Team chat'),
+      e('div',{style:{fontSize:12,color:'var(--muted)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}},
+        last?(last.name+': '+last.body):'Pick-up runs, who has what, shed talk - free, gone after 30 days.')),
+    unread>0&&e('span',{style:{background:'var(--amber)',color:'#1e2a3a',fontWeight:800,fontSize:12,borderRadius:12,padding:'2px 8px',minWidth:24,textAlign:'center'}},unread>99?'99+':unread),
+    e('span',{style:{color:'var(--muted)',fontSize:18,lineHeight:1}},'\u203a')
+  );
+}
+function TeamChat({role,onClose}){
+  const me=chatIdentity(role);
+  const [msgs,setMsgs]=useState(null);         /* null = loading */
+  const [err,setErr]=useState('');
+  const [draft,setDraft]=useState('');
+  const [pending,setPending]=useState({});     /* id -> 'sending'|'failed' */
+  const listRef=useRef(null);
+  const lastIso=useRef(null);
+  const markSeen=()=>{try{lsSet(LS_CHAT_SEEN,new Date().toISOString());}catch(e){}};
+  const merge=rows=>setMsgs(prev=>{
+    const m=new Map((prev||[]).map(x=>[x.id,x]));
+    rows.forEach(r=>{m.set(r.id,r);if(!lastIso.current||r.created_at>lastIso.current)lastIso.current=r.created_at;});
+    return Array.from(m.values()).sort((a,b)=>a.created_at<b.created_at?-1:a.created_at>b.created_at?1:0);
+  });
+  const scrollBottom=()=>{const el=listRef.current;if(el)el.scrollTop=el.scrollHeight;};
+  useEffect(()=>{
+    let dead=false;
+    (async()=>{
+      try{const m=await chatLoad();if(dead)return;merge(m);setErr('');markSeen();setTimeout(scrollBottom,30);}
+      catch(e){if(!dead){setMsgs(prev=>prev||[]);setErr('Could not load messages - check signal.');}}
+    })();
+    /* Realtime while open; poll as the fallback (navigator.onLine lies on Starlink). */
+    let ch=null;
+    try{
+      ch=sb.channel('chat_'+CONTRACTOR_SLUG)
+        .on('postgres_changes',{event:'INSERT',schema:'public',table:'chat_messages',filter:'contractor_slug=eq.'+CONTRACTOR_SLUG},
+          p=>{if(dead||!p.new||p.new.channel!=='team')return;merge([p.new]);markSeen();setTimeout(scrollBottom,30);})
+        .on('postgres_changes',{event:'DELETE',schema:'public',table:'chat_messages'},
+          p=>{if(dead||!p.old||!p.old.id)return;setMsgs(prev=>(prev||[]).filter(x=>x.id!==p.old.id));})
+        .subscribe();
+    }catch(e){ch=null;}
+    const t=setInterval(async()=>{try{const m=await chatLoad(lastIso.current||undefined);if(!dead&&m.length){merge(m);markSeen();setTimeout(scrollBottom,30);}}catch(e){}},60000);
+    return()=>{dead=true;clearInterval(t);try{if(ch)sb.removeChannel(ch);}catch(e){}};
+  },[]);
+  const send=async(text,retryId)=>{
+    const body=String(text||'').trim().slice(0,1000);
+    if(!body||!me||!me.canPost)return;
+    const id=retryId||('cm'+Date.now()+Math.random().toString(36).slice(2,7));
+    const row={id,contractor_slug:CONTRACTOR_SLUG,channel:'team',crew_id:me.crewId,name:me.name,role:me.role,body,created_at:new Date().toISOString()};
+    if(!retryId){merge([row]);setDraft('');setTimeout(scrollBottom,30);}
+    setPending(p=>({...p,[id]:'sending'}));
+    try{
+      const w=await withTimeout(sb.from('chat_messages').insert(row),12000,'chat_send_timeout');
+      if(w&&w.error)throw new Error(w.error.message);
+      setPending(p=>{const n={...p};delete n[id];return n;});markSeen();
+    }catch(e){
+      setPending(p=>({...p,[id]:'failed'}));
+      logSaveFailure(/timeout$/.test(e&&e.message||'')?'timeout':'error','chat',(e&&e.message)||'unknown');
+    }
+  };
+  const del=async(m)=>{
+    if(role!=='admin')return;
+    setMsgs(prev=>(prev||[]).filter(x=>x.id!==m.id));
+    try{await withTimeout(sb.from('chat_messages').delete().eq('id',m.id).eq('contractor_slug',CONTRACTOR_SLUG),8000,'chat_delete_timeout');}catch(e){}
+  };
+  const onKey=ev=>{if(ev.key==='Enter'&&!ev.shiftKey&&window.matchMedia&&window.matchMedia('(hover:hover)').matches){ev.preventDefault();send(draft);}};
+  /* render */
+  const items=[];let lastDay='',lastWho='';
+  (msgs||[]).forEach(m=>{
+    const day=chatDayLabel(m.created_at);
+    if(day!==lastDay){items.push(e('div',{key:'d'+m.id,style:{textAlign:'center',fontSize:11,color:'var(--muted)',margin:'14px 0 6px',fontWeight:700,letterSpacing:.4,textTransform:'uppercase'}},day));lastDay=day;lastWho='';}
+    const mine=!!(me&&((me.crewId&&m.crew_id===me.crewId)||(!me.crewId&&me.role==='admin'&&m.role==='admin'&&m.name===me.name)));
+    const who=m.crew_id||m.name;const showName=who!==lastWho;lastWho=who;
+    const st=pending[m.id];
+    items.push(e('div',{key:m.id,style:{display:'flex',flexDirection:'column',alignItems:mine?'flex-end':'flex-start',marginTop:showName?8:2}},
+      showName&&!mine&&e('div',{style:{fontSize:12,fontWeight:700,color:'var(--muted)',margin:'0 0 2px 10px'}},m.name+(m.role==='admin'?' \u00b7 Admin':m.role==='lead'?' \u00b7 Lead':'')),
+      e('div',{onClick:role==='admin'?()=>{if(confirm('Delete this message for everyone?'))del(m);}:(st==='failed'?()=>send(m.body,m.id):undefined),
+        style:{maxWidth:'82%',padding:'8px 12px',borderRadius:14,fontSize:15,lineHeight:1.35,whiteSpace:'pre-wrap',wordBreak:'break-word',
+          background:mine?'var(--amber)':'var(--card)',color:mine?'#1e2a3a':'var(--text)',border:mine?'none':'1px solid var(--border)',
+          opacity:st==='sending'?.6:1,outline:st==='failed'?'2px solid var(--red)':'none',cursor:role==='admin'||st==='failed'?'pointer':'default'}},
+        m.body,
+        e('div',{style:{fontSize:10,marginTop:3,textAlign:'right',opacity:.7}},
+          st==='sending'?'sending\u2026':st==='failed'?'NOT SENT - tap to retry':chatFmtTime(m.created_at)))
+    ));
+  });
+  return e('div',{style:{position:'fixed',inset:0,background:'var(--bg)',zIndex:300,display:'flex',flexDirection:'column'}},
+    e('div',{style:{padding:'12px 16px',display:'flex',alignItems:'center',gap:10,borderBottom:'1px solid var(--border)',background:'var(--hdr)',color:'#fff',flexShrink:0}},
+      e('button',{onClick:onClose,style:{background:'transparent',border:0,color:'#fff',fontSize:22,lineHeight:1,padding:'0 6px 0 0',cursor:'pointer'}},'\u2190'),
+      e('div',{style:{flex:1}},
+        e('div',{style:{fontFamily:'var(--h)',fontWeight:800,fontSize:20,lineHeight:1.1}},'Team chat \u00b7 '+CONTRACTOR_NAME),
+        e('div',{style:{fontSize:11,opacity:.75}},'Messages disappear after '+CHAT_DAYS+' days'+(role==='admin'?' \u00b7 tap a message to delete it':''))),
+      e('span',{style:{fontSize:22}},'\uD83D\uDCAC')),
+    err&&e('div',{style:{padding:'8px 16px',fontSize:12,background:'var(--redD)',color:'var(--red)',flexShrink:0}},err),
+    e('div',{ref:listRef,style:{flex:1,overflowY:'auto',WebkitOverflowScrolling:'touch',padding:'4px 12px 12px'}},
+      msgs===null?e('div',{style:{textAlign:'center',color:'var(--muted)',padding:40}},'Loading\u2026')
+      :items.length?items
+      :e('div',{style:{textAlign:'center',color:'var(--muted)',padding:'60px 24px',lineHeight:1.5}},'Nothing yet. Pick-up runs, who has the grinder, shed talk - say it here instead of a text.')),
+    e('div',{style:{flexShrink:0,borderTop:'1px solid var(--border)',background:'var(--card)',padding:'8px 10px calc(8px + env(safe-area-inset-bottom,0px))'}},
+      me&&me.canPost
+        ?e('div',{style:{display:'flex',gap:8,alignItems:'flex-end'}},
+            e('textarea',{className:'fi',rows:1,value:draft,placeholder:'Message as '+me.name+'\u2026',maxLength:1000,
+              onChange:ev=>setDraft(ev.target.value),onKeyDown:onKey,
+              style:{flex:1,resize:'none',minHeight:42,maxHeight:120,fontSize:15,lineHeight:1.35}}),
+            e('button',{onClick:()=>send(draft),disabled:!draft.trim(),
+              style:{background:draft.trim()?'var(--amber)':'var(--card2)',color:draft.trim()?'#1e2a3a':'var(--muted)',border:0,borderRadius:10,padding:'0 16px',height:42,fontWeight:800,fontSize:14,cursor:draft.trim()?'pointer':'default'}},'Send'))
+        :e('div',{style:{fontSize:13,color:'var(--muted)',textAlign:'center',padding:6}},'Pick your name on the home board to post here.'))
+  );
 }
 /* ── v4.6.72c PAY-DAY REMINDER ──
    Pay runs off what is on the server, so the day before and on pay day the lead and
