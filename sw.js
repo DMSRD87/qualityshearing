@@ -29,7 +29,7 @@
    Cost, stated plainly: a slow-but-live link may serve the previous build once.
    No cache means no fallback, so a first-ever install still needs signal — that
    has always been true. CACHE bumped so every device reactivates. */
-const CACHE = 'mygang-v10';
+const CACHE = 'mygang-v11'; /* v11: bumped so every device drops the cached Xero catalog */
 const PRECACHE = [
   '/',
   /* pinned — what current builds request */
@@ -76,6 +76,15 @@ self.addEventListener('fetch', event => {
 
   /* Supabase API calls — DO NOT INTERCEPT. */
   if (url.includes('supabase.co')) {
+    return;
+  }
+  /* v11 (22 Oct 2026) — Xero broker and any /api/ call — DO NOT INTERCEPT.
+     The cache-first rule at the bottom was caching GET /api/xero/catalog and
+     /api/xero/mappings the first time the Xero screen opened, so a bookkeeper's
+     laptop kept showing the Xero employee list as it was that day: new starters
+     added in Xero never appeared and the push stayed blocked. Live data is never
+     served from cache. */
+  if (url.includes('mygangxero') || url.includes('/api/')) {
     return;
   }
 
@@ -131,4 +140,40 @@ self.addEventListener('fetch', event => {
       }).catch(() => caches.match('/'));
     })
   );
+});
+
+/* ── v12 (27 Oct 2026) — WEB PUSH for Team chat ──
+   The broker (mygangxero /api/push/notify) sends {title, body, url, badge, tag}
+   when someone posts. Show it, set the icon badge, and on tap focus the open app
+   (it opens Team chat on the mg-open-chat message) or open /#chat cold. */
+self.addEventListener('push', event => {
+  let d = {};
+  try { d = event.data ? event.data.json() : {}; } catch (e) { d = { body: event.data ? event.data.text() : '' }; }
+  const title = d.title || 'myGang';
+  const opts = { body: d.body || '', tag: d.tag || 'mg-chat', renotify: true, data: { url: d.url || '/#chat' } };
+  if (d.ts) { const t = Date.parse(d.ts); if (t) opts.timestamp = t; }
+  const work = [self.registration.showNotification(title, opts)];
+  if (d.badge != null && 'setAppBadge' in self.navigator) work.push(self.navigator.setAppBadge(Number(d.badge) || 0).catch(() => {}));
+  event.waitUntil(Promise.all(work));
+});
+self.addEventListener('notificationclick', event => {
+  event.notification.close();
+  const url = (event.notification.data && event.notification.data.url) || '/#chat';
+  event.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
+    const c = list.find(x => x.url && x.url.indexOf(self.location.origin) === 0);
+    if (c) { try { c.postMessage({ type: 'mg-open-chat' }); } catch (e) {} return c.focus(); }
+    return self.clients.openWindow(url);
+  }));
+});
+/* the push service rotated this device's subscription: re-subscribe and ask the
+   open app (if any) to save the new endpoint; the next boot saves it otherwise */
+self.addEventListener('pushsubscriptionchange', event => {
+  const key = 'BLaVGElCp6Q35hW98M8x2_o_Ny8Cg0lE7oIQFVNivP3bHOi8k-PgW0AaKgwiG5QG0zGB05EKYDajnIU_HyjrWHA';
+  const pad = '='.repeat((4 - key.length % 4) % 4);
+  const raw = atob((key + pad).replace(/-/g, '+').replace(/_/g, '/'));
+  const u8 = new Uint8Array(raw.length); for (let i = 0; i < raw.length; i++) u8[i] = raw.charCodeAt(i);
+  event.waitUntil(self.registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: u8 })
+    .then(() => self.clients.matchAll({ type: 'window' }))
+    .then(list => list.forEach(c => { try { c.postMessage({ type: 'mg-push-resub' }); } catch (e) {} }))
+    .catch(() => {}));
 });
