@@ -624,7 +624,11 @@ const LS_TALLY_QUEUE='mg_tally_queue_'+CONTRACTOR_SLUG; /* per-cell offline queu
 const LS_TALLY_DEAD='mg_tally_dead_'+CONTRACTOR_SLUG; /* v4.6.3g — quarantined cells (permanent rejection). Replayed once on boot in case the server-side blocker (e.g. missing kind constraint) was since fixed. */
 const LS_TALLY_META_QUEUE='mg_tally_meta_queue_'+CONTRACTOR_SLUG; /* v4.6.4 — offline/failed mob metadata (type/desc) updates to existing count cells; flushed alongside the tally queue. */
 const ROLE_TIMEOUT_HOURS=12; /* auto-reset after 12h inactivity */
-const APP_VERSION='v4.6.72j';
+const APP_VERSION='v4.6.72n';
+/* v4.6.72n (29 Oct 2026): TEAM CHAT IN CREW VIEW. A VIEW-mode phone shows the crew overlay (G'day / My jobs / My tallies) on top of the home screen, and the Team chat bar sat underneath it - crew could not open the chat that the pointer broadcast sent them to (Woolaway, 29 Oct: contractor had to resend full text). The bar now sits under the greeting in the crew view. No other change. */
+/* v4.6.72m (28 Oct 2026): SAVE AUDIT FIXES. (1) Day notes no longer double: the note was treated as someone else's whenever updated_at strings differed, and the app's '...Z' never equalled PostgREST's '...+00:00', so any edit inside saved text prepended the whole saved note (Knights MARG-0028: 3 lines became 29). Identity is now the body this device last saw; genuine concurrent edits merge line-wise with no loss; one write per date at a time. (2) Broadcasts, pointers and job cards go once per phone number - a worker held as two or three crew records got every text two or three times. (3) Version watch: the app checks /version.json on resume and every 20 min; a different build reloads itself once from the home screen when idle, otherwise shows an 'Update ready' pill. A Knights iPhone ran a 2.5-day-old build through three fixes without it. sw.js v13 never caches version.json. (4) A whiteboard note that landed but timed out is no longer retried forever. No pay-engine, tally or job-blob change. */
+/* v4.6.72l (28 Oct 2026): EDIT JOB ROLES ARE HONEST (CJ TALL-0066: Jamie Morton's record said Penner, the job's own role snapshot said Shearer; Edit Job grouped him under Penners from the record but never rewrote the snapshot, even after removing and re-adding him three times, so the Tally tab kept him on a stand). Edit Job now groups people by the role the JOB uses, lists anyone whose record role differs ('on this job as Shearer - record says Penner') with an Update button, logs crew_role_changed when applied, and gives a person who is removed and later re-added their current record role. Finished jobs are untouched. No pay-engine, save-layer or sync change. */
+/* v4.6.72k (28 Oct 2026): SMS METER. Every text now carries the contractor slug to /api/send-sms, which writes one sms_usage row per batch with Twilio's own segment count (kind: broadcast / pointer / job_card / farmer / pin). Admin home board shows 'SMS this month: N texts, N segments, ~A$X' at the rate in billing_config (A$0.10 a segment; subscription stays flat, nothing included). Dale's monthly report is the view sms_usage_monthly. Also unifies api/send-sms.js across the fleet (AU number normalisation, dual env names, clear config errors). No pay, tally, save-layer or Xero change. */
 /* v4.6.72j (27 Oct 2026): PUSH NOTIFICATIONS + APP-ICON BADGE for Team chat. A Team chat post now reaches every opted-in phone as a notification (free) and the home-screen icon carries the unread count. Opt in from the banner at the top of Team chat ('Turn on notifications'); iPhone needs myGang on the Home Screen first (iOS 16.4+) and the banner says so; 'Not now' hides it for a week. Device subscriptions live in push_subscriptions (endpoint, keys, crew id, last_seen_at); a database trigger on chat_messages (pg_net) asks the broker /api/push/notify to send to every device of the contractor except the sender's, badge = messages since that device last opened the chat; opening the chat clears the badge and tells the server. Tapping the notification opens Team chat (/#chat or a message to the open app). sw.js gains push / notificationclick / pushsubscriptionchange handlers. SMS pointer texts from Broadcast stay until a crew is opted in. No pay, tally, save-layer or Xero change. */
 /* v4.6.72i (27 Oct 2026): (1) BROADCAST AS A POINTER - the Twilio export (21 Apr-24 Oct) put broadcasts at US$321 of $627, Knights $250 of it, 57% of broadcasts over 2 segments, Knights' October broadcasts alone costing more than the subscription. Default mode now posts the full text to Team chat (free, 30 days) and sends each crew member a ONE-segment text to open the app; 'Full text by SMS' remains, capped at 2 segments (306 characters) with a live characters-left counter and the send button disabled past it; farm contacts always get the full text (they are not in Team chat); the cost of the chosen mode, and what the other would have cost, shown before Send; broadcast_sent/broadcast_failed events say which mode. (2) SAVE SERIALISER - one job save in flight per job per device, the newest waits and runs once (Knights 27 Oct 07:19: a start-of-day burst of saves of the same job conflicted with each other under the 72h conditional write and one exhausted its retries - nothing lost, queued and merged on the next flush); conflict retries 3->5 with jittered backoff. No pay or tally change. */
 /* v4.6.72h (25 Oct 2026): ONE WRITE ROUTINE FOR jobs.data (Knights 25 Oct, DB-proven: MCIN-0030 lost 7 crew, its start date and sheep count to a 5-day-old blob flushed RAW from the job queue - the flush path ran no guard and wrote no snapshot; PYLA-0035 lost 9 crew the same way, CLEA-0095 was un-charged-out three times; every refused shrink save since May was queued and later flushed raw). mergeAndWriteJob is now the only write path for direct saves, queue flushes and sync-on-open. (1) A device can only change what it changed: per field at every level - top-level fields, status, rates, each crew-details/override entry, each day/run/mob - the server's value is kept wherever this device still holds what it last saw and the server has moved on; a deliberate edit is written through. (2) Guards are mandatory: reads get 8s with one retry and if they cannot complete nothing is written - the blob is queued WITH its stamp and merged later. (3) Nothing is refused-then-queued; work is protected as a merge rule (a run with cells or a person with work is never dropped). (4) Writes are conditional on updated_at with re-merge on conflict. (5) A merge that changes nothing writes nothing. (6) Blobs queued by the previous build (no stamp) can only add, never remove or revert. Log reasons: merge_kept, merge_noop_kept, merge_unavailable_queued, merge_conflict_retry, guard_shrink_restored, guard_crew_restored, queue_item_expired. No pay, tally-cell, UI, SMS or Xero change. */
@@ -2392,6 +2396,107 @@ const roleFromShedKey=(code,job,id)=>SHED_CODE_ROLE[code]||getJobRole(job,id);
    the house rate for that role. Nothing set = exactly the old behaviour. */
 /* v4.6.67 — every farmer phone on a farm, in order, de-duplicated. One place,
    so a send path cannot quietly miss the second contact. */
+/* ── v4.6.72m DAY-NOTE MERGE ── base: what this device last saw on the server
+   (null = never seen); theirs: the server now; ours: the box now. Line-level
+   three-way merge: a line both sides kept stays once; a line either side added
+   goes in where they put it; a line either side removed or rewrote goes (the
+   rewrite arrives as an added line); two rewrites of the same line are both kept,
+   theirs first. Never loses a word anyone typed, never doubles a shared line. Pure. */
+function mergeNoteLines(A,Bn){ /* align A (base) with Bn: which base lines survive, and Bn-only lines anchored before the next base index */
+  const n=A.length,m=Bn.length;const L=[];for(let i=0;i<=n;i++){L.push(new Array(m+1).fill(0));}
+  for(let i=n-1;i>=0;i--)for(let j=m-1;j>=0;j--)L[i][j]=A[i]===Bn[j]?L[i+1][j+1]+1:Math.max(L[i+1][j],L[i][j+1]);
+  const keep={},ins={};let i=0,j=0;
+  while(i<n&&j<m){if(A[i]===Bn[j]){keep[i]=1;i++;j++;}else if(L[i+1][j]>=L[i][j+1]){i++;}else{(ins[i]=ins[i]||[]).push(Bn[j]);j++;}}
+  while(j<m){(ins[i]=ins[i]||[]).push(Bn[j]);j++;}
+  return {keep,ins};
+}
+function mergeNoteText(base,theirs,ours){
+  base=base==null?null:String(base);theirs=String(theirs==null?'':theirs);ours=String(ours==null?'':ours);
+  if(theirs===ours)return ours;
+  if(base===null){ /* never seen the server for this day: keep whatever is not already contained */
+    const t=theirs.trim(),o=ours.trim();if(!t)return ours;if(!o)return theirs;
+    if(ours.indexOf(t)>=0)return ours;if(theirs.indexOf(o)>=0)return theirs;
+    return theirs.replace(/\s+$/,'')+'\n'+ours;
+  }
+  if(theirs===base)return ours;                       /* nobody else wrote since we last saw it: ours replaces */
+  if(ours===base)return theirs;                       /* we changed nothing, they did: take theirs */
+  const B=base.split('\n'),dT=mergeNoteLines(B,theirs.split('\n')),dO=mergeNoteLines(B,ours.split('\n'));
+  const out=[];
+  for(let i=0;i<=B.length;i++){
+    const it=dT.ins[i]||[],io=dO.ins[i]||[];
+    /* the side that rewrote the line just above puts its rewrite first; otherwise theirs first */
+    const oursFirst=i>0&&!dO.keep[i-1]&&dT.keep[i-1];
+    const a=oursFirst?io:it,b=oursFirst?it:io;
+    a.forEach(l=>out.push(l));b.forEach(l=>{if(a.indexOf(l)<0)out.push(l);});
+    if(i<B.length&&dT.keep[i]&&dO.keep[i])out.push(B[i]);
+  }
+  return out.join('\n');
+}
+/* ── v4.6.72m PHONE IDENTITY ── one text per phone number, however many crew
+   records share it (multi-role workers are usually two or three records). */
+function phoneKey(p){const d=String(p||'').replace(/[^0-9]/g,'');return d.length>9?d.slice(-9):d;}
+function uniqCrewByPhone(ids,gcl){const seen={};return (ids||[]).filter(id=>{const c=gcl(id);if(!c||!c.phone)return false;const k=phoneKey(c.phone);if(!k||seen[k])return false;seen[k]=1;return true;});}
+/* ── v4.6.72m VERSION WATCH ── a device that never reloads never gets a fix. */
+const LS_VER_TRIED='mg_ver_tried_'+CONTRACTOR_SLUG;
+const VERSION_CHECK_MS=20*60*1000;
+async function fetchServedVersion(){
+  try{
+    const r=await withTimeout(fetch('/version.json?t='+Date.now(),{cache:'no-store'}),8000,'version_timeout');
+    if(!r||!r.ok)return null;
+    const j=await r.json();
+    return (j&&typeof j.v==='string'&&/^v\d+\.\d+/.test(j.v))?j.v:null;
+  }catch(e){return null;}
+}
+function appIdleForReload(){
+  try{
+    if(document.querySelector('.overlay')||document.querySelector('.pin-modal'))return false;
+    const a=document.activeElement;if(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName||''))return false;
+    if((lsGet(LS_QUEUE)||[]).length||(lsGet(LS_TALLY_QUEUE)||[]).length)return false;
+    if(typeof _saveRunning!=='undefined'&&_saveRunning.size)return false;
+    if(typeof TALLY_INFLIGHT!=='undefined'&&TALLY_INFLIGHT.size)return false;
+    return true;
+  }catch(e){return false;}
+}
+async function reloadForUpdate(v,how){
+  try{lsSet(LS_VER_TRIED,v);}catch(e){}
+  try{logSaveFailure('version_reload','app','from='+APP_VERSION+';to='+v+';how='+(how||'tap'));}catch(e){}
+  try{flushInflightTallies();}catch(e){}
+  /* prime: fetch the HTML the way a navigation would so the service worker's cache
+     holds the new build before we reload (its 3s network race may otherwise hand
+     back the old copy once more on a slow link) */
+  try{await withTimeout(fetch('/',{headers:{'Accept':'text/html'},cache:'no-store'}),8000,'prime_timeout');}catch(e){}
+  try{if(navigator.serviceWorker){const reg=await navigator.serviceWorker.getRegistration();if(reg)await withTimeout(reg.update(),3000,'sw_update_timeout');}}catch(e){}
+  location.reload();
+}
+function VersionWatch({idle}){
+  const [avail,setAvail]=useState(null);
+  const idleRef=useRef(idle);idleRef.current=idle;
+  const hiddenAt=useRef(0);
+  const check=async(why)=>{
+    const v=await fetchServedVersion();
+    if(!v||v===APP_VERSION){if(v===APP_VERSION)setAvail(null);return;}
+    setAvail(v);
+    const tried=lsGet(LS_VER_TRIED);
+    const fresh=why==='boot'||why==='resume';
+    if(fresh&&tried!==v&&idleRef.current&&appIdleForReload())reloadForUpdate(v,why);
+  };
+  useEffect(()=>{
+    const t0=setTimeout(()=>check('boot'),12000);
+    const iv=setInterval(()=>{if(document.visibilityState==='visible')check('interval');},VERSION_CHECK_MS);
+    const onVis=()=>{
+      if(document.visibilityState==='hidden'){hiddenAt.current=Date.now();return;}
+      const away=Date.now()-hiddenAt.current;
+      check(away>5*60*1000?'resume':'interval');
+    };
+    document.addEventListener('visibilitychange',onVis);
+    return()=>{clearTimeout(t0);clearInterval(iv);document.removeEventListener('visibilitychange',onVis);};
+  },[]);
+  if(!avail)return null;
+  return e('div',{onClick:()=>reloadForUpdate(avail,'tap'),role:'button',
+    style:{position:'fixed',left:'50%',transform:'translateX(-50%)',bottom:'calc(118px + env(safe-area-inset-bottom,0px))',zIndex:260,
+      background:'var(--amber)',color:'#1e2a3a',borderRadius:22,padding:'9px 16px',fontSize:13,fontWeight:800,boxShadow:'0 4px 14px rgba(0,0,0,.35)',cursor:'pointer',whiteSpace:'nowrap'}},
+    '⬆️ Update ready · '+avail+' — tap to update');
+}
 function farmerContacts(farm){
   if(!farm)return [];
   const out=[],seen={};
@@ -3941,7 +4046,7 @@ function CrewPinRow({c,onSave}){
     if(!c.phone||!c.pin)return;
     setSmsState('sending');
     try{
-      const r=await fetch('/api/send-sms',{method:'POST',headers:{'Content-Type':'application/json'},
+      const r=await fetch('/api/send-sms',{method:'POST',headers:{'Content-Type':'application/json','x-mygang-slug':CONTRACTOR_SLUG},
         body:JSON.stringify({messages:[{to:c.phone,body:'Your myGang PIN for '+CONTRACTOR_NAME+' is '+c.pin+'. You need it when picking your name in the app. Keep this message.'}]})});
       setSmsState(r.ok?'sent':'failed');
     }catch(e2){setSmsState('failed');}
@@ -5064,9 +5169,28 @@ const flushMobDesc=(mid,v)=>{
   const [noteMap,setNoteMap]=useState(null);        /* date -> {body,role,at} */
   const [noteDraft,setNoteDraft]=useState(null);    /* uncontrolled-ish local echo */
   const noteTimer=useRef(null);
-  const noteLoadedAt=useRef({});                    /* date -> updated_at we last saw */
+  const noteLoadedAt=useRef({});                    /* date -> updated_at we last saw (display only since v4.6.72m) */
+  /* v4.6.72m - DAY NOTES: IDENTITY BY BODY, ONE WRITE AT A TIME, THREE-WAY MERGE.
+     Knights MARG-0028, 28 Oct 2026: the Lead's injury note grew from 3 lines to 29
+     as he tried to fix a typo. pushNote decided "someone else wrote this" by
+     comparing updated_at STRINGS - the app writes '...695Z', PostgREST returns
+     '...695+00:00' - so this device's OWN previous save always looked foreign, and
+     any edit inside already-saved text got the whole saved note prepended. Deleting
+     the duplicates re-triggered it. Reproduced in daynote_sim_test.js: 3 -> 6 -> 9.
+     Now: (a) a server body is foreign only when it differs from what THIS device
+     last loaded or wrote (noteKnown); (b) a genuine foreign write is merged line-wise
+     by mergeNoteText - a shared line is never doubled and nobody's words are dropped;
+     (c) writes for a date run one at a time, newest text wins, so two in-flight saves
+     cannot land out of order; (d) a merged result replaces the box only if the user
+     has not typed since; otherwise the merge is folded into what they have now. */
+  const noteKnown=useRef({});                       /* date -> body as this device last saw it on the server */
+  const noteLatest=useRef({});                      /* date -> newest text waiting to be written */
+  const noteBusy=useRef({});                        /* date -> a write loop is running */
+  const noteDraftRef=useRef({date:null,text:null}); /* what the textarea holds right now */
+  const noteFails=useRef({});                       /* date -> consecutive read/write failures */
   useEffect(()=>{
     let dead=false;
+    noteKnown.current={};noteLatest.current={};noteFails.current={};
     (async()=>{
       try{
         const r=await withTimeout(sb.from('job_day_notes')
@@ -5077,52 +5201,72 @@ const flushMobDesc=(mid,v)=>{
         if(r&&!r.error&&Array.isArray(r.data)){
           const m={};
           r.data.forEach(row=>{m[row.note_date]={body:row.body||'',role:row.updated_by_role||'',at:row.updated_at};
-            noteLoadedAt.current[row.note_date]=row.updated_at;});
+            noteLoadedAt.current[row.note_date]=row.updated_at;noteKnown.current[row.note_date]=row.body||'';});
+          noteKnown.current._loaded=true; /* a date with no row is known to be empty */
           setNoteMap(m);
         }else setNoteMap({});
       }catch(e){ if(!dead)setNoteMap({}); }
     })();
     return()=>{dead=true;};
   },[job.id]);
-  useEffect(()=>{setNoteDraft(null);},[viewDate]);
+  useEffect(()=>{setNoteDraft(null);noteDraftRef.current={date:viewDate,text:null};},[viewDate]);
   const noteRole=role==='farmer'?'Farmer':(role==='admin'?'Admin':(role==='shed_lead'?'Lead':'Crew'));
   const noteServer=(noteMap&&noteMap[viewDate])||null;
   const noteFallback=(job.dayNotes||{})[viewDate]||'';
   const noteValue=noteDraft!==null?noteDraft:(noteServer?noteServer.body:noteFallback);
-  const pushNote=async(text)=>{
+  const noteBaseFor=d=>{const k=noteKnown.current[d];if(k!==undefined)return k;return noteKnown.current._loaded?'':null;};
+  const pushNoteOnce=async(d,text)=>{
+    let srv=null,readOk=false;
     try{
-      /* NO SILENT LOSS. Several people can now hold this box open at once. If the
-         server row moved since we loaded it and the text is not ours, append
-         instead of replacing — a messy note is recoverable, a wiped one is not. */
-      let body=text;
       const cur=await withTimeout(sb.from('job_day_notes')
         .select('body,updated_at').eq('contractor_slug',CONTRACTOR_SLUG)
-        .eq('job_id',job.id).eq('note_date',viewDate).maybeSingle(),6000,'daynote_read_timeout');
-      if(cur&&!cur.error&&cur.data){
-        const seen=noteLoadedAt.current[viewDate];
-        if(seen&&cur.data.updated_at!==seen&&(cur.data.body||'')!==text){
-          const theirs=(cur.data.body||'').trim();
-          if(theirs&&text.indexOf(theirs)<0)body=theirs+'\n'+text;
-        }
-      }
+        .eq('job_id',job.id).eq('note_date',d).maybeSingle(),6000,'daynote_read_timeout');
+      if(cur&&!cur.error){readOk=true;srv=cur.data?(cur.data.body||''):'';}
+    }catch(e){}
+    if(!readOk){
+      /* cannot see the server: try again twice before writing without a merge, and say so */
+      const n=(noteFails.current[d]||0)+1;noteFails.current[d]=n;
+      if(n<=2){setTimeout(()=>pushNote(d,noteLatest.current[d]!==undefined?noteLatest.current[d]:text),4000);return;}
+      logSaveFailure('error','daynote_unverified_write','read failed '+n+'x - writing without merge');
+    }
+    const body=readOk?mergeNoteText(noteBaseFor(d),srv,text):text;
+    try{
       const at=new Date().toISOString();
       const w=await withTimeout(sb.from('job_day_notes').upsert({
-        contractor_slug:CONTRACTOR_SLUG,job_id:job.id,note_date:viewDate,
+        contractor_slug:CONTRACTOR_SLUG,job_id:job.id,note_date:d,
         body:body,updated_by_role:noteRole,updated_at:at
       },{onConflict:'contractor_slug,job_id,note_date'}),12000,'daynote_write_timeout');
       if(w&&w.error)throw new Error(w.error.message);
-      noteLoadedAt.current[viewDate]=at;
-      setNoteMap(m=>({...(m||{}),[viewDate]:{body:body,role:noteRole,at:at}}));
-      if(body!==text)setNoteDraft(body);
+      noteFails.current[d]=0;
+      noteKnown.current[d]=body;noteLoadedAt.current[d]=at;
+      setNoteMap(m=>({...(m||{}),[d]:{body:body,role:noteRole,at:at}}));
+      if(body!==text){
+        logSaveFailure('daynote_merged',job.id,'date='+d+';theirs='+(srv||'').length+'ch;ours='+text.length+'ch;result='+body.length+'ch');
+        const cur=noteDraftRef.current;
+        if(cur.date===d&&cur.text!==null&&cur.text!==text){
+          /* typed on since this save started: fold the merge into what they have now, then save that too */
+          const folded=mergeNoteText(text,body,cur.text);
+          noteDraftRef.current={date:d,text:folded};setNoteDraft(folded);
+          if(folded!==body)noteLatest.current[d]=folded;
+        }else if(cur.date===d){noteDraftRef.current={date:d,text:body};setNoteDraft(body);}
+      }
     }catch(e){
-      logSaveFailure(/timeout$/.test(e&&e.message||'')?'timeout':'error','daynote',
-        (e&&e.message)||'unknown');
+      logSaveFailure(/timeout$/.test(e&&e.message||'')?'timeout':'error','daynote',(e&&e.message)||'unknown');
+      const n=(noteFails.current[d]||0)+1;noteFails.current[d]=n;
+      if(n<=3)setTimeout(()=>pushNote(d,noteLatest.current[d]!==undefined?noteLatest.current[d]:text),5000); /* the box still holds the text; next keystroke retries too */
     }
   };
+  const pushNote=(d,text)=>{
+    noteLatest.current[d]=text;
+    if(noteBusy.current[d])return;
+    noteBusy.current[d]=true;
+    (async()=>{try{while(noteLatest.current[d]!==undefined){const t=noteLatest.current[d];delete noteLatest.current[d];await pushNoteOnce(d,t);}}finally{noteBusy.current[d]=false;}})();
+  };
   const setNote=v=>{
-    setNoteDraft(v);
+    setNoteDraft(v);noteDraftRef.current={date:viewDate,text:v};
     clearTimeout(noteTimer.current);
-    noteTimer.current=setTimeout(()=>pushNote(v),900);
+    const d=viewDate;
+    noteTimer.current=setTimeout(()=>pushNote(d,v),900);
   };
   const setTravel=(cid,val)=>{
     setJob(prev=>({...prev,travelTallies:{...(prev.travelTallies||{}),[cid]:{...((prev.travelTallies||{})[cid]||{}),[viewDate]:val}}}));
@@ -6534,7 +6678,7 @@ function WhiteboardTab({job,role}){
       const {_unsent,...row}=p;
       try{
         const r=await withTimeout(sb.from('job_whiteboard').insert(row),12000,'whiteboard_flush_timeout');
-        if(r&&r.error)throw new Error(r.error.message);
+        if(r&&r.error&&!/duplicate key|23505/i.test(r.error.message||''))throw new Error(r.error.message); /* v4.6.72m - it landed before the timeout: not unsent */
         setEntries(prev=>{const nx=prev.map(x=>x.id===p.id?row:x);lsSet(LS_WB+job.id,nx);return nx;});
       }catch(e){ /* stays unsent, tries again next time */ }
     }
@@ -7198,7 +7342,7 @@ function BroadcastModal({job,onClose,farmList,crewList,role}){
   /* v4.6.67 — every farmer contact on the farm, not just the first */
   const fContacts=farmerContacts(farm);
   const farmerPhone=(farm&&farm.farmerPhone||'').trim();
-  const crewWithPhone=job.crew.filter(id=>{const c=gcl(id);return c&&c.phone;});
+  const crewWithPhone=uniqCrewByPhone(job.crew,gcl); /* v4.6.72m - one text per phone number */
   /* v4.6.72d - what this tap costs, before it is tapped */
   const _bodies=broadcastBodies(msg,jobName);
   const _bcBody=_bodies.full;
@@ -7227,9 +7371,9 @@ function BroadcastModal({job,onClose,farmList,crewList,role}){
       '- '+CONTRACTOR_NAME+' via myGang'
     ].join('\n')); /* v4.6.72d - smart quotes cost double */
     const messages=crewWithPhone.map(id=>{const c=gcl(id);return{to:c.phone,body};});
-    if(alsoFarmer)fContacts.forEach(fc=>messages.push({to:fc.phone,body}));
+    if(alsoFarmer)fContacts.forEach(fc=>{if(!messages.some(m=>phoneKey(m.to)===phoneKey(fc.phone)))messages.push({to:fc.phone,body});}); /* v4.6.72m - a farmer who is also crew gets it once */
     try{
-      const res=await fetch('/api/send-sms',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages})});
+      const res=await fetch('/api/send-sms',{method:'POST',headers:{'Content-Type':'application/json','x-mygang-slug':CONTRACTOR_SLUG},body:JSON.stringify({messages})});
       const data=await res.json();
       setSentCount(data.sent||0);
       setStatus(data.failed>0?'partial':'done');
@@ -7268,9 +7412,9 @@ function BroadcastModal({job,onClose,farmList,crewList,role}){
       return;
     }
     const messages=crewWithPhone.map(id=>{const c=gcl(id);return{to:c.phone,body:_bodies.ptr};});
-    if(alsoFarmer)fContacts.forEach(fc=>messages.push({to:fc.phone,body:_bodies.full}));
+    if(alsoFarmer)fContacts.forEach(fc=>{const i=messages.findIndex(m=>phoneKey(m.to)===phoneKey(fc.phone));if(i>=0)messages[i]={to:fc.phone,body:_bodies.full};else messages.push({to:fc.phone,body:_bodies.full});}); /* v4.6.72m - a farmer who is also crew gets the full text once, not a pointer as well */
     try{
-      const res=await fetch('/api/send-sms',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages})});
+      const res=await fetch('/api/send-sms',{method:'POST',headers:{'Content-Type':'application/json','x-mygang-slug':CONTRACTOR_SLUG},body:JSON.stringify({messages})});
       const data=await res.json();
       setSentCount(data.sent||0);
       setStatus(data.failed>0?'partial':'done');
@@ -7467,7 +7611,7 @@ function CrewSMSRow({id,c,views,status,onPreview,job,farmList,crewList,appUrl}){
     try{
       /* v4.6.58 — build once, send it, and log exactly what was sent. */
       const cardBody=buildJobCardSMS(job,id,farmList,crewList,appUrl);
-      await fetch('/api/send-sms',{method:'POST',headers:{'Content-Type':'application/json'},
+      await fetch('/api/send-sms',{method:'POST',headers:{'Content-Type':'application/json','x-mygang-slug':CONTRACTOR_SLUG},
         body:JSON.stringify({messages:[{to:c.phone,body:cardBody}]})});
       logJobEvent(job&&job.id,'job_card_sent','To '+(c.name||id)+'\n'+cardBody);
       setIndivSent(true);
@@ -7520,7 +7664,7 @@ function FarmerSMSRow({job,views,onPreview,farmList,appUrl,farmerName,farmerPhon
       const list=contacts.length?contacts:[{name:farmerName||'there',phone:farmerPhone}];
       const messages=list.map(fc=>({to:fc.phone,
         body:buildFarmerSMS(job,fc.name||'there',fc.phone,farmList,appUrl)}));
-      await fetch('/api/send-sms',{method:'POST',headers:{'Content-Type':'application/json'},
+      await fetch('/api/send-sms',{method:'POST',headers:{'Content-Type':'application/json','x-mygang-slug':CONTRACTOR_SLUG},
         body:JSON.stringify({messages})});
       /* v4.6.58 — recorded verbatim. */
       logJobEvent(job&&job.id,'farmer_sms_sent',
@@ -7579,7 +7723,7 @@ function SMSModal({job,onClose,onPreview,farmList,crewList}){
 
   const doSend=async()=>{
     setStatus('sending');
-    const messages=job.crew.map(id=>{
+    const messages=uniqCrewByPhone(job.crew,gcl).map(id=>{ /* v4.6.72m - one card per phone number */
       const c=gcl(id);
       if(!c||!c.phone)return null;
       return{to:c.phone,body:buildJobCardSMS(job,id,farmList,crewList,appUrl)};
@@ -7597,7 +7741,7 @@ function SMSModal({job,onClose,onPreview,farmList,crewList}){
     try{
       const res=await fetch('/api/send-sms',{
         method:'POST',
-        headers:{'Content-Type':'application/json'},
+        headers:{'Content-Type':'application/json','x-mygang-slug':CONTRACTOR_SLUG},
         body:JSON.stringify({messages}),
       });
       const data=await res.json();
@@ -7609,7 +7753,7 @@ function SMSModal({job,onClose,onPreview,farmList,crewList}){
     }
   };
 
-  const crewWithPhone=job.crew.filter(id=>{const c=gcl(id);return c&&c.phone;});
+  const crewWithPhone=uniqCrewByPhone(job.crew,gcl); /* v4.6.72m - one text per phone number */
   const crewNoPhone=job.crew.filter(id=>{const c=gcl(id);return c&&!c.phone;});
 
   return e('div',{className:'overlay'},e('div',{className:'sheet'},
@@ -8012,6 +8156,7 @@ function EditJobScreen({job,onSave,onClose,farmList,addFarm,crewList,addCrew}){
   const [leadId,setLeadId]=useState(job.leadId||''); /* v4.6.13 - designated shed lead */
   const [selCrew,setSelCrew]=useState(job.crew||[]);
   const [submitErr,setSubmitErr]=useState('');
+  const [roleSync,setRoleSync]=useState([]); /* v4.6.72l - ids whose job role is to be refreshed from the record on save */
 
   const rJobName=useRef(),rStartDate=useRef(),rDays=useRef(),rSheep=useRef();
   const rAccomm=useRef(),rNotes=useRef(),rJobPin=useRef();
@@ -8028,10 +8173,21 @@ function EditJobScreen({job,onSave,onClose,farmList,addFarm,crewList,addCrew}){
        Preserve existing snapshots so historical role context is kept. */
     const existingDetails=(job.rates?.crewDetails)||{};
     const newDetails={...existingDetails};
+    /* v4.6.72l - CJ TALL-0066: a person's role on the job is their snapshot from
+       when they were added, by design (old pays must not move). But this form
+       showed the LIVE record role and never touched the snapshot, so a shearer
+       whose record now says penner stayed a shearer on the job however many
+       times he was removed and re-added. Now: (a) someone not on the job before
+       this edit takes their current record role; (b) anyone the admin tapped
+       'Update' on below takes it too; (c) everyone else keeps their snapshot. */
+    const wasOn=id=>(job.crew||[]).indexOf(id)>=0;
     selCrew.forEach(id=>{
-      if(!newDetails[id]?.role){
-        const c=crewList.find(cr=>cr.id===id);
-        if(c)newDetails[id]={...((lsGet(LS_WORKER_DEFAULTS)||{})[id]||{}),...(newDetails[id]||{}),role:c.role}; /* v4.6.6 - seed sticky worker settings */
+      const c=crewList.find(cr=>cr.id===id);
+      if(!c)return;
+      if(!newDetails[id]?.role||!wasOn(id)||roleSync.indexOf(id)>=0){
+        newDetails[id]={...((lsGet(LS_WORKER_DEFAULTS)||{})[id]||{}),...(newDetails[id]||{}),role:c.role}; /* v4.6.6 - seed sticky worker settings */
+        if(wasOn(id)&&existingDetails[id]&&existingDetails[id].role&&existingDetails[id].role!==c.role)
+          logJobEvent(job.id,'crew_role_changed',(c.name||id)+': '+existingDetails[id].role+' \u2192 '+c.role+' (updated in Edit Job)','admin');
       }
     });
     onSave({
@@ -8054,8 +8210,13 @@ function EditJobScreen({job,onSave,onClose,farmList,addFarm,crewList,addCrew}){
 
   const tog=id=>setSelCrew(p=>p.includes(id)?p.filter(x=>x!==id):[...p,id]);
   const handleAddCrew=c=>{addCrew(c);setSelCrew(p=>[...p,c.id]);setShowAddCrew(false);};
-  const ROLE_ORDER=['Shearer','Crutcher','Wool Handler','Wool Classer','Presser','Penner'];
-  const crewByRole=ROLE_ORDER.reduce((acc,r)=>{const members=(crewList||[]).filter(c=>c.role===r&&isActiveCrew(c));if(members.length)acc.push({role:r,members});return acc;},[]); /* v4.6.51 — active only */
+  const ROLE_ORDER=['Shearer','Crutcher','Wool Handler','Wool Classer','Presser','Penner','Cook'];
+  /* v4.6.72l - the role this form shows is the one the JOB uses: the snapshot for
+     people already on the job, the record for everyone else. Mismatches are
+     listed under the chips with an Update button, not hidden by the grouping. */
+  const effRole=c=>{const on=(job.crew||[]).indexOf(c.id)>=0;const r=on?(getJobRole(job,c.id)||c.role):c.role;return roleSync.indexOf(c.id)>=0?c.role:r;};
+  const crewByRole=ROLE_ORDER.reduce((acc,r)=>{const members=(crewList||[]).filter(c=>effRole(c)===r&&isActiveCrew(c));if(members.length)acc.push({role:r,members});return acc;},[]); /* v4.6.51 — active only */
+  const roleMismatch=(crewList||[]).filter(c=>selCrew.indexOf(c.id)>=0&&(job.crew||[]).indexOf(c.id)>=0&&roleSync.indexOf(c.id)<0&&(getJobRole(job,c.id)||c.role)!==c.role);
 
   const vf=farmQuery?farmList.filter(f=>f.name.toLowerCase().includes(farmQuery)||f.address.toLowerCase().includes(farmQuery)):farmList;
 
@@ -8145,6 +8306,13 @@ function EditJobScreen({job,onSave,onClose,farmList,addFarm,crewList,addCrew}){
               ))
             )
           )),
+          roleMismatch.length>0&&e('div',{style:{margin:'8px 0 4px',padding:'10px 12px',borderRadius:8,background:'var(--amberD)',border:'1px solid var(--amberB)',fontSize:13,lineHeight:1.5}},
+            e('div',{style:{fontWeight:700,marginBottom:4}},'\u26A0\uFE0F Role changed since they were added'),
+            roleMismatch.map(c=>e('div',{key:c.id,style:{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,padding:'4px 0'}},
+              e('span',null,c.name+': on this job as ',e('b',null,getJobRole(job,c.id)||c.role),' \u2014 record says ',e('b',null,c.role)),
+              e('button',{type:'button',onClick:()=>setRoleSync(p=>p.concat([c.id])),style:{background:'var(--amber)',color:'#1e2a3a',border:0,borderRadius:7,padding:'6px 10px',fontWeight:800,fontSize:12,cursor:'pointer',whiteSpace:'nowrap'}},'Update to '+c.role))),
+            e('div',{style:{fontSize:11,color:'var(--muted)',marginTop:4}},'Only this job changes, from today. Finished jobs keep the role they were paid at.')),
+          roleSync.length>0&&e('div',{style:{margin:'4px 0',fontSize:12,color:'var(--green,#22c55e)',fontWeight:600}},'\u2713 '+roleSync.length+' role'+(roleSync.length===1?'':'s')+' will update when you save.'),
           !showAddCrew&&e('button',{className:'add-inline-btn',onClick:()=>setShowAddCrew(true)},'+ Add New Crew Member'),
           showAddCrew&&e(AddCrewForm,{key:'add-crew',onAdd:handleAddCrew,onCancel:()=>setShowAddCrew(false)})
         )
@@ -8650,7 +8818,8 @@ function HomeScreen({jobs:allJobs,role,setRole,onJob,onNew,onDatabase,onSchedule
   return e('div',null,
     e(TopBar,{role,setRole,onSchedule}),
     e(PayDayNudge,{jobs:allJobs,role}), /* v4.6.72c - under the header, above the stats card */
-    role!=='farmer'&&e(TeamChatBar,{key:'chatbar-'+(myId||''),role,onOpen:()=>setShowChat(true)}), /* v4.6.72d */
+    role!=='farmer'&&!(role==='read_only'&&((lsGet(LS_APP_SETTINGS)||{}).crewView!=='all'))&&e(TeamChatBar,{key:'chatbar-'+(myId||''),role,onOpen:()=>setShowChat(true)}), /* v4.6.72d; v4.6.72n - the crew view carries its own bar */
+    e(SmsMeterLine,{role}), /* v4.6.72k */
     showChat&&role!=='farmer'&&e(TeamChat,{role,onClose:()=>setShowChat(false)}),
     /* v4.6.11 - FARMER VIEW: farmer devices see only their farm's jobs */
     role==='farmer'&&e('div',{style:{position:'fixed',top:58,left:0,right:0,bottom:0,background:'var(--bg)',zIndex:150,overflowY:'auto',WebkitOverflowScrolling:'touch',padding:'16px'}},
@@ -8710,6 +8879,9 @@ function HomeScreen({jobs:allJobs,role,setRole,onJob,onNew,onDatabase,onSchedule
           e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',margin:'6px 0 2px'}},
             e('div',{style:{fontFamily:'var(--h)',fontSize:20,fontWeight:800}},"G'day "+((me&&me.name.split(' ')[0])||'')),
             e('button',{onClick:()=>{lsSet(LS_MY_ID,'');setMyId(null);},style:{background:'none',border:'none',color:'var(--muted)',fontSize:12,cursor:'pointer',textDecoration:'underline'}},'Not you?')),
+          /* v4.6.72n - the Team chat bar was under this overlay, so VIEW-mode crew could not
+             open the chat the pointer text sent them to (Woolaway, 29 Oct). */
+          e('div',{style:{margin:'0 -16px 2px'}},e(TeamChatBar,{key:'chatbar-crew-'+myId,role,onOpen:()=>setShowChat(true)})),
           e('div',{style:{display:'flex',gap:8,margin:'10px 0 14px'}},
             ['jobs','tallies'].map(t=>e('button',{key:t,onClick:()=>setCrewTab(t),
               style:{flex:1,background:crewTab===t?'var(--amber)':'var(--card)',color:crewTab===t?'#000':'var(--muted)',
@@ -9869,6 +10041,38 @@ function resolvePayDay(jobs){
   const fq=dflt.payFrequency||src.payFrequency||'weekly';
   return {pd,fq};
 }
+/* ── v4.6.72k SMS METER (28 Oct 2026) ──
+   Dale's call: subscription stays flat, SMS is metered on top at A$0.10 a
+   segment, nothing included. Every /api/send-sms call now carries the slug;
+   the function writes one sms_usage row per batch with Twilio's own segment
+   count. This line on the admin home board shows the month so far; the rate
+   comes from billing_config so it can change without a deploy. */
+const SMS_BILL_AUD_PER_SEGMENT_DEFAULT=0.10;
+function SmsMeterLine({role}){
+  const [m,setM]=useState(null);
+  useEffect(()=>{
+    if(role!=='admin')return;
+    let dead=false;
+    (async()=>{
+      try{
+        const now=new Date();const start=new Date(now.getFullYear(),now.getMonth(),1).toISOString();
+        const [u,c]=await Promise.all([
+          withTimeout(sb.from('sms_usage').select('segments,sent,kind').eq('contractor_slug',CONTRACTOR_SLUG).gte('sent_at',start).limit(5000),8000,'sms_usage_timeout'),
+          withTimeout(sb.from('billing_config').select('v').eq('k','sms_aud_per_segment').maybeSingle(),8000,'billing_cfg_timeout').catch(()=>null)
+        ]);
+        if(dead||!u||u.error)return;
+        const rows=u.data||[];const segs=rows.reduce((a,r)=>a+(Number(r.segments)||0),0);const texts=rows.reduce((a,r)=>a+(Number(r.sent)||0),0);
+        const rate=(c&&c.data&&Number(c.data.v)>0)?Number(c.data.v):SMS_BILL_AUD_PER_SEGMENT_DEFAULT;
+        setM({segs,texts,rate});
+      }catch(e){}
+    })();
+    return()=>{dead=true;};
+  },[role]);
+  if(role!=='admin'||!m)return null;
+  return e('div',{style:{margin:'8px 16px 0',fontSize:12,color:'var(--muted)',display:'flex',justifyContent:'space-between',alignItems:'center'}},
+    e('span',null,'📨 SMS this month: '+m.texts+' text'+(m.texts===1?'':'s')+' · '+m.segs+' segment'+(m.segs===1?'':'s')),
+    e('b',{style:{color:'var(--text)'}},'~A$'+(m.segs*m.rate).toFixed(2)));
+}
 function PayDayNudge({jobs,role}){
   const [dismissedFor,setDismissedFor]=useState(()=>lsGet(LS_PAYDAY_DISMISSED)||'');
   if(role!=='admin'&&role!=='shed_lead')return null;
@@ -10742,6 +10946,7 @@ function App(){
 
   return e('div',{style:{paddingTop:(!isOnline||(isOnline&&!isFreshState&&isLoaded.current)||(isOnline&&isFreshState&&isLoaded.current&&pendingCount>0))?20:0}},
     e(StatusBar),
+    e(VersionWatch,{idle:screen==='home'&&!showNew&&!showEdit&&!showDatabase&&!showSMS&&!showBroadcast&&!jobPinPending}), /* v4.6.72m */
     screen==='home'&&role!=='farmer'&&e(InstallNudge),
     screen==='home'&&e(HomeScreen,{jobs,role,setRole:persistRole,onJob:goJob,onNew:()=>setShowNew(true),onDatabase:()=>setShowDatabase(true),onSchedule:goSchedule,contractorName:CONTRACTOR_NAME}),
     screen==='schedule'&&role!=='read_only'&&role!=='shed_lead'&&e(ScheduleScreen,{jobs,role,setRole:persistRole,onBack:goHome,onJob:goJob,onNew:()=>setShowNew(true),onNewDraft:()=>setShowNew(true),

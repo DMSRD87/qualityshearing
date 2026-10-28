@@ -29,7 +29,11 @@
    Cost, stated plainly: a slow-but-live link may serve the previous build once.
    No cache means no fallback, so a first-ever install still needs signal — that
    has always been true. CACHE bumped so every device reactivates. */
-const CACHE = 'mygang-v11'; /* v11: bumped so every device drops the cached Xero catalog */
+/* v13 (28 Oct 2026) — VERSION WATCH. The app now asks /version.json whether the
+   served build differs from the one it is running. That file must never come
+   from this cache: it is passed straight through, like the API calls. CACHE
+   bumped so every device reactivates and drops any copy the old rule stored. */
+const CACHE = 'mygang-v13'; /* v11: Xero catalog purge; v13: version.json pass-through */
 const PRECACHE = [
   '/',
   /* pinned — what current builds request */
@@ -85,6 +89,10 @@ self.addEventListener('fetch', event => {
      added in Xero never appeared and the push stayed blocked. Live data is never
      served from cache. */
   if (url.includes('mygangxero') || url.includes('/api/')) {
+    return;
+  }
+  /* v13 — the build marker is live data too */
+  if (url.includes('/version.json')) {
     return;
   }
 
