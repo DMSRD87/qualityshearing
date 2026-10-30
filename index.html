@@ -624,7 +624,8 @@ const LS_TALLY_QUEUE='mg_tally_queue_'+CONTRACTOR_SLUG; /* per-cell offline queu
 const LS_TALLY_DEAD='mg_tally_dead_'+CONTRACTOR_SLUG; /* v4.6.3g — quarantined cells (permanent rejection). Replayed once on boot in case the server-side blocker (e.g. missing kind constraint) was since fixed. */
 const LS_TALLY_META_QUEUE='mg_tally_meta_queue_'+CONTRACTOR_SLUG; /* v4.6.4 — offline/failed mob metadata (type/desc) updates to existing count cells; flushed alongside the tally queue. */
 const ROLE_TIMEOUT_HOURS=12; /* auto-reset after 12h inactivity */
-const APP_VERSION='v4.6.72n';
+const APP_VERSION='v4.6.72o';
+/* v4.6.72o (30 Oct 2026): BROADCAST CAP IS A WARNING, NOT A LIMIT. Josh (Knights): 'I'm not concerned with the $2, I'd prefer the clear received message.' SMS is metered to the contractor, so the 2-text cap only ever protected their own money. Full-text mode still shows segments x people and the dollar figure before Send and flags a long message; it no longer refuses. The sheet remembers the last mode used on this phone. No other change. */
 /* v4.6.72n (29 Oct 2026): TEAM CHAT IN CREW VIEW. A VIEW-mode phone shows the crew overlay (G'day / My jobs / My tallies) on top of the home screen, and the Team chat bar sat underneath it - crew could not open the chat that the pointer broadcast sent them to (Woolaway, 29 Oct: contractor had to resend full text). The bar now sits under the greeting in the crew view. No other change. */
 /* v4.6.72m (28 Oct 2026): SAVE AUDIT FIXES. (1) Day notes no longer double: the note was treated as someone else's whenever updated_at strings differed, and the app's '...Z' never equalled PostgREST's '...+00:00', so any edit inside saved text prepended the whole saved note (Knights MARG-0028: 3 lines became 29). Identity is now the body this device last saw; genuine concurrent edits merge line-wise with no loss; one write per date at a time. (2) Broadcasts, pointers and job cards go once per phone number - a worker held as two or three crew records got every text two or three times. (3) Version watch: the app checks /version.json on resume and every 20 min; a different build reloads itself once from the home screen when idle, otherwise shows an 'Update ready' pill. A Knights iPhone ran a 2.5-day-old build through three fixes without it. sw.js v13 never caches version.json. (4) A whiteboard note that landed but timed out is no longer retried forever. No pay-engine, tally or job-blob change. */
 /* v4.6.72l (28 Oct 2026): EDIT JOB ROLES ARE HONEST (CJ TALL-0066: Jamie Morton's record said Penner, the job's own role snapshot said Shearer; Edit Job grouped him under Penners from the record but never rewrote the snapshot, even after removing and re-adding him three times, so the Tally tab kept him on a stand). Edit Job now groups people by the role the JOB uses, lists anyone whose record role differs ('on this job as Shearer - record says Penner') with an Update button, logs crew_role_changed when applied, and gives a person who is removed and later re-added their current record role. Finished jobs are untouched. No pay-engine, save-layer or sync change. */
@@ -7316,7 +7317,9 @@ function JobCardView({job,crewId,onClose}){
    ONE-segment text saying so. "Full text by SMS" is still there, capped at 2 segments
    (306 characters), with the cost on the button. Farm contacts are not in Team chat, so
    they always get the full text. */
+/* v4.6.72o - SMS_MAX_SEGS is now a warning line, not a limit: the contractor pays per segment and chooses. LS_BC_MODE = last broadcast mode used on this phone. */
 const SMS_MAX_SEGS=2;
+const LS_BC_MODE='mg_bc_mode_'+CONTRACTOR_SLUG;
 function broadcastBodies(msg,jobName){
   const m=String(msg||'').trim();
   const full=m?smsClean(['Update from '+CONTRACTOR_NAME+' re: '+jobName+' -','',m,'','Do not reply to this message - contact me directly.','- '+CONTRACTOR_NAME+' via myGang'].join('\n')):'';
@@ -7337,7 +7340,8 @@ function BroadcastModal({job,onClose,farmList,crewList,role}){
      updates are crew-only ("bring your own lunch"), so this is OFF by default and
      ticked deliberately for the ones he does need - wet sheep, start delayed. */
   const [alsoFarmer,setAlsoFarmer]=useState(false);
-  const [mode,setMode]=useState('chat'); /* v4.6.72i - 'chat' (post + 1-line text) | 'sms' (full text, capped) */
+  const [mode,_setMode]=useState(()=>{const m=lsGet(LS_BC_MODE);return (m==='sms'||m==='chat')?m:'chat';}); /* v4.6.72i - 'chat' (post + 1-line text) | 'sms' (full text); v4.6.72o - remembered per phone */
+  const setMode=k=>{_setMode(k);try{lsSet(LS_BC_MODE,k);}catch(e){}};
   const me=chatIdentity(role||'admin')||{crewId:null,name:CONTRACTOR_NAME,role:'admin',canPost:true};
   /* v4.6.67 — every farmer contact on the farm, not just the first */
   const fContacts=farmerContacts(farm);
@@ -7354,7 +7358,8 @@ function BroadcastModal({job,onClose,farmList,crewList,role}){
   const _chatSegs=msg.trim()?(_ptrSegs*crewWithPhone.length+(alsoFarmer?_bcSegs*fContacts.length:0)):0;
   const _smsSegsTotal=_bcSegs*_bcRecips;
   const _capChars=_bcUcs2?67*SMS_MAX_SEGS:153*SMS_MAX_SEGS;
-  const _overCap=mode==='sms'&&_bcSegs>SMS_MAX_SEGS;
+  const _long=mode==='sms'&&_bcSegs>SMS_MAX_SEGS; /* v4.6.72o - shown, never enforced */
+  const _overCap=false;
   const _canSend=!!msg.trim()&&crewWithPhone.length>0&&!_overCap&&(mode!=='chat'||me.canPost);
 
   const doSend=async()=>{
@@ -7466,7 +7471,7 @@ function BroadcastModal({job,onClose,farmList,crewList,role}){
         e('div',{style:{margin:'-4px 16px 10px',fontSize:11.5,color:'var(--muted)',lineHeight:1.4}},
           mode==='chat'
             ?'Full message goes to Team chat (free). Each crew member gets one short text telling them to open the app.'
-            :'Whole message by text, up to '+SMS_MAX_SEGS+' texts per person ('+_capChars+' characters). Costs add up fast.'),
+            :'Whole message by text. Billed per segment - the cost shows below before you send.'),
         e('textarea',{
           className:'fi',rows:5,
           placeholder:'e.g. Wet sheep tomorrow — no work. Will update by 7am.',
@@ -7488,12 +7493,12 @@ function BroadcastModal({job,onClose,farmList,crewList,role}){
           !me.canPost?e('div',{style:{color:'var(--amber)',marginTop:2}},'Pick your name on the home board first so the post has a sender.'):null
         ),
         _bcSegs>0&&mode==='sms'&&e('div',{style:{margin:'10px 16px 0',padding:'8px 12px',borderRadius:8,fontSize:12,lineHeight:1.5,
-          background:(_bcUcs2||_overCap)?'var(--amberD)':'var(--card2)',border:'1px solid '+((_bcUcs2||_overCap)?'var(--amberB)':'var(--border)'),color:'var(--text)'}},
+          background:(_bcUcs2||_long)?'var(--amberD)':'var(--card2)',border:'1px solid '+((_bcUcs2||_long)?'var(--amberB)':'var(--border)'),color:'var(--text)'}},
           e('b',null,_bcSegs+' segment'+(_bcSegs===1?'':'s')+' \u00d7 '+_bcRecips+' '+(_bcRecips===1?'person':'people')+' = '+_smsSegsTotal+' segments'),
           ' (~$'+(_smsSegsTotal*SMS_AUD_PER_SEGMENT).toFixed(2)+')',
-          e('div',{style:{color:_overCap?'var(--red,#ef4444)':'var(--muted)',marginTop:2,fontWeight:_overCap?700:400}},
-            _overCap?('Over the '+SMS_MAX_SEGS+'-text limit by '+(_bcBody.length-_capChars)+' characters. Shorten it, or send it via Team chat.')
-                    :((_capChars-_bcBody.length)+' characters left before the '+SMS_MAX_SEGS+'-text limit.')),
+          e('div',{style:{color:_long?'var(--amber)':'var(--muted)',marginTop:2,fontWeight:_long?700:400}},
+            _long?('Long message: '+_bcSegs+' texts per person. Shorter is cheaper, or send it via Team chat - your call.')
+                 :((_capChars-_bcBody.length)+' characters left before it becomes '+(SMS_MAX_SEGS+1)+' texts.')),
           _bcUcs2?e('div',{style:{color:'var(--muted)',marginTop:2}},'Emoji or symbols in this message halve the characters per segment - remove them to roughly halve the cost.'):null
         )
       ),
