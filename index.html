@@ -624,21 +624,25 @@ const LS_TALLY_QUEUE='mg_tally_queue_'+CONTRACTOR_SLUG; /* per-cell offline queu
 const LS_TALLY_DEAD='mg_tally_dead_'+CONTRACTOR_SLUG; /* v4.6.3g — quarantined cells (permanent rejection). Replayed once on boot in case the server-side blocker (e.g. missing kind constraint) was since fixed. */
 const LS_TALLY_META_QUEUE='mg_tally_meta_queue_'+CONTRACTOR_SLUG; /* v4.6.4 — offline/failed mob metadata (type/desc) updates to existing count cells; flushed alongside the tally queue. */
 const ROLE_TIMEOUT_HOURS=12; /* auto-reset after 12h inactivity */
-const APP_VERSION='v4.6.72o';
-/* v4.6.72o (30 Oct 2026): BROADCAST CAP IS A WARNING, NOT A LIMIT. Josh (Knights): 'I'm not concerned with the $2, I'd prefer the clear received message.' SMS is metered to the contractor, so the 2-text cap only ever protected their own money. Full-text mode still shows segments x people and the dollar figure before Send and flags a long message; it no longer refuses. The sheet remembers the last mode used on this phone. No other change. */
-/* v4.6.72n (29 Oct 2026): TEAM CHAT IN CREW VIEW. A VIEW-mode phone shows the crew overlay (G'day / My jobs / My tallies) on top of the home screen, and the Team chat bar sat underneath it - crew could not open the chat that the pointer broadcast sent them to (Woolaway, 29 Oct: contractor had to resend full text). The bar now sits under the greeting in the crew view. No other change. */
-/* v4.6.72m (28 Oct 2026): SAVE AUDIT FIXES. (1) Day notes no longer double: the note was treated as someone else's whenever updated_at strings differed, and the app's '...Z' never equalled PostgREST's '...+00:00', so any edit inside saved text prepended the whole saved note (Knights MARG-0028: 3 lines became 29). Identity is now the body this device last saw; genuine concurrent edits merge line-wise with no loss; one write per date at a time. (2) Broadcasts, pointers and job cards go once per phone number - a worker held as two or three crew records got every text two or three times. (3) Version watch: the app checks /version.json on resume and every 20 min; a different build reloads itself once from the home screen when idle, otherwise shows an 'Update ready' pill. A Knights iPhone ran a 2.5-day-old build through three fixes without it. sw.js v13 never caches version.json. (4) A whiteboard note that landed but timed out is no longer retried forever. No pay-engine, tally or job-blob change. */
-/* v4.6.72l (28 Oct 2026): EDIT JOB ROLES ARE HONEST (CJ TALL-0066: Jamie Morton's record said Penner, the job's own role snapshot said Shearer; Edit Job grouped him under Penners from the record but never rewrote the snapshot, even after removing and re-adding him three times, so the Tally tab kept him on a stand). Edit Job now groups people by the role the JOB uses, lists anyone whose record role differs ('on this job as Shearer - record says Penner') with an Update button, logs crew_role_changed when applied, and gives a person who is removed and later re-added their current record role. Finished jobs are untouched. No pay-engine, save-layer or sync change. */
-/* v4.6.72k (28 Oct 2026): SMS METER. Every text now carries the contractor slug to /api/send-sms, which writes one sms_usage row per batch with Twilio's own segment count (kind: broadcast / pointer / job_card / farmer / pin). Admin home board shows 'SMS this month: N texts, N segments, ~A$X' at the rate in billing_config (A$0.10 a segment; subscription stays flat, nothing included). Dale's monthly report is the view sms_usage_monthly. Also unifies api/send-sms.js across the fleet (AU number normalisation, dual env names, clear config errors). No pay, tally, save-layer or Xero change. */
-/* v4.6.72j (27 Oct 2026): PUSH NOTIFICATIONS + APP-ICON BADGE for Team chat. A Team chat post now reaches every opted-in phone as a notification (free) and the home-screen icon carries the unread count. Opt in from the banner at the top of Team chat ('Turn on notifications'); iPhone needs myGang on the Home Screen first (iOS 16.4+) and the banner says so; 'Not now' hides it for a week. Device subscriptions live in push_subscriptions (endpoint, keys, crew id, last_seen_at); a database trigger on chat_messages (pg_net) asks the broker /api/push/notify to send to every device of the contractor except the sender's, badge = messages since that device last opened the chat; opening the chat clears the badge and tells the server. Tapping the notification opens Team chat (/#chat or a message to the open app). sw.js gains push / notificationclick / pushsubscriptionchange handlers. SMS pointer texts from Broadcast stay until a crew is opted in. No pay, tally, save-layer or Xero change. */
-/* v4.6.72i (27 Oct 2026): (1) BROADCAST AS A POINTER - the Twilio export (21 Apr-24 Oct) put broadcasts at US$321 of $627, Knights $250 of it, 57% of broadcasts over 2 segments, Knights' October broadcasts alone costing more than the subscription. Default mode now posts the full text to Team chat (free, 30 days) and sends each crew member a ONE-segment text to open the app; 'Full text by SMS' remains, capped at 2 segments (306 characters) with a live characters-left counter and the send button disabled past it; farm contacts always get the full text (they are not in Team chat); the cost of the chosen mode, and what the other would have cost, shown before Send; broadcast_sent/broadcast_failed events say which mode. (2) SAVE SERIALISER - one job save in flight per job per device, the newest waits and runs once (Knights 27 Oct 07:19: a start-of-day burst of saves of the same job conflicted with each other under the 72h conditional write and one exhausted its retries - nothing lost, queued and merged on the next flush); conflict retries 3->5 with jittered backoff. No pay or tally change. */
-/* v4.6.72h (25 Oct 2026): ONE WRITE ROUTINE FOR jobs.data (Knights 25 Oct, DB-proven: MCIN-0030 lost 7 crew, its start date and sheep count to a 5-day-old blob flushed RAW from the job queue - the flush path ran no guard and wrote no snapshot; PYLA-0035 lost 9 crew the same way, CLEA-0095 was un-charged-out three times; every refused shrink save since May was queued and later flushed raw). mergeAndWriteJob is now the only write path for direct saves, queue flushes and sync-on-open. (1) A device can only change what it changed: per field at every level - top-level fields, status, rates, each crew-details/override entry, each day/run/mob - the server's value is kept wherever this device still holds what it last saw and the server has moved on; a deliberate edit is written through. (2) Guards are mandatory: reads get 8s with one retry and if they cannot complete nothing is written - the blob is queued WITH its stamp and merged later. (3) Nothing is refused-then-queued; work is protected as a merge rule (a run with cells or a person with work is never dropped). (4) Writes are conditional on updated_at with re-merge on conflict. (5) A merge that changes nothing writes nothing. (6) Blobs queued by the previous build (no stamp) can only add, never remove or revert. Log reasons: merge_kept, merge_noop_kept, merge_unavailable_queued, merge_conflict_retry, guard_shrink_restored, guard_crew_restored, queue_item_expired. No pay, tally-cell, UI, SMS or Xero change. */
-/* v4.6.72g (21 Oct 2026): A QUEUE FLUSH CAN NEVER DROP A ROW (Baxters 20 Oct, DB-proven: three tally flushes overlapped on a signal blip at 2:32:04pm and a run's counts queued mid-flush were overwritten by a flush writing its stale leftovers back over the whole queue; same pattern in the job-blob and mob-metadata queues, which is also the likely cause of Hancock Redpath 17 Oct where 4 runs/411 head are in tally_entries but not the job). (1) JOURNAL FIRST - writeTallyCell puts the row in localStorage before any network call. (2) REMOVE BY IDENTITY - every flush removes only the exact row it landed (key + timestamp) from the live queue; never writes a list back. (3) SINGLE FLIGHT - one flush per queue at a time, late callers trigger one more pass. (4) NEWEST KEYSTROKE WINS - a new write for a cell aborts the older airborne one, and the DB trigger tally_entries_no_stale_overwrite refuses an older updated_at over a newer one (10-minute window, so a wrong phone clock cannot lock a device out). No pay, sync-order or settings change. */
-/* v4.6.72f (20 Oct 2026): PER-SHEARER OVERRIDES (Knights ask). Admin taps a shearer's name on any mob on the Tally tab: own $/head and Ganger on/off for THIS MOB or the WHOLE DAY. rates.shearerOverrides[crewId].byMob/byDate; most specific wins (shearer-mob > shearer-day > mob override > job rate); ganger true/false beats gangerByDate for that scope. ONE resolver (shearerBase/isGangerFor) feeds calcPeriodStats, generateSummary and payWeekJobData; grower mob totals untouched (base rates). Covered by the rates stale-device guard. Amber dot on the name when one applies. */
-/* v4.6.72e (20 Oct 2026): BIRELLAN FIX (Knights, 15 Oct: a PC with an old copy of the job saved over the shed phone all day; the shrink guard blocked the dangerous saves but mob TYPE flipped back to the job default and rousie runs blanked on screen). (1) Stale-device guard now covers mob type/desc - same seen-stamp rule as rate overrides (_srvMobMeta, guard_mobmeta_kept). (2) hydrateTallies overlays this device's own queued/in-flight cells over server rows so a refresh can never blank an unsent count. Server data was never wrong; nothing repriced. No pay-engine maths change. */
+const APP_VERSION='v4.6.73r';
+/* v4.6.73r (18 Nov 2026): HOME SCREEN KNOWS ALL MY RECORDS. Craig (Knights) is three crew records on one phone; 'My jobs' only matched the one his phone picked, so Deltroit was missing. My jobs and My tallies now count every record that shares my phone number (same rule as broadcasts since 72m). Chat identity, Viewed markers and pay unchanged. */
+/* v4.6.73q (16 Nov 2026): 'Also works as' is a one-line picker - rows only for people with a second role, '+ Add a second role' opens Who / Also as. No change to data, save or pay. */
+/* v4.6.73p (16 Nov 2026): ONE PERSON, SEVERAL ROLES ON A JOB. Jamie (CJ) shears and pens the same day. crewDetails[id].extraRoles (optional) + 'Also works as' in Edit Job. The board, shed grid, ganger pick, summary and the shed-runs pay loop read any of the person's roles; shed runs are paid as the person's shed role (primary when it is one, else the first extra). pieceIds unchanged in effect (counts already paid to whoever has them). Stand fee stays primary-role only. Without extraRoles nothing changes: replay harness 0 pay differences across every job in the database. */
+/* v4.6.73o (12 Nov 2026): SHED RUNS TO XERO BY ROLE. Shelley (Knights): classers and pressers came across as 'Shedhand HR'. Every run went out as one component. Lines now carry the role they were paid under; the Xero payload sends classer runs as classer_runs and presser runs as presser_runs, wool handlers and penners stay shed_runs; two new rows in My Database > Xero > Pay items. The broker uses the Shed staff runs item for either until it is mapped. Pay engine untouched. */
+/* v4.6.73n (12 Nov 2026): PAYG TO XERO. Teegan (Knights, 5 Nov): every payslip needed a manual tax adjustment because shearers are withheld at a flat rate. The push now sends each worker's myGang tax (sum of per-job Tax Withholding % slices, as the Pay Week report) and the %; the broker reads Xero's own PAYG and posts the difference as a manual adjustment, proven on Demo Company 12 Nov (probe Q4-Q7, pushtest). No % = Xero's tables, untouched. Dry run shows the PAYG column; result flags any payslip whose tax missed. Pay engine unchanged. */
+/* v4.6.73m (30 Oct 2026): BROADCAST CAP IS A WARNING, NOT A LIMIT. Josh (Knights): 'I'm not concerned with the $2, I'd prefer the clear received message.' SMS is metered to the contractor, so the 2-text cap only ever protected their own money. Full-text mode still shows segments x people and the dollar figure before Send and flags a long message; it no longer refuses. The sheet remembers the last mode used on this phone. No other change. */
+/* v4.6.73l (29 Oct 2026): TEAM CHAT IN CREW VIEW. A VIEW-mode phone shows the crew overlay (G'day / My jobs / My tallies) on top of the home screen, and the Team chat bar sat underneath it - crew could not open the chat that the pointer broadcast sent them to (Woolaway, 29 Oct: contractor had to resend full text). The bar now sits under the greeting in the crew view. No other change. */
+/* v4.6.73k (28 Oct 2026): SAVE AUDIT FIXES. (1) Day notes no longer double: the note was treated as someone else's whenever updated_at strings differed, and the app's '...Z' never equalled PostgREST's '...+00:00', so any edit inside saved text prepended the whole saved note (Knights MARG-0028: 3 lines became 29). Identity is now the body this device last saw; genuine concurrent edits merge line-wise with no loss; one write per date at a time. (2) Broadcasts, pointers and job cards go once per phone number - a worker held as two or three crew records got every text two or three times. (3) Version watch: the app checks /version.json on resume and every 20 min; a different build reloads itself once from the home screen when idle, otherwise shows an 'Update ready' pill. A Knights iPhone ran a 2.5-day-old build through three fixes without it. sw.js v13 never caches version.json. (4) A whiteboard note that landed but timed out is no longer retried forever. No pay-engine, tally or job-blob change. */
+/* v4.6.73j (28 Oct 2026): EDIT JOB ROLES ARE HONEST (CJ TALL-0066: Jamie Morton's record said Penner, the job's own role snapshot said Shearer; Edit Job grouped him under Penners from the record but never rewrote the snapshot, even after removing and re-adding him three times, so the Tally tab kept him on a stand). Edit Job now groups people by the role the JOB uses, lists anyone whose record role differs ('on this job as Shearer - record says Penner') with an Update button, logs crew_role_changed when applied, and gives a person who is removed and later re-added their current record role. Finished jobs are untouched. No pay-engine, save-layer or sync change. */
+/* v4.6.73i (28 Oct 2026): SMS METER. Every text now carries the contractor slug to /api/send-sms, which writes one sms_usage row per batch with Twilio's own segment count (kind: broadcast / pointer / job_card / farmer / pin). Admin home board shows 'SMS this month: N texts, N segments, ~A$X' at the rate in billing_config (A$0.10 a segment; subscription stays flat, nothing included). Dale's monthly report is the view sms_usage_monthly. Also unifies api/send-sms.js across the fleet (AU number normalisation, dual env names, clear config errors). No pay, tally, save-layer or Xero change. */
+/* v4.6.73h (27 Oct 2026): PUSH NOTIFICATIONS + APP-ICON BADGE for Team chat. A Team chat post now reaches every opted-in phone as a notification (free) and the home-screen icon carries the unread count. Opt in from the banner at the top of Team chat ('Turn on notifications'); iPhone needs myGang on the Home Screen first (iOS 16.4+) and the banner says so; 'Not now' hides it for a week. Device subscriptions live in push_subscriptions (endpoint, keys, crew id, last_seen_at); a database trigger on chat_messages (pg_net) asks the broker /api/push/notify to send to every device of the contractor except the sender's, badge = messages since that device last opened the chat; opening the chat clears the badge and tells the server. Tapping the notification opens Team chat (/#chat or a message to the open app). sw.js gains push / notificationclick / pushsubscriptionchange handlers. SMS pointer texts from Broadcast stay until a crew is opted in. No pay, tally, save-layer or Xero change. */
+/* v4.6.73g (27 Oct 2026): (1) BROADCAST AS A POINTER - the Twilio export (21 Apr-24 Oct) put broadcasts at US$321 of $627, Knights $250 of it, 57% of broadcasts over 2 segments, Knights' October broadcasts alone costing more than the subscription. Default mode now posts the full text to Team chat (free, 30 days) and sends each crew member a ONE-segment text to open the app; 'Full text by SMS' remains, capped at 2 segments (306 characters) with a live characters-left counter and the send button disabled past it; farm contacts always get the full text (they are not in Team chat); the cost of the chosen mode, and what the other would have cost, shown before Send; broadcast_sent/broadcast_failed events say which mode. (2) SAVE SERIALISER - one job save in flight per job per device, the newest waits and runs once (Knights 27 Oct 07:19: a start-of-day burst of saves of the same job conflicted with each other under the 72h conditional write and one exhausted its retries - nothing lost, queued and merged on the next flush); conflict retries 3->5 with jittered backoff. No pay or tally change. */
+/* v4.6.73f (25 Oct 2026): ONE WRITE ROUTINE FOR jobs.data (Knights 25 Oct, DB-proven: MCIN-0030 lost 7 crew, its start date and sheep count to a 5-day-old blob flushed RAW from the job queue - the flush path ran no guard and wrote no snapshot; PYLA-0035 lost 9 crew the same way, CLEA-0095 was un-charged-out three times; every refused shrink save since May was queued and later flushed raw). mergeAndWriteJob is now the only write path for direct saves, queue flushes and sync-on-open. (1) A device can only change what it changed: per field at every level - top-level fields, status, rates, each crew-details/override entry, each day/run/mob - the server's value is kept wherever this device still holds what it last saw and the server has moved on; a deliberate edit is written through. (2) Guards are mandatory: reads get 8s with one retry and if they cannot complete nothing is written - the blob is queued WITH its stamp and merged later. (3) Nothing is refused-then-queued; work is protected as a merge rule (a run with cells or a person with work is never dropped). (4) Writes are conditional on updated_at with re-merge on conflict. (5) A merge that changes nothing writes nothing. (6) Blobs queued by the previous build (no stamp) can only add, never remove or revert. Log reasons: merge_kept, merge_noop_kept, merge_unavailable_queued, merge_conflict_retry, guard_shrink_restored, guard_crew_restored, queue_item_expired. No pay, tally-cell, UI, SMS or Xero change. */
+/* v4.6.73e (21 Oct 2026): A QUEUE FLUSH CAN NEVER DROP A ROW (Baxters 20 Oct, DB-proven: three tally flushes overlapped on a signal blip at 2:32:04pm and a run's counts queued mid-flush were overwritten by a flush writing its stale leftovers back over the whole queue; same pattern in the job-blob and mob-metadata queues, which is also the likely cause of Hancock Redpath 17 Oct where 4 runs/411 head are in tally_entries but not the job). (1) JOURNAL FIRST - writeTallyCell puts the row in localStorage before any network call. (2) REMOVE BY IDENTITY - every flush removes only the exact row it landed (key + timestamp) from the live queue; never writes a list back. (3) SINGLE FLIGHT - one flush per queue at a time, late callers trigger one more pass. (4) NEWEST KEYSTROKE WINS - a new write for a cell aborts the older airborne one, and the DB trigger tally_entries_no_stale_overwrite refuses an older updated_at over a newer one (10-minute window, so a wrong phone clock cannot lock a device out). No pay, sync-order or settings change. */
+/* v4.6.73d (20 Oct 2026): PER-SHEARER OVERRIDES (Knights ask). Admin taps a shearer's name on any mob on the Tally tab: own $/head and Ganger on/off for THIS MOB or the WHOLE DAY. rates.shearerOverrides[crewId].byMob/byDate; most specific wins (shearer-mob > shearer-day > mob override > job rate); ganger true/false beats gangerByDate for that scope. ONE resolver (shearerBase/isGangerFor) feeds calcPeriodStats, generateSummary and payWeekJobData; grower mob totals untouched (base rates). Covered by the rates stale-device guard. Amber dot on the name when one applies. */
+/* v4.6.73c (20 Oct 2026): BIRELLAN FIX (Knights, 15 Oct: a PC with an old copy of the job saved over the shed phone all day; the shrink guard blocked the dangerous saves but mob TYPE flipped back to the job default and rousie runs blanked on screen). (1) Stale-device guard now covers mob type/desc - same seen-stamp rule as rate overrides (_srvMobMeta, guard_mobmeta_kept). (2) hydrateTallies overlays this device's own queued/in-flight cells over server rows so a refresh can never blank an unsent count. Server data was never wrong; nothing repriced. No pay-engine maths change. */
 /* v4.6.72d (15 Oct 2026): (1) TEAM CHAT - one channel per contractor on the home board (crew, lead, admin; never farmers): name: message, 30-day retention hard-deleted nightly by pg_cron (chat_messages table, Realtime on), live via Supabase Realtime while open + 60s poll, unread badge on the home-board bar, admin can delete, failed sends marked and retryable, no offline queue. Built because SMS broadcasts were being used as a group chat ($250 of the $534 all-time Twilio bill was one contractor). (2) SMS SMART-PUNCTUATION NORMALISER - curly quotes/long dashes flipped bodies to UCS-2 (half the characters per segment); every outgoing body now passes smsClean. (3) BROADCAST COST LINE - segments x recipients and an AUD estimate shown before Send, with a warning when emoji keep the body UCS-2. No pay, sync or settings change. */
-/* v4.6.72c (15 Oct 2026): PAY-DAY REMINDER on the home board for lead + admin - the day before and on pay day: 'Pay day tomorrow/today - make sure every tally is entered and the app has synced before pay is run.' Pay day resolves like Pay Week (default_rates -> latest non-draft job -> Friday); end-of-shed payers never see it; dismiss hides it until the next pay date. UI only - no pay, sync, DB or settings change. Still NO Xero code. */
-/* v4.6.72b (12 Oct 2026): CREW + FARMER SMS TRIM to Dale's wording. Crew: 'Hi X, you have been added to a job with <contractor> starting <date>. Tap the link for details:' + link (+ one lead PIN line) + 'Do not reply'. Farmer: 'Hi X, <contractor> have your shearing locked in. Tap the link to see details:' + link + 'Hit Farmer - PIN <pin>'. Both hold 2 GSM-7 segments at the longest fleet contractor name. Job detail stays behind the link (viewed receipt). SMS text only - no pay, sync, DB or settings change. Built on v4.6.72a; still NO Xero code (that is 4.6.73+, Knights only). */
+/* v4.6.73a (15 Oct 2026) = v4.6.73 (Xero push, Knights pilot) + the fleet 72b/72c additions: CREW + FARMER SMS TRIM to Dale's wording (both 2 GSM-7 segments; job detail stays behind the link) and PAY-DAY REMINDER on the home board for lead + admin the day before and on pay day (resolves like Pay Week; end-of-shed payers never see it; dismiss hides until the next pay date). UI + SMS text only - no pay, sync, DB or settings change. Xero push unchanged. */
 /* v4.6.72a (6 Oct 2026): nudge bar no longer hides the home-board buttons - while it shows, the fab-stack lifts clear of it (body.a2hs-on). Shed-name placeholder neutralised to 'e.g. Hilltop' (leak list - old value was a real station name). UI only - no pay, sync or data change. */
 /* v4.6.72 (6 Oct 2026): ADD-TO-HOME-SCREEN NUDGE on the home board. Browser-tab only, phones only, never for farmers; dismiss once = never again on that device; Android Chrome gets a one-tap Install. UI only - no pay, sync, DB or settings change. Built on live v4.6.70; v4.6.71 is the Xero TEST build (Quality only) and is NOT included. */
 const SUPER_RATE=0.12; /* SG rate, 12% from 1 Jul 2025. One-line change if legislated rate moves. */
@@ -2346,6 +2350,19 @@ const getJobRole=(job,id)=>{
   const c=gc(id);
   return c?c.role:null;
 };
+/* v4.6.72p — ONE PERSON, SEVERAL ROLES ON A JOB. crewDetails[id].extraRoles is an optional
+   list of further roles this person works on this job (Jamie: Shearer + Penner). getJobRole
+   stays the PRIMARY role (stand fee, defaults, history). jobRoles() is the full list; the
+   board, shed grid and shed-runs pay loop ask "any of these" instead of "the one". shedRoleOf()
+   is the role a person's shed runs are paid as: the primary when it is a shed-type role (as
+   today), otherwise the first extra shed role. Without extraRoles every answer is unchanged. */
+const EXTRA_ROLE_OPTS=['Shearer','Wool Handler','Wool Classer','Penner','Presser'];
+function jobExtraRoles(job,id){const det=((job?.rates?.crewDetails)||{})[id]||{};const x=det.extraRoles;return Array.isArray(x)?x.filter(r=>EXTRA_ROLE_OPTS.indexOf(r)>=0):[];}
+function jobRoles(job,id){const p=getJobRole(job,id);const x=jobExtraRoles(job,id).filter(r=>r!==p);return (p?[p]:[]).concat(x);}
+function hasJobRole(job,id,rs){const want=Array.isArray(rs)?rs:[rs];return jobRoles(job,id).some(r=>want.indexOf(r)>=0);}
+function shedRoleOf(job,id){const p=getJobRole(job,id);if(p&&p!=='Shearer'&&p!=='Crutcher'&&p!=='Cook')return p;const x=jobExtraRoles(job,id).find(r=>SHED_ROLES.indexOf(r)>=0);return x||null;}
+function shedIdsOf(job){return (job.crew||[]).filter(id=>!!shedRoleOf(job,id));}
+function jobRoleLabel(job,id){const rs=jobRoles(job,id);return rs.length?rs.join(' + '):null;}
 
 /* ══ v4.6.18 — MID-SHED ROLE CHANGE ══════════════════════════════════════════
    A shed hand can change role mid-shed: classer for two runs then presser, or a
@@ -2436,6 +2453,8 @@ function mergeNoteText(base,theirs,ours){
 /* ── v4.6.72m PHONE IDENTITY ── one text per phone number, however many crew
    records share it (multi-role workers are usually two or three records). */
 function phoneKey(p){const d=String(p||'').replace(/[^0-9]/g,'');return d.length>9?d.slice(-9):d;}
+/* v4.6.72r - every crew record on my phone number is me (Craig: Presser + Wool Classer + an old Wool Classer, one phone) */
+function myRecordIds(myId){const me=(CREW||[]).find(c=>c.id===myId);const k=me&&me.phone?phoneKey(me.phone):'';const ids=(CREW||[]).filter(c=>c.id===myId||(k&&c.phone&&phoneKey(c.phone)===k)).map(c=>c.id);return ids.length?ids:(myId?[myId]:[]);}
 function uniqCrewByPhone(ids,gcl){const seen={};return (ids||[]).filter(id=>{const c=gcl(id);if(!c||!c.phone)return false;const k=phoneKey(c.phone);if(!k||seen[k])return false;seen[k]=1;return true;});}
 /* ── v4.6.72m VERSION WATCH ── a device that never reloads never gets a fix. */
 const LS_VER_TRIED='mg_ver_tried_'+CONTRACTOR_SLUG;
@@ -2566,8 +2585,7 @@ function hasPieceCounts(job,id){
 }
 function pieceIds(job){
   return (job.crew||[]).filter(id=>{
-    const r=getJobRole(job,id);
-    return r==='Shearer'||r==='Crutcher'||hasPieceCounts(job,id);
+    return hasJobRole(job,id,['Shearer','Crutcher'])||hasPieceCounts(job,id); /* v4.6.72p - any of the person's roles */
   });
 }
 /* Stand fee stays strictly role-based. It is equipment hire for a shearer who
@@ -3186,7 +3204,7 @@ const pad=(str,len)=>String(str).padEnd(len,' ');
 function generateFarmRecord(job){
   const farm=gf(job.farmId);
   const shIds=pieceIds(job); /* v4.6.18 — data-driven: counts are paid to whoever entered them */
-  const shedIds=job.crew.filter(id=>{const r=getJobRole(job,id);return r&&r!=='Shearer'&&r!=='Crutcher'&&r!=='Cook';});
+  const shedIds=shedIdsOf(job); /* v4.6.72p */
   const dash='\u2500'.repeat(56);
   const dashEq='\u2550'.repeat(56);
   /* Group mobs by type+desc across entire job */
@@ -3310,7 +3328,7 @@ function generateFarmRecord(job){
 function generateSummary(job,period){
   const farm=gf(job.farmId);const rates=job.rates||{};
   const shIds=pieceIds(job); /* v4.6.18 — data-driven: counts are paid to whoever entered them */
-  const shedIds=job.crew.filter(id=>{const r=getJobRole(job,id);return r&&r!=='Shearer'&&r!=='Crutcher'&&r!=='Cook';});
+  const shedIds=shedIdsOf(job); /* v4.6.72p */
   const dash='\u2500'.repeat(52);
   const inP=date=>!period||(date>=period.start&&date<=period.end);
   const shornBy={};shIds.forEach(id=>{shornBy[id]={sh:0,shEarn:0,cr:0,crEarn:0,mobs:[],daysSet:{}};});
@@ -3744,7 +3762,7 @@ function payWeekJobData(job,period){
   const out={};
   const W=id=>{if(!out[id]){const c=gc(id);out[id]={id,name:c?c.name:'Unknown',role:getJobRole(job,id)||(c?c.role:'')||'',lines:[],piece:0,teamLoad:0,staffEarn:0,travel:0,stand:0,standSuper:0,tax:0,mess:0,sundries:0,hasTeam:false};}return out[id];};
   const shIds=pieceIds(job); /* v4.6.18 — data-driven: counts are paid to whoever entered them */
-  const stIds=job.crew.filter(id=>{const r=getJobRole(job,id);return r&&r!=='Shearer'&&r!=='Crutcher'&&r!=='Cook';});
+  const stIds=shedIdsOf(job); /* v4.6.72p - anyone with a shed-type role among their roles */
   const dEt=id=>((rates.crewDetails||{})[id])||{};
   /* piecework: per date x type x effective rate (overrides + individual loadings baked in) */
   const agg={};const daysSet={};
@@ -3760,15 +3778,15 @@ function payWeekJobData(job,period){
   });});});
   Object.values(agg).sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:b.rate-a.rate).forEach(g=>{
     const earn=g.cnt*g.rate;const w=W(g.id);w.piece+=earn;
-    w.lines.push({date:g.date,shed,item:g.cnt.toLocaleString()+' '+(g.type==='Shearing'?'shorn':'crutched'),units:g.cnt,rate:g.rate,amount:earn,superable:true});
+    w.lines.push({date:g.date,shed,item:g.cnt.toLocaleString()+' '+(g.type==='Shearing'?'shorn':'crutched'),units:g.cnt,rate:g.rate,amount:earn,superable:true,kind:g.type==='Shearing'?'shearing':'crutching'});
   });
   /* team loading - mirrors generateSummary: base x total team heads in period, per team-loaded shearer */
   const teamTotal=(()=>{let t=0;Object.entries(job.runs||{}).forEach(([date,rs])=>{if(!inP(date))return;(rs||[]).forEach(run=>mobsOf(run).forEach(mob=>{shIds.forEach(sid=>{t+=(mob.counts||{})[sid]||0;});}));});return t;})();
   shIds.forEach(id=>{const lt=(rates.loadingType||{})[id];const base=(rates.shearerLoadings||{})[id]||0;
     if(lt==='team'&&base>0&&teamTotal>0){const earn=base*teamTotal;const w=W(id);w.teamLoad+=earn;w.hasTeam=true;
-      w.lines.push({date:'',shed,item:'Team loading '+teamTotal.toLocaleString()+' head',units:teamTotal,rate:base,amount:earn,superable:true});}});
+      w.lines.push({date:'',shed,item:'Team loading '+teamTotal.toLocaleString()+' head',units:teamTotal,rate:base,amount:earn,superable:true,kind:'team_loading'});}});
   /* shed staff per day - role rate + per-person override; presser day rules (threshold / cpk, union of dates) */
-  stIds.forEach(id=>{const role=getJobRole(job,id);const d=dEt(id);
+  stIds.forEach(id=>{const role=shedRoleOf(job,id);const d=dEt(id); /* v4.6.72p - the role their runs are paid as */
     const ov=(rates.crewOverrides||{})[id];
     const defR=role==='Wool Classer'?rates.classerPerRun:role==='Penner'?rates.pennerPerRun:role==='Presser'?rates.presserPerRun:rates.woolHandlerPerRun;
     /* v4.6.66 — through the one resolver, so a per-role override applies here
@@ -3787,12 +3805,12 @@ function payWeekJobData(job,period){
           const cd=classerDayEarn(job,id,date,units,rr);
           w.staffEarn+=cd.earn;
           w.lines.push({date,shed,item:cd.basis==='fleeces'?(cd.units.toLocaleString()+' fleeces classed'):(units+' run'+(units===1?'':'s')+' '+r),
-            units:cd.units,rate:cd.rate,amount:cd.earn,superable:true});
+            units:cd.units,rate:cd.rate,amount:cd.earn,superable:true,kind:cd.basis==='fleeces'?'classer_fleece':'shed_runs',role:r});
           return;
         }
         const earn=units*rr;
         w.staffEarn+=earn;
-        w.lines.push({date,shed,item:units+' run'+(units===1?'':'s')+' '+r,units,rate:rr,amount:earn,superable:true});
+        w.lines.push({date,shed,item:units+' run'+(units===1?'':'s')+' '+r,units,rate:rr,amount:earn,superable:true,kind:'shed_runs',role:r});
       });
     });
     const skipD=dt=>splitD.indexOf(dt)>=0;
@@ -3803,15 +3821,15 @@ function payWeekJobData(job,period){
         if(mode==='cpk'){
           const kg=(((job.baleWeights||{})[id])||{})[date]||0;
           if(kg>0){const earn=kg*(rates.pressCpk||0);const w=W(id);w.staffEarn+=earn;
-            w.lines.push({date,shed,item:kg.toLocaleString()+' kg',units:kg,rate:rates.pressCpk||0,amount:earn,superable:true});}
+            w.lines.push({date,shed,item:kg.toLocaleString()+' kg',units:kg,rate:rates.pressCpk||0,amount:earn,superable:true,kind:'bale_kg'});}
         }else{
           const bales=((job.baleTallies||{})[id]||{})[date]||0;
           const runs=((job.shedTallies||{})[id]||{})[date]||0;
           const thr=rates.baleThreshold||13;
           if(bales>thr){const pb=rates.presserPerBale||14.20;const earn=bales*pb;const w=W(id);w.staffEarn+=earn;
-            w.lines.push({date,shed,item:bales+' bales',units:bales,rate:pb,amount:earn,superable:true});}
+            w.lines.push({date,shed,item:bales+' bales',units:bales,rate:pb,amount:earn,superable:true,kind:'bales'});}
           else if(runs>0){const earn=runs*rpr;const w=W(id);w.staffEarn+=earn;
-            w.lines.push({date,shed,item:runs+' runs',units:runs,rate:rpr,amount:earn,superable:true});}
+            w.lines.push({date,shed,item:runs+' runs',units:runs,rate:rpr,amount:earn,superable:true,kind:'shed_runs',role:'Presser'});}
         }
       });
     }else{
@@ -3823,11 +3841,11 @@ function payWeekJobData(job,period){
           const cd=classerDayEarn(job,id,date,runs,rpr);
           w.staffEarn+=cd.earn;
           w.lines.push({date,shed,item:cd.basis==='fleeces'?(cd.units.toLocaleString()+' fleeces classed'):(runs+' runs'),
-            units:cd.units,rate:cd.rate,amount:cd.earn,superable:true});
+            units:cd.units,rate:cd.rate,amount:cd.earn,superable:true,kind:cd.basis==='fleeces'?'classer_fleece':'shed_runs',role});
           return;
         }
         const earn=runs*rpr;w.staffEarn+=earn;
-        w.lines.push({date,shed,item:runs+' runs',units:runs,rate:rpr,amount:earn,superable:true});
+        w.lines.push({date,shed,item:runs+' runs',units:runs,rate:rpr,amount:earn,superable:true,kind:'shed_runs',role});
       });
     }
   });
@@ -3842,7 +3860,7 @@ function payWeekJobData(job,period){
       const item=cd.basis==='heads'
         ? cd.units+' meal'+(cd.units===1?'':'s')+(cd.half?' (half day)':'')
         : (cd.half?'Half day cooking':'Full day cooking');
-      w.lines.push({date,shed,item,units:cd.units,rate:cd.rate,amount:cd.earn,superable:true});
+      w.lines.push({date,shed,item,units:cd.units,rate:cd.rate,amount:cd.earn,superable:true,kind:cd.basis==='heads'?'cook_head':'cook_day'});
     });
   });
   /* travel (mode-aware) */
@@ -3859,7 +3877,7 @@ function payWeekJobData(job,period){
       }else{
         rate=((rates.travelRate||{})[id]||0);earn=tDays*rate;item='Travel '+tDays+' day'+(tDays===1?'':'s');
       }
-      if(earn>0){const w=W(id);w.travel+=earn;w.lines.push({date:'',shed,item,units:tDays,rate,amount:earn,superable:false});}
+      if(earn>0){const w=W(id);w.travel+=earn;w.lines.push({date:'',shed,item,units:tDays,rate,amount:earn,superable:false,kind:'travel'});}
     }
   });
   /* stand fee (BYO) - superable per rates.standFeeSuper (default ON) */
@@ -3870,7 +3888,7 @@ function payWeekJobData(job,period){
        borrowed handpiece must not collect it. */
     standFeeIds(job).forEach(id=>{if((((rates.crewDetails||{})[id])||{}).standFee===false)return;const n=Object.keys(daysSet[id]||{}).length;if(!n)return;
       const earn=n*(rates.standFeePerDay||0);const w=W(id);w.stand+=earn;if(superFlag)w.standSuper+=earn;
-      w.lines.push({date:'',shed,item:'Stand fee (BYO) '+n+' day'+(n===1?'':'s'),units:n,rate:rates.standFeePerDay||0,amount:earn,superable:superFlag});});
+      w.lines.push({date:'',shed,item:'Stand fee (BYO) '+n+' day'+(n===1?'':'s'),units:n,rate:rates.standFeePerDay||0,amount:earn,superable:superFlag,kind:'stand_fee'});});
   }
   /* mess + sundries (deduction-only workers still appear) */
   job.crew.forEach(id=>{
@@ -3997,6 +4015,331 @@ function generatePayWeekCSV(jobs,period){
 
    Absent means active, so nothing changes for anyone already on the books. */
 function isActiveCrew(c){return !!c&&c.active!==false;}
+/* ══ v4.6.71 — XERO PAYROLL AU PUSH ═══════════════════════════════════════════
+   The contractor's pay week becomes a DRAFT pay run in their Xero. They check
+   it and post it in Xero; posting is what files STP. myGang never posts, never
+   files, never touches a posted run. Xero owns tax and super; myGang owns the
+   earnings lines and deductions. Design + proof: XERO-DESIGN-14sep2026.md.
+
+   Nothing Xero lives in this file: no client id, no secret, no tokens. The app
+   talks to the central broker with its slug and the access-password hash it
+   already holds, and the broker holds the Xero side (tokens in Supabase, RLS
+   on, anon key sees nothing). Every broker call carries an AbortController —
+   a push that has timed out must never land minutes later.
+
+   Crew record gains three fields, all optional, all ignored by pay maths:
+     employmentType 'employee' (default) | 'contractor'   — contractors (ABN) are
+                    never pushed to Xero payroll; the pay engine's 12% super
+                    figure is UNCHANGED in this build (separate decision).
+     abn            free text, shown for contractors only
+     aliasOf        another crew id — this record is the same person; their
+                    lines are pushed under the primary. Fixes the duplicate-
+                    identity problem without touching tallies or the blob.
+
+   Pay Week lines gain `kind` (shearing, crutching, team_loading, shed_runs,
+   classer_fleece, bales, bale_kg, cook_day, cook_head, travel, stand_fee) — additive, read by
+   nothing else; the report and CSV are byte-identical. */
+const XERO_BROKER='https://mygangxero.vercel.app';
+const XERO_COMPONENTS=[
+  ['shearing','Shearing (per head)'],['crutching','Crutching (per head)'],['shed_runs','Shed staff runs (wool handlers, penners)'],['classer_runs','Classer runs'],['presser_runs','Presser runs'],
+  ['classer_fleece','Wool classing (per fleece)'],['bales','Pressing (per bale)'],['bale_kg','Pressing (per kg)'],['cook_day','Cook (per day)'],['cook_head','Cook (per head)'],
+  ['team_loading','Team loading'],['stand_fee','Stand fee (BYO)'],['travel','Travel'],['mess','Mess'],['sundries','Sundries']];
+const XERO_COMP_LABEL=XERO_COMPONENTS.reduce((a,x)=>{a[x[0]]=x[1];return a;},{});
+/* The broker key is the ADMIN PIN hash (contractor_settings.admin_pin_hash) — the
+   same thing that unlocks the admin role. App-entry passwords were removed
+   fleet-wide on 2 Oct 2026, so they cannot be the key. */
+let _xeroDefaultKey=null;
+async function xeroKey(){
+  if(_pinCache&&_pinCache.admin)return _pinCache.admin;
+  /* no admin PIN stored yet = the contractor is on the default PIN; the broker accepts its hash */
+  if(!_xeroDefaultKey){try{_xeroDefaultKey=await hashPin(DEFAULT_ADMIN_PIN);}catch(_){}}
+  return _xeroDefaultKey||_accessHash||null;
+}
+async function xeroFetch(path,opts){
+  opts=opts||{};
+  const key=await xeroKey();
+  if(!key){const err=new Error('Could not derive the admin key on this device.');err.code='no_key';throw err;}
+  const ctrl=new AbortController();const t=setTimeout(()=>ctrl.abort(),opts.timeoutMs||15000);
+  try{
+    const isPost=!!opts.body;
+    const url=XERO_BROKER+path+(isPost?'':((path.indexOf('?')>=0?'&':'?')+'slug='+encodeURIComponent(CONTRACTOR_SLUG)+'&key='+encodeURIComponent(key)));
+    const r=await fetch(url,{method:isPost?'POST':'GET',signal:ctrl.signal,
+      headers:isPost?{'Content-Type':'application/json'}:undefined,
+      body:isPost?JSON.stringify(Object.assign({slug:CONTRACTOR_SLUG,key:key},opts.body)):undefined});
+    let j=null;try{j=await r.json();}catch(_){j={error:'Unreadable reply from the Xero link ('+r.status+')'};}
+    if(!r.ok&&!(j&&j.stage)){const err=new Error((j&&j.error)||('Xero link error '+r.status));err.code=(j&&j.code)||r.status;err.body=j;throw err;}
+    return j;
+  }catch(err){
+    if(err.name==='AbortError'){const e2=new Error('No reply from the Xero link — check signal and try again.');e2.code='timeout';throw e2;}
+    throw err;
+  }finally{clearTimeout(t);}
+}
+/* crew id → the id the person is paid under (aliasOf chain, one hop, guarded) */
+function xeroPrimaryId(id){const c=gc(id);if(c&&c.aliasOf&&c.aliasOf!==id&&gc(c.aliasOf))return c.aliasOf;return id;}
+/* Pay Week → push contract. Same data the report prints, grouped per person. */
+/* v4.6.73o - shed runs go to Xero under the role they were paid as (Shelley, Knights 12 Nov:
+   classers and pressers were landing as 'Shedhand HR'). Wool handlers and penners stay shed_runs. */
+function xeroComponentFor(ln,w){
+  if(ln.kind!=='shed_runs')return ln.kind;
+  const r=ln.role||w.role||'';
+  if(r==='Wool Classer')return 'classer_runs';
+  if(r==='Presser')return 'presser_runs';
+  return 'shed_runs';
+}
+function buildXeroPayload(jobs,period,fq){
+  const per={};
+  (jobs||[]).forEach(job=>{
+    if(!job||job.status==='Draft')return;
+    const data=payWeekJobData(job,period);
+    Object.values(data).forEach(w=>{
+      const pid=xeroPrimaryId(w.id);const c=gc(pid)||{};
+      if(!per[pid])per[pid]={crewId:pid,name:c.name||w.name,role:c.role||w.role,employmentType:c.employmentType||'employee',lines:[],gross:0,tax:0,_pcts:[]};
+      const p=per[pid];
+      w.lines.forEach(ln=>{if(!ln.kind)return;p.lines.push({component:xeroComponentFor(ln,w),units:ln.units,rate:ln.rate,amount:ln.amount,desc:((ln.date?ln.date+' ':'')+ln.shed+' '+ln.item).slice(0,50)});});
+      if(w.mess>0)p.lines.push({component:'mess',units:1,rate:w.mess,amount:w.mess,desc:'Mess'});
+      if(w.sundries>0)p.lines.push({component:'sundries',units:1,rate:w.sundries,amount:w.sundries,desc:'Sundries'});
+      p.gross+=(w.piece+w.teamLoad+w.staffEarn+w.stand);
+      /* v4.6.73n - PAYG: the same per-job Tax Withholding % slices the Pay Week report prints */
+      p.tax+=(Number(w.tax)||0);
+      {const _pc=parseFloat(((((job.rates||{}).crewDetails||{})[w.id])||{}).taxRate||0)||0;if(_pc>0&&p._pcts.indexOf(_pc)<0)p._pcts.push(_pc);}
+    });
+  });
+  const workers=[],skipped=[];
+  Object.values(per).sort((a,b)=>a.name.localeCompare(b.name)).forEach(p=>{
+    p.gross=Math.round(p.gross*100)/100;
+    p.tax=Math.round(p.tax*100)/100;
+    /* taxPct present = this worker has a myGang % and the broker sets Xero's PAYG to p.tax; absent = Xero's tables */
+    if(p._pcts.length){p.taxPct=p._pcts.length===1?p._pcts[0]:Math.max.apply(null,p._pcts);if(p._pcts.length>1)p.taxMixed=p._pcts.slice().sort((a,b)=>a-b).join('/');}
+    delete p._pcts;
+    if(!p.lines.length)return;
+    if(p.employmentType==='contractor'){skipped.push({name:p.name,why:'ABN contractor — not paid through Xero payroll'});return;}
+    workers.push(p);
+  });
+  return {period:{start:period.start,end:period.end,frequency:fq},workers,skipped};
+}
+/* ── My Database › Xero tab ── */
+function XeroTab({crewList}){
+  const [status,setStatus]=useState({state:'loading'});
+  const [cat,setCat]=useState(null);
+  const [maps,setMaps]=useState(null);
+  const [busy,setBusy]=useState('');
+  const [msg,setMsg]=useState('');
+  const [err,setErr]=useState('');
+  const [travelAs,setTravelAs]=useState('reimbursement');
+  const dflt=lsGet(LS_DEFAULT_RATES)||{};
+  const fq=(dflt.payFrequency&&dflt.payFrequency!=='shed')?dflt.payFrequency:'weekly';
+  const load=async()=>{
+    setErr('');
+    try{
+      const s=await xeroFetch('/api/xero/status');
+      if(!s.connected){setStatus({state:s.status||'not_connected',tenant:s.tenant_name,lastError:s.last_error});return;}
+      setStatus({state:'loading',tenant:s.tenant_name});
+      const [c,m]=await Promise.all([xeroFetch('/api/xero/catalog',{timeoutMs:30000}),xeroFetch('/api/xero/mappings')]);
+      setCat(c||{});setMaps(m||{crew:{},pay_item:{},calendar:{}});
+      const tv=m&&m.pay_item&&m.pay_item.travel&&m.pay_item.travel.meta&&m.pay_item.travel.meta.as;if(tv)setTravelAs(tv);
+      setStatus({state:'active',tenant:s.tenant_name,since:s.connected_at}); /* active only once the catalog is here — the tab reads it */
+    }catch(e2){setStatus({state:e2.code==='no_key'?'nokey':'error'});setErr(e2.message||String(e2));}
+  };
+  useEffect(()=>{
+    const h=String(window.location.hash||'');
+    if(/xero=connected/.test(h)){setMsg('Xero connected.');try{history.replaceState(null,'',window.location.pathname);}catch(_){}}
+    else if(/xero=(cancelled|failed)/.test(h)){setErr('Xero connection did not complete.');try{history.replaceState(null,'',window.location.pathname);}catch(_){}}
+    load();
+  },[]);
+  const connect=async()=>{
+    const key=await xeroKey();
+    if(!key){setErr('Could not derive the admin key on this device.');return;}
+    window.location.href=XERO_BROKER+'/api/xero/connect?slug='+encodeURIComponent(CONTRACTOR_SLUG)+'&key='+encodeURIComponent(key)+'&return='+encodeURIComponent(CONTRACTOR_URL+'/');
+  };
+  const disconnect=async()=>{
+    if(!confirm('Disconnect Xero? Mappings are kept; reconnecting the same organisation picks them straight back up.'))return;
+    setBusy('disconnect');setErr('');
+    try{await xeroFetch('/api/xero/disconnect',{body:{}});setStatus({state:'revoked'});setCat(null);setMaps(null);}
+    catch(e2){setErr(e2.message);}finally{setBusy('');}
+  };
+  const saveMap=async(entry)=>{
+    setBusy(entry.kind+':'+entry.mygang_key);setErr('');
+    try{
+      await xeroFetch('/api/xero/mappings',{body:{entries:[entry]}});
+      setMaps(m=>{const n={crew:{...(m||{}).crew},pay_item:{...(m||{}).pay_item},calendar:{...(m||{}).calendar}};
+        if(entry.xero_id)n[entry.kind][entry.mygang_key]={id:entry.xero_id,name:entry.xero_name,meta:entry.meta||{}};else delete n[entry.kind][entry.mygang_key];return n;});
+    }catch(e2){setErr(e2.message);}finally{setBusy('');}
+  };
+  const createItem=async(component)=>{
+    setBusy('create:'+component);setErr('');
+    try{
+      const body={component};
+      if(component==='travel')body.as=travelAs;
+      if(component==='stand_fee')body.superable=(dflt.standFeeSuper!==false);
+      const r=await xeroFetch('/api/xero/payitems',{body,timeoutMs:30000});
+      setMaps(m=>{const n={crew:{...(m||{}).crew},pay_item:{...(m||{}).pay_item},calendar:{...(m||{}).calendar}};n.pay_item[component]={id:r.xero_id,name:r.name,meta:{as:r.as}};return n;});
+      const c=await xeroFetch('/api/xero/catalog',{timeoutMs:30000});setCat(c);
+      setMsg((r.created?'Created in Xero: ':'Already in Xero, now mapped: ')+r.name);
+    }catch(e2){setErr(e2.message);}finally{setBusy('');}
+  };
+  const card={background:'var(--card)',borderRadius:12,padding:14,marginBottom:14,border:'1px solid var(--border)'};
+  const h={fontFamily:'var(--h)',fontSize:15,fontWeight:800,marginBottom:6};
+  const sub={fontSize:12,color:'var(--muted)',lineHeight:1.45,marginBottom:10};
+  const row={display:'flex',alignItems:'center',gap:8,padding:'8px 0',borderTop:'1px solid var(--border)',flexWrap:'wrap'};
+  const lbl={flex:'1 1 140px',fontSize:13,fontWeight:600};
+  const sel={flex:'2 1 200px'};
+  const small={background:'var(--card2)',border:'1px solid var(--border)',borderRadius:7,padding:'6px 10px',color:'var(--text)',fontWeight:700,fontSize:12,cursor:'pointer'};
+  const opt=(v,t,dis)=>e('option',{key:v,value:v,disabled:!!dis},t);
+
+  if(status.state==='loading'||(status.state==='active'&&!cat))return e('div',{style:{textAlign:'center',padding:'40px 0',color:'var(--muted)'}},status.tenant?'Loading '+status.tenant+'…':'Checking Xero link…');
+  const notice=[
+    msg&&e('div',{key:'m',style:{padding:'10px 12px',borderRadius:8,background:'rgba(34,197,94,.12)',border:'1px solid rgba(34,197,94,.35)',fontSize:13,marginBottom:12}},msg),
+    err&&e('div',{key:'e',style:{padding:'10px 12px',borderRadius:8,background:'rgba(239,68,68,.1)',border:'1px solid rgba(239,68,68,.35)',fontSize:13,marginBottom:12,color:'#ef4444'}},err)];
+  if(status.state!=='active'){
+    return e('div',null,notice,
+      e('div',{style:card},
+        e('div',{style:h},'Xero Payroll'),
+        e('div',{style:sub},'Push each pay week into Xero as a DRAFT pay run. You check it and post it in Xero as normal — posting is what sends it to the ATO. myGang never posts a pay run.'),
+        status.state==='revoked'&&e('div',{style:{fontSize:12,color:'var(--amber)',marginBottom:10}},'The Xero connection was removed. Reconnect to continue.'),
+        status.state==='error'&&e('div',{style:{fontSize:12,color:'var(--amber)',marginBottom:10}},'Could not reach the Xero link. Needs signal.'),
+        status.state==='nokey'&&e('div',{style:{fontSize:12,color:'var(--amber)',marginBottom:10}},'Could not derive the admin key on this device.'),
+        e('button',{className:'btn-p',style:{width:'100%'},onClick:connect},'Connect Xero'),
+        e('div',{style:{fontSize:11,color:'var(--dim)',marginTop:8,lineHeight:1.4}},'You will be taken to Xero to sign in and choose the organisation, then brought back here. Uses the payroll login for your business.')));
+  }
+  const cals=(cat&&cat.calendars)||[];const emps=(cat&&cat.employees)||[];
+  const m=maps||{crew:{},pay_item:{},calendar:{}};
+  const calMap=m.calendar[fq];
+  const calOk=calMap&&cals.find(c=>c.id===calMap.id&&String(c.type).toLowerCase()===fq);
+  const crew=(crewList||[]).filter(c=>isActiveCrew(c)&&!c.aliasOf&&(c.employmentType||'employee')!=='contractor');
+  const aliased=(crewList||[]).filter(c=>c.aliasOf&&gc(c.aliasOf));
+  const contractors=(crewList||[]).filter(c=>(c.employmentType||'employee')==='contractor'&&isActiveCrew(c));
+  const usedEmp={};Object.entries(m.crew).forEach(([cid,v])=>{if(v.id&&v.id!=='skip')usedEmp[v.id]=cid;});
+  const unmapped=crew.filter(c=>!m.crew[c.id]).length;
+  const itemsFor=(comp)=>{
+    const as=comp==='travel'?travelAs:(comp==='mess'||comp==='sundries')?'deduction':'earnings';
+    if(as==='deduction')return {as,list:(cat.deductionTypes||[]).map(x=>({id:x.id,name:x.name}))};
+    if(as==='reimbursement')return {as,list:(cat.reimbursementTypes||[]).map(x=>({id:x.id,name:x.name}))};
+    if(as==='allowance')return {as,list:(cat.earningsRates||[]).filter(x=>x.earningsType==='ALLOWANCE').map(x=>({id:x.id,name:x.name+(x.isExemptFromSuper?'':' (superable!)')}))};
+    return {as,list:(cat.earningsRates||[]).filter(x=>x.rateType==='RATEPERUNIT'&&x.earningsType!=='ALLOWANCE').map(x=>({id:x.id,name:x.name+' ('+(x.typeOfUnits||'unit')+(x.isExemptFromSuper?', no super':'')+')'}))};
+  };
+  return e('div',null,notice,
+    e('div',{style:card},
+      e('div',{style:{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}},
+        e('div',{style:{flex:1}},e('div',{style:h},'✓ Connected to '+(status.tenant||'Xero')),
+          e('div',{style:{fontSize:12,color:'var(--muted)'}},'Pushes go in as drafts. Post them in Xero as usual.')),
+        e('button',{onClick:disconnect,disabled:busy==='disconnect',style:small},'Disconnect'))),
+    /* 1. calendar */
+    e('div',{style:card},
+      e('div',{style:h},'1. Pay period'),
+      e('div',{style:sub},'myGang pays '+fq+'. Pick the Xero payroll calendar that matches. Only calendars of the same type can be chosen.'),
+      e('div',{style:row},e('div',{style:lbl},fq==='fortnightly'?'Fortnightly':'Weekly'),
+        e('select',{className:'if-sel',style:sel,value:calMap?calMap.id:'',disabled:busy==='calendar:'+fq,
+          onChange:ev=>{const c=cals.find(x=>x.id===ev.target.value);saveMap({kind:'calendar',mygang_key:fq,xero_id:c?c.id:null,xero_name:c?c.name:null});}},
+          opt('','— choose —'),cals.map(c=>opt(c.id,c.name+' ('+c.type+')',String(c.type).toLowerCase()!==fq)))),
+      calMap&&!calOk&&e('div',{style:{fontSize:12,color:'#ef4444'}},'Mapped calendar no longer matches — choose again.')),
+    /* 2. pay items */
+    e('div',{style:card},
+      e('div',{style:h},'2. Pay items'),
+      e('div',{style:sub},'Each thing myGang pays needs a matching pay item in Xero. Pick an existing one, or press Create and myGang adds it to Xero with the right units and super setting. Only items you actually use need mapping — a push tells you if one is missing.'),
+      e('div',{style:{...row,borderTop:'none'}},e('div',{style:lbl},'Travel goes to Xero as'),
+        e('select',{className:'if-sel',style:sel,value:travelAs,onChange:ev=>{setTravelAs(ev.target.value);if(m.pay_item.travel)saveMap({kind:'pay_item',mygang_key:'travel',xero_id:null});}},
+          opt('reimbursement','Reimbursement (not taxed, not reported as an allowance)'),opt('allowance','Travel allowance (reported to the ATO as an allowance)')),
+        e('div',{style:{flexBasis:'100%',fontSize:11,color:'var(--dim)'}},'Ask your bookkeeper which. Changing it clears the travel mapping.')),
+      XERO_COMPONENTS.map(([comp,label])=>{
+        const cur=m.pay_item[comp];const {as,list}=itemsFor(comp);
+        const stale=cur&&!list.find(x=>x.id===cur.id);
+        return e('div',{key:comp,style:row},
+          e('div',{style:lbl},label,comp==='stand_fee'&&e('div',{style:{fontSize:10,color:'var(--dim)',fontWeight:500}},(dflt.standFeeSuper!==false)?'superable per your settings':'not superable per your settings')),
+          e('select',{className:'if-sel',style:sel,value:cur&&!stale?cur.id:'',disabled:busy==='pay_item:'+comp,
+            onChange:ev=>{const x=list.find(y=>y.id===ev.target.value);saveMap({kind:'pay_item',mygang_key:comp,xero_id:x?x.id:null,xero_name:x?x.name:null,meta:{as}});}},
+            opt('','— not mapped —'),list.map(x=>opt(x.id,x.name))),
+          e('button',{onClick:()=>createItem(comp),disabled:!!busy,style:small},busy==='create:'+comp?'Creating…':'Create in Xero'),
+          stale&&e('div',{style:{flexBasis:'100%',fontSize:11,color:'#ef4444'}},'Mapped item no longer in Xero — choose again.'));
+      })),
+    /* 3. crew */
+    e('div',{style:card},
+      e('div',{style:h},'3. Crew → Xero employees'),
+      e('div',{style:sub},'Match each person to their Xero employee record. Names are never matched automatically. Anyone with pay in a week who is not matched blocks the push, with their name shown.'+(unmapped?' '+unmapped+' still to match.':'')),
+      crew.length===0&&e('div',{style:{fontSize:12,color:'var(--muted)'}},'No active crew.'),
+      crew.map(c=>{
+        const cur=m.crew[c.id];
+        const stale=cur&&cur.id!=='skip'&&!emps.find(x=>x.id===cur.id);
+        return e('div',{key:c.id,style:row},
+          e('div',{style:lbl},c.name,e('div',{style:{fontSize:10,color:'var(--dim)',fontWeight:500}},c.role)),
+          e('select',{className:'if-sel',style:sel,value:cur&&!stale?cur.id:'',disabled:busy==='crew:'+c.id,
+            onChange:ev=>{const v=ev.target.value;const x=emps.find(y=>y.id===v);saveMap({kind:'crew',mygang_key:c.id,xero_id:v==='skip'?'skip':(x?x.id:null),xero_name:v==='skip'?'Not paid through Xero':(x?x.name:null)});}},
+            opt('','— not matched —'),opt('skip','Not paid through Xero'),
+            emps.map(x=>{const taken=usedEmp[x.id]&&usedEmp[x.id]!==c.id;const offCal=calMap&&x.calendarId!==calMap.id;
+              return opt(x.id,x.name+(offCal?' — not on the mapped calendar':'')+(taken?' — already matched':''),taken);})),
+          stale&&e('div',{style:{flexBasis:'100%',fontSize:11,color:'#ef4444'}},'Xero employee no longer active — choose again.'));
+      }),
+      aliased.length>0&&e('div',{style:{fontSize:11,color:'var(--dim)',marginTop:8,lineHeight:1.4}},'Paid under another record: '+aliased.map(c=>c.name+' → '+((gc(c.aliasOf)||{}).name||'?')).join(', ')),
+      contractors.length>0&&e('div',{style:{fontSize:11,color:'var(--dim)',marginTop:4,lineHeight:1.4}},'ABN contractors, not pushed: '+contractors.map(c=>c.name).join(', '))));
+}
+/* ── Pay Week › Push to Xero ── */
+function XeroPushModal({jobs,period,fq,onClose}){
+  const [phase,setPhase]=useState('checking'); /* checking | ready | blocked | pushing | done | error */
+  const [dry,setDry]=useState(null);
+  const [res,setRes]=useState(null);
+  const [err,setErr]=useState('');
+  const payload=buildXeroPayload(jobs,period,fq);
+  useEffect(()=>{(async()=>{
+    if(!payload.workers.length){setPhase('blocked');setDry({errors:['Nobody has pay in this period'+(payload.skipped.length?' (ABN contractors are not pushed)':'')+'.']});return;}
+    try{
+      const r=await xeroFetch('/api/xero/push',{body:Object.assign({dryRun:true},payload),timeoutMs:30000});
+      setDry(r);setPhase(r.ok?'ready':'blocked');
+    }catch(e2){setErr(e2.message);setPhase('error');}
+  })();},[]);
+  const doPush=async()=>{
+    setPhase('pushing');setErr('');
+    try{
+      const r=await xeroFetch('/api/xero/push',{body:payload,timeoutMs:170000}); /* v4.6.73n - two-phase push (PAYG) is ~2 Xero calls per worker; broker allows 180s */
+      setRes(r);
+      if(r.stage==='pushed')setPhase('done');else{setDry(r);setPhase(r.errors?'blocked':'error');if(r.error)setErr(r.error);}
+    }catch(e2){setErr(e2.message);setPhase('error');}
+  };
+  const money=n=>'$'+(Number(n)||0).toFixed(2);
+  const box={position:'fixed',inset:0,background:'rgba(0,0,0,.6)',zIndex:400,display:'flex',alignItems:'flex-end',justifyContent:'center'};
+  const sheet={background:'var(--bg)',width:'100%',maxWidth:560,maxHeight:'90vh',overflowY:'auto',borderRadius:'16px 16px 0 0',padding:16};
+  const h={fontFamily:'var(--h)',fontSize:17,fontWeight:800,marginBottom:4};
+  const btn={flex:1,background:'var(--amber)',border:'none',borderRadius:10,padding:'12px',color:'#000',fontWeight:800,cursor:'pointer',fontSize:13};
+  const ghost={flex:1,background:'var(--card)',border:'1px solid var(--border)',borderRadius:10,padding:'12px',color:'var(--muted)',fontWeight:700,cursor:'pointer',fontSize:13};
+  const tr=(k,cells,bold)=>e('div',{key:k,style:{display:'grid',gridTemplateColumns:'1.6fr 1fr 1fr 1fr',gap:6,fontSize:12,padding:'6px 0',borderTop:'1px solid var(--border)',fontWeight:bold?800:500}},cells.map((c,i)=>e('div',{key:i,style:{textAlign:i?'right':'left',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}},c)));
+  let body;
+  if(phase==='checking')body=e('div',{style:{color:'var(--muted)',padding:'20px 0',textAlign:'center'}},'Checking with Xero…');
+  else if(phase==='blocked')body=e('div',null,
+    e('div',{style:{fontSize:13,fontWeight:700,marginBottom:6,color:'var(--amber)'}},'Cannot push yet'),
+    (dry&&dry.errors||[]).map((x,i)=>e('div',{key:i,style:{fontSize:12.5,padding:'6px 0',borderTop:'1px solid var(--border)'}},'• '+x)),
+    e('div',{style:{fontSize:11.5,color:'var(--dim)',marginTop:10,lineHeight:1.4}},'Fix these in My Database → Xero, then try again. Nothing was sent.'));
+  else if(phase==='error')body=e('div',null,
+    e('div',{style:{fontSize:13,fontWeight:700,marginBottom:6,color:'#ef4444'}},'Push stopped'),
+    e('div',{style:{fontSize:12.5,lineHeight:1.45}},err||'Unknown error'),
+    res&&res.payRunId&&e('div',{style:{fontSize:11.5,color:'var(--dim)',marginTop:8}},'A draft may exist in Xero — check Payroll → Pay employees.'));
+  else if(phase==='ready'||phase==='pushing')body=e('div',null,
+    e('div',{style:{fontSize:12.5,color:'var(--muted)',marginBottom:8,lineHeight:1.45}},'This creates or updates the DRAFT pay run for '+fmtPeriodLabel(period.start,period.end)+'. Pushing again replaces the same draft — it never makes a second one. PAYG below is myGang’s Tax Withholding % and is set on the Xero payslip as a manual adjustment; “Xero” means no % here, so Xero’s own tables apply. Super is Xero’s.'),
+    tr('h',['Worker','Earnings','PAYG','Deduct.'],true),
+    (dry.workers||[]).map((w,i)=>{const L=w.lines||{};const ded=(L.DeductionLines||[]).reduce((s,l)=>s+l.Amount,0);const rb=(L.ReimbursementLines||[]).reduce((s,l)=>s+l.Amount,0);
+      const _pw=(payload.workers||[]).find(x=>x.name===w.name)||{};const _tx=(L.expectedTax!=null)?('-'+money(L.expectedTax)+(_pw.taxPct!=null?' ('+(_pw.taxMixed||_pw.taxPct)+'%)':'')):'Xero';
+      return tr(i,[w.name+' → '+w.employee,money(L.expectedWages),_tx,ded?'-'+money(ded):'—']);}),
+    (payload.workers||[]).some(x=>x.taxMixed)&&e('div',{style:{fontSize:11.5,color:'var(--amber)',marginTop:6}},'Mixed % this week (different % on different jobs, the higher is shown): '+(payload.workers||[]).filter(x=>x.taxMixed).map(x=>x.name+' '+x.taxMixed+'%').join(', ')+'. The dollar figure is the sum of each job’s slice, as on the Pay Week report.'),
+    payload.skipped.length>0&&e('div',{style:{fontSize:11.5,color:'var(--dim)',marginTop:8}},'Not pushed: '+payload.skipped.map(s=>s.name+' ('+s.why+')').join('; ')),
+    e('div',{style:{display:'flex',gap:8,marginTop:14}},
+      e('button',{onClick:onClose,style:ghost,disabled:phase==='pushing'},'Cancel'),
+      e('button',{onClick:doPush,style:btn,disabled:phase==='pushing'},phase==='pushing'?'Pushing…':'Push to Xero')));
+  else if(phase==='done')body=e('div',null,
+    e('div',{style:{fontSize:13,fontWeight:700,marginBottom:6,color:res.ok?'#22c55e':'var(--amber)'}},res.ok?'✓ Draft pay run '+(res.draftCreated?'created':'updated')+' in '+res.tenant:'Pushed with problems'),
+    e('div',{style:{fontSize:11.5,color:'var(--muted)',marginBottom:8}},'Period '+res.period.start+' → '+res.period.end+(res.period.paymentDate?' · pays '+res.period.paymentDate:'')),
+    tr('h',['Worker','Wages','Tax','Net'],true),
+    (res.workers||[]).map((w,i)=>w.ok
+      ?tr(i,[w.name+((w.wagesMatch&&w.taxMatch!==false)?'':' ⚠'),money(w.xero.wages),money(w.xero.tax)+(w.expectedTax!=null?'':' (Xero)'),money(w.xero.netPay)])
+      :tr(i,[w.name+' ✗','','',''])),
+    (res.workers||[]).filter(w=>!w.ok||w.flag).map((w,i)=>e('div',{key:'f'+i,style:{fontSize:11.5,color:'#ef4444',marginTop:4}},w.name+': '+(w.error||w.flag))),
+    tr('t',['Total',money(res.payRunTotals.wages),money(res.payRunTotals.tax),money(res.payRunTotals.netPay)],true),
+    e('div',{style:{fontSize:11.5,color:'var(--dim)',marginTop:10,lineHeight:1.45}},'Tax marked (Xero) is from the employee’s tax declaration; the rest is myGang’s % applied as a manual PAYG adjustment on the payslip. Super is Xero’s. Open Xero → Payroll → Pay employees to review and post.'),
+    e('div',{style:{display:'flex',gap:8,marginTop:14}},
+      e('button',{onClick:onClose,style:ghost},'Close'),
+      e('a',{href:'https://go.xero.com',target:'_blank',rel:'noopener',style:Object.assign({},btn,{textAlign:'center',textDecoration:'none'})},'Open Xero')));
+  return e('div',{style:box,onClick:ev=>{if(ev.target===ev.currentTarget&&phase!=='pushing')onClose();}},
+    e('div',{style:sheet},
+      e('div',{style:h},'Push to Xero'),
+      body,
+      (phase==='checking'||phase==='blocked'||phase==='error')&&e('div',{style:{display:'flex',gap:8,marginTop:14}},e('button',{onClick:onClose,style:ghost},'Close'))));
+}
 function genCrewPin(){return String(Math.floor(Math.random()*10000)).padStart(4,'0');}
 /* v4.6.48 — crew PINs are now opt-out per contractor. Some contractors do not
    want crew logging in at all: farmer plus lead/admin only. Unset means enabled,
@@ -4123,7 +4466,7 @@ function generateTallyTrends(jobs,endPeriod,fq,weeksN){
   (jobs||[]).forEach(job=>{
     if(!job||!job.crew)return;
     const shIds=pieceIds(job); /* v4.6.18 — data-driven: counts are paid to whoever entered them */
-    const stIds=job.crew.filter(id=>{const r=getJobRole(job,id);return r&&r!=='Shearer'&&r!=='Crutcher'&&r!=='Cook';});
+    const stIds=shedIdsOf(job); /* v4.6.72p */
     periods.forEach((p,pi)=>{
       const inP=d=>d>=p.start&&d<=p.end;
       Object.entries(job.runs||{}).forEach(([date,rs])=>{if(!inP(date))return;(rs||[]).forEach(run=>{mobsOf(run).forEach(mob=>{
@@ -4933,7 +5276,7 @@ function TallyTab({job,setJob,role,viewDate,setViewDate}){
   const todayStr=localToday();
   const dates=jobDates(job);
   const dayRuns=(job.runs||{})[viewDate]||[];
-  const shearers=job.crew.filter(id=>{const r=getJobRole(job,id);return r==='Shearer'||r==='Crutcher';});
+  const shearers=job.crew.filter(id=>hasJobRole(job,id,['Shearer','Crutcher'])); /* v4.6.72p */
   /* STAND ORDER — persisted per-job. New shearers added later appear at end of the order. */
   const savedOrder=Array.isArray(job.shearerOrder)?job.shearerOrder:[];
   const orderedFromSaved=savedOrder.filter(id=>shearers.includes(id));
@@ -4942,8 +5285,8 @@ function TallyTab({job,setJob,role,viewDate,setViewDate}){
   const [reorderMode,setReorderMode]=useState(false);
   const [confirmDelRun,setConfirmDelRun]=useState(null); /* run id awaiting delete confirmation */
   const [shOv,setShOv]=useState(null); /* v4.6.72f - {id,mobId} shearer override sheet */
-  const shedStaff=job.crew.filter(id=>{const r=getJobRole(job,id);return r==='Wool Handler'||r==='Wool Classer'||r==='Penner';});
-  const pressers=job.crew.filter(id=>(getJobRole(job,id)||gc(id)?.role)==='Presser');
+  const shedStaff=job.crew.filter(id=>hasJobRole(job,id,['Wool Handler','Wool Classer','Penner'])); /* v4.6.72p */
+  const pressers=job.crew.filter(id=>hasJobRole(job,id,'Presser')||(!getJobRole(job,id)&&gc(id)?.role==='Presser'));
   const rates=job.rates||{};
   const mobRunTot=mob=>shearers.reduce((s,id)=>s+(mob.counts[id]||0),0);
   const runTot=run=>mobsOf(run).reduce((s,mob)=>s+mobRunTot(mob),0);
@@ -5118,7 +5461,7 @@ const flushMobDesc=(mid,v)=>{
        runs read back as their own role and price at the wrong rate — a wool
        handler covering the penner was paid $80 instead of $85. */
     const liveRoles=Object.keys(live);
-    const isSplit=liveRoles.length>1||(liveRoles.length===1&&liveRoles[0]!==getJobRole(job,cid));
+    const isSplit=liveRoles.length>1||(liveRoles.length===1&&liveRoles[0]!==shedRoleOf(job,cid)); /* v4.6.72p */
     setJob(prev=>{
       const nextRole={...(prev.shedRoleRuns||{})};
       const forCid={...(nextRole[cid]||{})};
@@ -5298,7 +5641,7 @@ const flushMobDesc=(mid,v)=>{
   const hasCrutch=Object.values(job.runs||{}).flat().some(run=>mobsOf(run).some(m=>m.type==='Crutching'));
   const stats=shearerStats(job,viewDate,shearers);
   const mts=mobTotals(job,viewDate,shearers);
-  const roleGroups=[{lbl:'WOOL HANDLER',ids:shedStaff.filter(id=>(getJobRole(job,id)||gc(id)?.role)==='Wool Handler')},{lbl:'CLASSER',ids:shedStaff.filter(id=>(getJobRole(job,id)||gc(id)?.role)==='Wool Classer')},{lbl:'PENNER',ids:shedStaff.filter(id=>(getJobRole(job,id)||gc(id)?.role)==='Penner')}].filter(g=>g.ids.length>0);
+  const roleGroups=[{lbl:'WOOL HANDLER',ids:shedStaff.filter(id=>(shedRoleOf(job,id)||gc(id)?.role)==='Wool Handler')},{lbl:'CLASSER',ids:shedStaff.filter(id=>(shedRoleOf(job,id)||gc(id)?.role)==='Wool Classer')},{lbl:'PENNER',ids:shedStaff.filter(id=>(shedRoleOf(job,id)||gc(id)?.role)==='Penner')}].filter(g=>g.ids.length>0); /* v4.6.72p */
 
   return e('div',null,
     shOv&&e(ShearerOverrideSheet,{job,setJob,role,id:shOv.id,mobId:shOv.mobId,date:viewDate,onClose:()=>setShOv(null)}), /* v4.6.72f */
@@ -5336,7 +5679,7 @@ const flushMobDesc=(mid,v)=>{
     (function(){
       const gr=(job.rates||{}).gangerRate||{};
       if(!(Number(gr.Shearing)||Number(gr.Crutching)))return null;
-      const eligible=(job.crew||[]).filter(id=>{const r=getJobRole(job,id);return r==='Shearer'||r==='Crutcher';});
+      const eligible=(job.crew||[]).filter(id=>hasJobRole(job,id,['Shearer','Crutcher'])); /* v4.6.72p */
       if(!eligible.length)return null;
       const explicit=((job.rates||{}).gangerByDate||{})[viewDate];
       const cur=gangerOn(job,viewDate);
@@ -5488,7 +5831,7 @@ const flushMobDesc=(mid,v)=>{
                 border:'1px solid var(--border)',background:split?'var(--amberD)':'var(--card2)',
                 color:split?'var(--amber)':'var(--dim)',cursor:'pointer'}},
               split?('Split \u00b7 '+splitTxt):'Split roles'),
-            splitFor===id&&e(ShedSplitEditor,{crewId:id,jobRole:getJobRole(job,id),
+            splitFor===id&&e(ShedSplitEditor,{crewId:id,jobRole:shedRoleOf(job,id),
               current:sp,dayTotal:runs,
               onSave:byRole=>{setShedSplit(id,byRole);setSplitFor(null);},
               onCancel:()=>setSplitFor(null)})
@@ -5578,7 +5921,7 @@ const flushMobDesc=(mid,v)=>{
           e(Av,{name:c.name,size:32}),
           e('div',{className:'staff-info'},
             e('div',{className:'staff-name'},c.name),
-            e('div',{className:'staff-rate-lbl'},(getJobRole(job,id)||c.role)+(isAdmin&&perDayAmt?' · '+rateLbl:''))
+            e('div',{className:'staff-rate-lbl'},(jobRoleLabel(job,id)||c.role)+(isAdmin&&perDayAmt?' · '+rateLbl:''))
           ),
           e('div',{className:'staff-stats'},
             e('div',{className:'s-grp'},e('div',{className:'s-lbl'},tMode==='km'?'Drove':'Travel'),
@@ -5675,7 +6018,7 @@ const flushMobDesc=(mid,v)=>{
           e(Av,{name:c.name,size:32}),
           e('div',{className:'staff-info'},
             e('div',{className:'staff-name'},c.name),
-            e('div',{className:'staff-rate-lbl'},(getJobRole(job,id)||c.role)+(isAdmin?' \u00b7 $'+rate.toFixed(2)+'/day':''))
+            e('div',{className:'staff-rate-lbl'},(jobRoleLabel(job,id)||c.role)+(isAdmin?' \u00b7 $'+rate.toFixed(2)+'/day':''))
           ),
           e('div',{className:'staff-stats'},
             e('div',{className:'s-grp'},e('div',{className:'s-lbl'},'Mess'),
@@ -5879,7 +6222,7 @@ function SummaryTab({job,setJob,role}){
   const prevStart=period?addDays(period.start,-periodLen):null;
   const nextStart=period?addDays(period.start,periodLen):null;
   const btnLabel=d=>{const [,mo,dy]=d.split('-').map(Number);const dt=new Date(d.split('-')[0],mo-1,dy);const dn=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];return dn[dt.getDay()]+' '+String(dy).padStart(2,'0')+'/'+String(mo).padStart(2,'0');};
-  const shIds=job.crew.filter(id=>{const r=getJobRole(job,id);return r==='Shearer'||r==='Crutcher';});
+  const shIds=job.crew.filter(id=>hasJobRole(job,id,['Shearer','Crutcher'])); /* v4.6.72p */
   const totalJobShorn=Object.values(job.runs||{}).flat().flatMap(r=>mobsOf(r)).reduce((s,mob)=>s+shIds.reduce((a,id)=>a+(mob.counts[id]||0),0),0);
 
   return e('div',{className:'summary-wrap'},
@@ -6110,9 +6453,9 @@ function AdminTab({job,setJob,onEdit,onDeleteFarm,onDeleteJob,onPublish}){
     setSaved(true);setTimeout(()=>setSaved(false),2000);
   };
 
-  const shearers=job.crew.filter(id=>{const r=getJobRole(job,id);return r==='Shearer'||r==='Crutcher';});
+  const shearers=job.crew.filter(id=>hasJobRole(job,id,['Shearer','Crutcher'])); /* v4.6.72p */
   const loadingCrew=shearers; /* shearers + crutchers get $/head loadings — already included in `shearers` */
-  const shedStaff=job.crew.filter(id=>{const r=getJobRole(job,id);return r&&r!=='Shearer'&&r!=='Crutcher'&&r!=='Cook';});
+  const shedStaff=shedIdsOf(job); /* v4.6.72p */
   const DAY_FULL_=['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
 
   return e('div',{className:'admin-wrap'},
@@ -6215,7 +6558,7 @@ function AdminTab({job,setJob,onEdit,onDeleteFarm,onDeleteJob,onPublish}){
       e('div',{className:'admin-sec-hdr'},e('div',{className:'admin-sec-title'},'Per Person Rate Overrides'),e('div',{className:'admin-sec-sub'},'Override $/run per person. Someone who works two roles can have a rate for each \u2014 tap By role.')),
       shedStaff.map(id=>{
         const c=gc(id);if(!c)return null;
-        const role=getJobRole(job,id);
+        const role=shedRoleOf(job,id); /* v4.6.72p */
         const cur=(draft.crewOverrides||{})[id]??'';
         const defR=role==='Wool Classer'?draft.classerPerRun:role==='Penner'?draft.pennerPerRun:role==='Presser'?draft.presserPerRun:draft.woolHandlerPerRun;
         /* v4.6.66 — roles this person has actually worked on the job, so the
@@ -8162,6 +8505,9 @@ function EditJobScreen({job,onSave,onClose,farmList,addFarm,crewList,addCrew}){
   const [selCrew,setSelCrew]=useState(job.crew||[]);
   const [submitErr,setSubmitErr]=useState('');
   const [roleSync,setRoleSync]=useState([]); /* v4.6.72l - ids whose job role is to be refreshed from the record on save */
+  const [extraRoles,setExtraRoles]=useState(()=>{const o={};Object.entries(((job.rates||{}).crewDetails)||{}).forEach(([id,d])=>{if(d&&Array.isArray(d.extraRoles)&&d.extraRoles.length)o[id]=d.extraRoles.slice();});return o;}); /* v4.6.72p - also works as */
+  const [addExtra,setAddExtra]=useState(null); /* v4.6.72q - {id,role} while the picker is open */
+  const togExtra=(id,r)=>setExtraRoles(p=>{const cur=p[id]||[];const next=cur.indexOf(r)>=0?cur.filter(x=>x!==r):cur.concat([r]);const o={...p};if(next.length)o[id]=next;else delete o[id];return o;});
 
   const rJobName=useRef(),rStartDate=useRef(),rDays=useRef(),rSheep=useRef();
   const rAccomm=useRef(),rNotes=useRef(),rJobPin=useRef();
@@ -8194,6 +8540,13 @@ function EditJobScreen({job,onSave,onClose,farmList,addFarm,crewList,addCrew}){
         if(wasOn(id)&&existingDetails[id]&&existingDetails[id].role&&existingDetails[id].role!==c.role)
           logJobEvent(job.id,'crew_role_changed',(c.name||id)+': '+existingDetails[id].role+' \u2192 '+c.role+' (updated in Edit Job)','admin');
       }
+    });
+    /* v4.6.72p - extra roles: kept only for people still on the job, never equal to the primary */
+    selCrew.forEach(id=>{
+      const prim=(newDetails[id]||{}).role;
+      const x=(extraRoles[id]||[]).filter(r=>r!==prim&&EXTRA_ROLE_OPTS.indexOf(r)>=0);
+      if(x.length)newDetails[id]={...(newDetails[id]||{}),extraRoles:x};
+      else if(newDetails[id]&&newDetails[id].extraRoles){const nd={...newDetails[id]};delete nd.extraRoles;newDetails[id]=nd;}
     });
     onSave({
       ...job,
@@ -8318,6 +8671,22 @@ function EditJobScreen({job,onSave,onClose,farmList,addFarm,crewList,addCrew}){
               e('button',{type:'button',onClick:()=>setRoleSync(p=>p.concat([c.id])),style:{background:'var(--amber)',color:'#1e2a3a',border:0,borderRadius:7,padding:'6px 10px',fontWeight:800,fontSize:12,cursor:'pointer',whiteSpace:'nowrap'}},'Update to '+c.role))),
             e('div',{style:{fontSize:11,color:'var(--muted)',marginTop:4}},'Only this job changes, from today. Finished jobs keep the role they were paid at.')),
           roleSync.length>0&&e('div',{style:{margin:'4px 0',fontSize:12,color:'var(--green,#22c55e)',fontWeight:600}},'\u2713 '+roleSync.length+' role'+(roleSync.length===1?'':'s')+' will update when you save.'),
+          /* v4.6.72q - ALSO WORKS AS: only people who have a second role are listed; one button adds one */
+          selCrew.length>0&&e('div',{style:{margin:'10px 0 4px'}},
+            e('div',{className:'crew-group-lbl'},'Also works as'),
+            Object.keys(extraRoles).filter(id=>selCrew.indexOf(id)>=0).map(id=>{const c=crewList.find(cr=>cr.id===id);if(!c)return null;const prim=effRole(c);const mine=(extraRoles[id]||[]).filter(r=>r!==prim);if(!mine.length)return null;
+              return e('div',{key:id,style:{display:'flex',alignItems:'center',gap:8,padding:'6px 0',borderBottom:'1px solid var(--border)',fontSize:13}},
+                e('span',{style:{flex:1}},c.name,e('span',{style:{color:'var(--muted)'}},' \u00b7 '+prim),e('span',{style:{color:'var(--amber)',fontWeight:600}},' + '+mine.join(' + '))),
+                e('button',{type:'button',onClick:()=>setExtraRoles(p=>{const o={...p};delete o[id];return o;}),style:{background:'none',border:'none',color:'var(--muted)',fontSize:16,padding:'0 6px'},'aria-label':'Remove second role'},'\u2715'));}),
+            addExtra?e('div',{style:{display:'flex',gap:6,alignItems:'center',flexWrap:'wrap',marginTop:6}},
+                e('select',{className:'if-sel',style:{flex:1,minWidth:120},value:addExtra.id,onChange:ev=>setAddExtra(a=>({...a,id:ev.target.value}))},
+                  e('option',{value:''},'Who\u2026'),selCrew.map(id=>{const c=crewList.find(cr=>cr.id===id);return c?e('option',{key:id,value:id},c.name+' \u00b7 '+effRole(c)):null;})),
+                e('select',{className:'if-sel',style:{flex:1,minWidth:120},value:addExtra.role,onChange:ev=>setAddExtra(a=>({...a,role:ev.target.value}))},
+                  e('option',{value:''},'Also as\u2026'),EXTRA_ROLE_OPTS.filter(r=>{const c=crewList.find(cr=>cr.id===addExtra.id);return !c||r!==effRole(c);}).map(r=>e('option',{key:r,value:r},r))),
+                e('button',{type:'button',className:'chip'+(addExtra.id&&addExtra.role?' sel':''),disabled:!(addExtra.id&&addExtra.role),onClick:()=>{togExtra(addExtra.id,addExtra.role);setAddExtra(null);}},'Add'),
+                e('button',{type:'button',className:'chip',onClick:()=>setAddExtra(null)},'Cancel'))
+              :e('button',{type:'button',className:'chip',style:{marginTop:6},onClick:()=>setAddExtra({id:'',role:''})},'+ Add a second role'),
+            e('div',{style:{fontSize:11,color:'var(--muted)',marginTop:4}},'For someone doing two jobs on this shed \u2014 a shearer who also pens up. They appear on both grids and get one pay line per role.')),
           !showAddCrew&&e('button',{className:'add-inline-btn',onClick:()=>setShowAddCrew(true)},'+ Add New Crew Member'),
           showAddCrew&&e(AddCrewForm,{key:'add-crew',onAdd:handleAddCrew,onCancel:()=>setShowAddCrew(false)})
         )
@@ -8601,7 +8970,7 @@ function MyTallies({myId,me,jobs}){
         const data=await sbAll(()=>sb.from('tally_entries')
           .select('job_id,cell_date,kind,value,mob_type')
           .eq('contractor_slug',CONTRACTOR_SLUG)
-          .eq('crew_id',myId)
+          .in('crew_id',myRecordIds(myId)) /* v4.6.72r - all my records */
           .gte('cell_date',f).lte('cell_date',t)
           .order('cell_date',{ascending:true}),
           'mytallies_timeout',{ms:8000});
@@ -8613,7 +8982,7 @@ function MyTallies({myId,me,jobs}){
              rather than pulling a whole career */
           const n=await withTimeout(
             sb.from('tally_entries').select('cell_date')
-              .eq('contractor_slug',CONTRACTOR_SLUG).eq('crew_id',myId)
+              .eq('contractor_slug',CONTRACTOR_SLUG).in('crew_id',myRecordIds(myId))
               .order('cell_date',{ascending:true}).limit(5000),
             8000,'mytallies_near_timeout').catch(()=>null);
           if(dead)return;
@@ -8724,6 +9093,7 @@ function HomeScreen({jobs:allJobs,role,setRole,onJob,onNew,onDatabase,onSchedule
   const [pwCopied,setPwCopied]=useState(false);
   const [pwCsv,setPwCsv]=useState(false);
   const [pwView,setPwView]=useState('pay'); /* v4.6.9 - pay | tallies */
+  const [xeroPush,setXeroPush]=useState(null); /* v4.6.71 */
   /* v4.6.10 - whiteboard unread counts for job cards (per-device seen) */
   const [wbCounts,setWbCounts]=useState({});
   useEffect(()=>{let alive=true;(async()=>{try{
@@ -8878,7 +9248,8 @@ function HomeScreen({jobs:allJobs,role,setRole,onJob,onNew,onDatabase,onSchedule
       ):(function(){
         const me=(CREW||[]).find(c=>c.id===myId);
         const from=addDays(localToday(),-2),to=addDays(localToday(),7);
-        const mine=jobs.filter(j=>j.status!=='Draft'&&(j.crew||[]).includes(myId)&&jobInWindow(j,from,to))
+        const myIds=myRecordIds(myId); /* v4.6.72r */
+        const mine=jobs.filter(j=>j.status!=='Draft'&&(j.crew||[]).some(id=>myIds.includes(id))&&jobInWindow(j,from,to))
           .sort((a,b)=>String(a.startDate||'').localeCompare(String(b.startDate||'')));
         return e('div',null,
           e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',margin:'6px 0 2px'}},
@@ -9051,8 +9422,10 @@ function HomeScreen({jobs:allJobs,role,setRole,onJob,onNew,onDatabase,onSchedule
         e('div',{style:{position:'fixed',bottom:0,left:0,right:0,display:'flex',gap:8,padding:'12px 16px',background:'var(--card)',borderTop:'1px solid var(--border)'}},
           e('button',{onClick:function(){doCopy(txt,setPwCopied);},style:ftBtn},pwCopied?'\u2713 Copied':'Copy'),
           pwView==='pay'&&e('button',{onClick:function(){doCopy(generatePayWeekCSV(jobs,period),setPwCsv);},style:ftBtn},pwCsv?'\u2713 CSV copied':'Copy CSV'),
+          pwView==='pay'&&e('button',{onClick:function(){setXeroPush({period:period,fq:fq});},style:ftBtn},'Push to Xero'),
           e('button',{onClick:doPrint,style:ftBtn},'Print')));
     })(),
+    xeroPush&&e(XeroPushModal,{jobs:jobs,period:xeroPush.period,fq:xeroPush.fq,onClose:function(){setXeroPush(null);}}), /* v4.6.71 */
     e('div',{style:{position:'fixed',bottom:8,left:0,right:0,textAlign:'center',fontSize:11,color:'var(--muted)',fontFamily:'var(--m)',letterSpacing:'.5px',pointerEvents:'none',fontWeight:600,opacity:.7}},'myGang '+APP_VERSION)
   );
 }
@@ -9062,10 +9435,18 @@ function EditCrewForm({member,onSave,onClose}){
   const [role,setRole]=useState(member.role||'Shearer');
   const [phone,setPhone]=useState(member.phone||'');
   const [hasVehicle,setHasVehicle]=useState(!!member.hasVehicle);
+  /* v4.6.71 — employment type, ABN, same-person link. None of these touch pay maths. */
+  const [employmentType,setEmploymentType]=useState(member.employmentType==='contractor'?'contractor':'employee');
+  const [abn,setAbn]=useState(member.abn||'');
+  const [aliasOf,setAliasOf]=useState(member.aliasOf||'');
   const ROLES=['Shearer','Crutcher','Wool Handler','Wool Classer','Presser','Penner','Cook'];
+  const aliasChoices=(CREW||[]).filter(c=>c.id!==member.id&&!c.aliasOf).sort((a,b)=>(a.name||'').localeCompare(b.name||''));
   const doSave=()=>{
     if(!name.trim())return;
-    onSave({...member,name:name.trim(),role,phone:phone.trim(),hasVehicle});
+    const next={...member,name:name.trim(),role,phone:phone.trim(),hasVehicle};
+    if(employmentType==='contractor'){next.employmentType='contractor';next.abn=abn.trim();}else{delete next.employmentType;delete next.abn;}
+    if(aliasOf&&aliasOf!==member.id&&(CREW||[]).find(c=>c.id===aliasOf))next.aliasOf=aliasOf;else delete next.aliasOf;
+    onSave(next);
   };
   return e('div',null,
     e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:10}},
@@ -9087,6 +9468,22 @@ function EditCrewForm({member,onSave,onClose}){
           e('input',{type:'checkbox',checked:hasVehicle,onChange:ev=>setHasVehicle(ev.target.checked)}),
           '🚗 Has own vehicle'
         )
+      ),
+      e('div',null,
+        e('div',{style:{fontSize:10,fontWeight:700,color:'var(--dim)',textTransform:'uppercase',letterSpacing:.4,marginBottom:4}},'Paid as'),
+        e('select',{className:'if-sel',value:employmentType,onChange:ev=>setEmploymentType(ev.target.value)},
+          e('option',{value:'employee'},'Employee (PAYG)'),e('option',{value:'contractor'},'Contractor (ABN)'))
+      ),
+      employmentType==='contractor'&&e('div',null,
+        e('div',{style:{fontSize:10,fontWeight:700,color:'var(--dim)',textTransform:'uppercase',letterSpacing:.4,marginBottom:4}},'ABN'),
+        e('input',{type:'text',className:'if-inp',inputMode:'numeric',value:abn,onChange:ev=>setAbn(ev.target.value),placeholder:'11 digits'})
+      ),
+      e('div',{style:{gridColumn:'span 2'}},
+        e('div',{style:{fontSize:10,fontWeight:700,color:'var(--dim)',textTransform:'uppercase',letterSpacing:.4,marginBottom:4}},'Same person as'),
+        e('select',{className:'if-sel',value:aliasOf,onChange:ev=>setAliasOf(ev.target.value)},
+          e('option',{value:''},'\u2014 no, this is their only record \u2014'),
+          aliasChoices.map(c=>e('option',{key:c.id,value:c.id},c.name+' ('+c.role+')'))),
+        e('div',{style:{fontSize:10.5,color:'var(--dim)',marginTop:3,lineHeight:1.35}},'Use when the same worker was added twice. Their pay is grouped under the other record for Xero. Tallies are not moved.')
       )
     ),
     e('div',{style:{fontSize:11,color:'var(--muted)',marginBottom:10,lineHeight:1.4,padding:'8px 10px',background:'var(--card2)',borderRadius:7}},
@@ -9201,10 +9598,11 @@ function DatabaseScreen({farmList,crewList,addFarm,addCrew,onClose,setFarmList,s
       e('div',{style:{fontFamily:'var(--h)',fontSize:22,fontWeight:800,color:'#fff'}},'My Database')
     ),
     e('div',{style:{display:'flex',borderBottom:'2px solid var(--border)',background:'var(--card)'}},
-      ['farms','crew'].map(t=>e('button',{key:t,onClick:()=>setTab(t),style:{flex:1,padding:'12px',background:'none',border:'none',fontWeight:700,fontSize:14,cursor:'pointer',borderBottom:tab===t?'2px solid var(--amber)':'2px solid transparent',marginBottom:-2,color:tab===t?'var(--amber)':'var(--muted)'}},t==='farms'?'🏠 Farms':'👥 Crew'))
+      ['farms','crew','xero'].map(t=>e('button',{key:t,onClick:()=>setTab(t),style:{flex:1,padding:'12px',background:'none',border:'none',fontWeight:700,fontSize:14,cursor:'pointer',borderBottom:tab===t?'2px solid var(--amber)':'2px solid transparent',marginBottom:-2,color:tab===t?'var(--amber)':'var(--muted)'}},t==='farms'?'🏠 Farms':t==='crew'?'👥 Crew':'🔗 Xero'))
     ),
     e('div',{style:{flex:1,overflowY:'auto',padding:'16px'}},
 
+      tab==='xero'&&e(XeroTab,{crewList}), /* v4.6.71 */
       /* FARMS TAB */
       tab==='farms'&&e('div',null,
         e('button',{className:'btn-p',style:{width:'100%',marginBottom:16},onClick:()=>{setEditFarm(null);setShowAddFarm(true);}},'+ Add New Farm'),
@@ -9265,7 +9663,7 @@ function DatabaseScreen({farmList,crewList,addFarm,addCrew,onClose,setFarmList,s
               :e('div',{style:{background:'var(--card)',borderRadius:12,padding:14,marginBottom:8,border:'1px solid var(--border)',display:'flex',justifyContent:'space-between',alignItems:'center'}},
                 e('div',null,
                   e('div',{style:{fontWeight:700,fontSize:15}},c.name),
-                  e('div',{style:{fontSize:12,color:'var(--muted)',marginTop:2}},c.role+(c.phone?' · '+c.phone:'')+(c.hasVehicle?' · 🚗':''))
+                  e('div',{style:{fontSize:12,color:'var(--muted)',marginTop:2}},c.role+(c.phone?' · '+c.phone:'')+(c.hasVehicle?' · 🚗':'')+(c.employmentType==='contractor'?' · ABN contractor':'')+(c.aliasOf&&gc(c.aliasOf)?' · same as '+gc(c.aliasOf).name:''))
                 ,
                   e(CrewPinRow,{c:c,onSave:handleSaveCrew}) /* v4.6.12 */
                 ),
